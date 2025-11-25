@@ -1,23 +1,60 @@
 """
 Mosaic Runtime - MeshContext Implementation
 
-This module implements MeshContext, the query interface for topology and
-event semantics information. This information is used by nodes (especially
-agent nodes) to understand their position in the mesh and generate prompts.
+This module provides the MeshContext implementation for topology and
+event semantics queries.
 
-Key Responsibilities:
-1. Provide topology information (who subscribes to whom)
-2. Provide event semantics (descriptions for agent prompts)
-3. Provide node capability information
+MeshContext is part of the "Context Plane" - it provides read-only
+information about the mesh network that nodes can use for:
+1. Understanding their position in the topology
+2. Generating agent prompts with event semantics
+3. Making routing decisions
 
-Design Notes:
-- MeshContext is READ-ONLY - it doesn't modify any data
-- All data comes from the storage layer (repositories)
-- Results may be cached for performance (future enhancement)
+Architecture:
+=============
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                        MeshContextImpl                          │
+    │                                                                 │
+    │  ┌──────────────────────────┐   ┌────────────────────────────┐ │
+    │  │   Topology Queries       │   │   Semantics Queries        │ │
+    │  │                          │   │                            │ │
+    │  │  - Who do I subscribe to?│   │  - What does PreToolUse    │ │
+    │  │  - Who subscribes to me? │   │    mean?                   │ │
+    │  │  - Blocking subscribers? │   │  - What's the payload      │ │
+    │  │                          │   │    schema?                 │ │
+    │  └──────────────────────────┘   └────────────────────────────┘ │
+    │              │                              │                   │
+    │              ▼                              ▼                   │
+    │  ┌──────────────────────────┐   ┌────────────────────────────┐ │
+    │  │  SubscriptionRepository  │   │   CapabilityRepository     │ │
+    │  └──────────────────────────┘   └────────────────────────────┘ │
+    └─────────────────────────────────────────────────────────────────┘
+
+Use Cases:
+==========
+
+1. Agent Prompt Generation:
+   - Get topology to explain "who am I in this network?"
+   - Get event semantics to explain "what events might I receive?"
+
+2. Session Routing (in agent nodes):
+   - Query subscriptions to get session_scope configuration
+   - (The context just provides data; interpretation is node-specific)
+
+3. Debugging/Monitoring:
+   - Inspect network topology
+   - Understand event flow
+
+Design Principles:
+==================
+1. Read-only - context never modifies state
+2. Caches topology for efficiency (refresh on request)
+3. Event semantics are registered per node type
 """
 
 import logging
-from typing import Protocol, runtime_checkable
+from typing import Optional
 
 from mosaic.core.interfaces import MeshContext
 from mosaic.core.models import (
@@ -26,119 +63,78 @@ from mosaic.core.models import (
     NodeCapabilities,
     Subscription,
 )
-from mosaic.core.types import NodeId, MeshId, NodeType
+from mosaic.core.types import NodeId, MeshId
+
+from mosaic.storage import (
+    SubscriptionRepository,
+    CapabilityRepository,
+)
 
 
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Repository Protocols (for dependency injection)
-# =============================================================================
-
-@runtime_checkable
-class SubscriptionQueryProtocol(Protocol):
-    """Protocol for subscription queries needed by MeshContext."""
-    
-    async def get_by_source(
-        self,
-        mesh_id: MeshId,
-        source_id: NodeId,
-    ) -> list[Subscription]:
-        """Get subscriptions where node is the subscriber."""
-        ...
-    
-    async def get_by_target(
-        self,
-        mesh_id: MeshId,
-        target_id: NodeId,
-    ) -> list[Subscription]:
-        """Get subscriptions where node is being subscribed to."""
-        ...
-
-
-@runtime_checkable
-class CapabilityQueryProtocol(Protocol):
-    """Protocol for capability queries needed by MeshContext."""
-    
-    async def get_by_node_type(
-        self,
-        mesh_id: MeshId,
-        node_type: NodeType,
-    ) -> list[EventSemantics]:
-        """Get event semantics for a node type."""
-        ...
-    
-    async def get_all(
-        self,
-        mesh_id: MeshId,
-    ) -> list[NodeCapabilities]:
-        """Get all registered node capabilities."""
-        ...
-
-
-# =============================================================================
-# MeshContext Implementation
-# =============================================================================
-
 class MeshContextImpl(MeshContext):
     """
-    Implementation of MeshContext interface.
+    Implementation of MeshContext for topology and semantics queries.
     
-    MeshContextImpl provides read-only access to mesh information that
-    nodes need for decision-making and prompt generation.
-    
-    Two Types of Information:
-    1. TOPOLOGY: Who subscribes to whom
-       - My subscriptions (who I subscribe to)
-       - My subscribers (who subscribes to me)
-       - Used for understanding event flow
-    
-    2. SEMANTICS: What events mean
-       - Human-readable descriptions
-       - Schema information
-       - Used for agent prompt generation
+    MeshContextImpl provides nodes with information about:
+    - Their subscription relationships (who they subscribe to, who subscribes to them)
+    - Event type semantics (descriptions, schemas)
+    - Node type capabilities (what events each type can produce/consume)
     
     Usage:
-        context = MeshContextImpl(node_id, mesh_id, sub_repo, cap_repo)
+        context = MeshContextImpl(
+            node_id="worker",
+            mesh_id="dev",
+            subscription_repo=sub_repo,
+            capability_repo=cap_repo,
+        )
         
         # Get topology
         topology = await context.get_topology_context()
         for sub in topology.subscribers:
             print(f"{sub.source_id} subscribes to me for {sub.event_pattern}")
         
-        # Get event semantics for prompt injection
-        semantics = await context.get_event_semantics(["PreToolUse"])
+        # Get event semantics
+        semantics = await context.get_event_semantics(["PreToolUse", "PostToolUse"])
         for event_type, info in semantics.items():
             print(f"{event_type}: {info.description}")
     
+    Caching:
+        Topology is cached and refreshed on explicit request.
+        Event semantics are always fetched fresh.
+    
     Attributes:
         node_id: The node this context is for
-        mesh_id: The mesh this context belongs to
+        mesh_id: The mesh this context is in
     """
     
     def __init__(
         self,
         node_id: NodeId,
         mesh_id: MeshId,
-        subscription_repo: SubscriptionQueryProtocol,
-        capability_repo: CapabilityQueryProtocol | None = None,
+        subscription_repo: SubscriptionRepository,
+        capability_repo: CapabilityRepository,
     ) -> None:
         """
         Initialize the context.
         
         Args:
-            node_id: Node this context is for
-            mesh_id: Mesh this context belongs to
+            node_id: The node this context is for
+            mesh_id: The mesh this context is in
             subscription_repo: Repository for subscription queries
-            capability_repo: Repository for capability queries (optional)
+            capability_repo: Repository for capability queries
         """
         self._node_id = node_id
         self._mesh_id = mesh_id
         self._subscription_repo = subscription_repo
         self._capability_repo = capability_repo
         
-        logger.debug(f"MeshContextImpl initialized: node_id={node_id}, mesh_id={mesh_id}")
+        # Cached topology (refreshed on request)
+        self._topology_cache: Optional[TopologyContext] = None
+        
+        logger.debug(f"MeshContextImpl created for node {node_id}")
     
     @property
     def node_id(self) -> NodeId:
@@ -147,29 +143,27 @@ class MeshContextImpl(MeshContext):
     
     @property
     def mesh_id(self) -> MeshId:
-        """The mesh this context belongs to."""
+        """The mesh this context is in."""
         return self._mesh_id
     
     async def get_topology_context(self) -> TopologyContext:
         """
         Get topology information for this node.
         
-        Returns a TopologyContext containing:
+        This returns:
         - subscriptions: Who this node subscribes to (downstream of us)
         - subscribers: Who subscribes to this node (upstream of us)
         
         Returns:
             TopologyContext with subscription relationships
         """
-        logger.debug(f"MeshContextImpl.get_topology_context: node_id={self._node_id}")
-        
-        # Get subscriptions where this node is the subscriber
+        # Query subscriptions where this node is the subscriber
         subscriptions = await self._subscription_repo.get_by_source(
             mesh_id=self._mesh_id,
             source_id=self._node_id,
         )
         
-        # Get subscriptions where this node is being subscribed to
+        # Query subscriptions where this node is being subscribed to
         subscribers = await self._subscription_repo.get_by_target(
             mesh_id=self._mesh_id,
             target_id=self._node_id,
@@ -182,8 +176,11 @@ class MeshContextImpl(MeshContext):
             subscribers=subscribers,
         )
         
+        # Cache for efficiency
+        self._topology_cache = topology
+        
         logger.debug(
-            f"MeshContextImpl.get_topology_context: "
+            f"Topology for {self._node_id}: "
             f"subscriptions={len(subscriptions)}, subscribers={len(subscribers)}"
         )
         
@@ -196,8 +193,8 @@ class MeshContextImpl(MeshContext):
         """
         Get semantic information for event types.
         
-        This provides human-readable descriptions and schema information
-        for event types. Agent nodes use this for prompt generation.
+        This retrieves descriptions and schema information for
+        the specified event types. Used for agent prompt generation.
         
         Args:
             event_types: Event types to look up
@@ -205,34 +202,33 @@ class MeshContextImpl(MeshContext):
         Returns:
             Dict mapping event type to its semantics
         """
-        logger.debug(
-            f"MeshContextImpl.get_event_semantics: event_types={event_types}"
-        )
-        
         result: dict[str, EventSemantics] = {}
-        
-        # If no capability repo, return empty result
-        if self._capability_repo is None:
-            logger.debug("MeshContextImpl: no capability_repo, returning empty semantics")
-            return result
         
         # Get all capabilities
         all_capabilities = await self._capability_repo.get_all(self._mesh_id)
         
-        # Extract semantics for requested event types
-        for capabilities in all_capabilities:
-            # Check produced events
-            for semantics in capabilities.produced_events:
-                if semantics.event_type in event_types:
-                    result[semantics.event_type] = semantics
+        # Build event type -> semantics mapping
+        for cap in all_capabilities:
+            for event_sem in cap.produced_events:
+                if event_sem.event_type in event_types:
+                    result[event_sem.event_type] = event_sem
             
-            # Check consumed events
-            for semantics in capabilities.consumed_events:
-                if semantics.event_type in event_types:
-                    result[semantics.event_type] = semantics
+            for event_sem in cap.consumed_events:
+                if event_sem.event_type in event_types:
+                    # Prefer produced over consumed if both exist
+                    if event_sem.event_type not in result:
+                        result[event_sem.event_type] = event_sem
+        
+        # For any event types not found, create default semantics
+        for event_type in event_types:
+            if event_type not in result:
+                result[event_type] = EventSemantics(
+                    event_type=event_type,
+                    description=f"Event type: {event_type} (no description registered)",
+                )
         
         logger.debug(
-            f"MeshContextImpl.get_event_semantics: found {len(result)} semantics"
+            f"Event semantics for {event_types}: found {len(result)}"
         )
         
         return result
@@ -241,59 +237,95 @@ class MeshContextImpl(MeshContext):
         """
         Get capabilities of all registered node types.
         
+        This returns what events each node type can produce or consume,
+        along with semantic descriptions.
+        
         Returns:
             List of capability declarations
         """
-        logger.debug("MeshContextImpl.get_all_node_capabilities")
-        
-        if self._capability_repo is None:
-            logger.debug("MeshContextImpl: no capability_repo, returning empty list")
-            return []
-        
         capabilities = await self._capability_repo.get_all(self._mesh_id)
         
-        logger.debug(
-            f"MeshContextImpl.get_all_node_capabilities: found {len(capabilities)}"
-        )
+        logger.debug(f"Retrieved {len(capabilities)} node type capabilities")
         
         return capabilities
     
-    async def get_topology_summary(self) -> str:
+    async def get_blocking_subscribers_for_event(
+        self,
+        event_type: str,
+    ) -> list[Subscription]:
         """
-        Get a human-readable summary of topology for prompt injection.
+        Get subscribers with blocking subscriptions for an event type.
         
-        This generates a natural language description of the node's
-        position in the mesh network.
+        This is a convenience method that filters the cached topology.
+        
+        Args:
+            event_type: The event type to check
         
         Returns:
-            Human-readable topology summary
+            List of blocking subscriptions
         """
-        topology = await self.get_topology_context()
+        # Ensure topology is loaded
+        if self._topology_cache is None:
+            await self.get_topology_context()
+        
+        return self._topology_cache.get_blocking_subscribers(event_type)
+    
+    async def refresh(self) -> None:
+        """
+        Force refresh of cached topology.
+        
+        Call this if subscriptions may have changed.
+        """
+        self._topology_cache = None
+        await self.get_topology_context()
+        logger.debug(f"Context refreshed for node {self._node_id}")
+    
+    def generate_topology_prompt(self) -> str:
+        """
+        Generate a natural language description of this node's topology.
+        
+        This can be injected into agent system prompts to help them
+        understand their position in the network.
+        
+        Returns:
+            Human-readable topology description
+        
+        Raises:
+            RuntimeError: If topology hasn't been loaded
+        """
+        if self._topology_cache is None:
+            raise RuntimeError(
+                "Topology not loaded. Call get_topology_context() first."
+            )
         
         lines = [
-            f"Node '{self._node_id}' in mesh '{self._mesh_id}':",
+            f"You are node '{self._node_id}' in mesh '{self._mesh_id}'.",
             "",
         ]
         
         # Describe subscriptions (who we subscribe to)
-        if topology.subscriptions:
-            lines.append("You subscribe to:")
-            for sub in topology.subscriptions:
-                blocking = " (blocking)" if sub.is_blocking() else ""
-                lines.append(f"  - {sub.target_id}: {sub.event_pattern}{blocking}")
+        if self._topology_cache.subscriptions:
+            lines.append("You subscribe to the following nodes:")
+            for sub in self._topology_cache.subscriptions:
+                blocking = " (BLOCKING - you must reply)" if sub.is_blocking() else ""
+                lines.append(
+                    f"  - {sub.target_id}: events matching '{sub.event_pattern}'{blocking}"
+                )
+            lines.append("")
         else:
             lines.append("You do not subscribe to any other nodes.")
-        
-        lines.append("")
+            lines.append("")
         
         # Describe subscribers (who subscribes to us)
-        if topology.subscribers:
-            lines.append("Nodes subscribing to you:")
-            for sub in topology.subscribers:
-                blocking = " (blocking)" if sub.is_blocking() else ""
-                lines.append(f"  - {sub.source_id}: {sub.event_pattern}{blocking}")
+        if self._topology_cache.subscribers:
+            lines.append("The following nodes subscribe to your events:")
+            for sub in self._topology_cache.subscribers:
+                blocking = " (BLOCKING - sender waits for your reply)" if sub.is_blocking() else ""
+                lines.append(
+                    f"  - {sub.source_id}: listens for '{sub.event_pattern}'{blocking}"
+                )
         else:
-            lines.append("No other nodes subscribe to you.")
+            lines.append("No other nodes subscribe to your events.")
         
         return "\n".join(lines)
 

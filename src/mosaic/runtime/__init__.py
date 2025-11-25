@@ -1,156 +1,188 @@
 """
 Mosaic Runtime Module
 
-This module provides the runtime infrastructure for the Mosaic event system.
-It implements the core interfaces defined in mosaic.core.interfaces and
-coordinates with the transport layer.
+This module provides the runtime infrastructure that bridges the transport
+layer and nodes. It implements the core Mosaic interfaces defined in
+mosaic.core.interfaces.
+
+Module Responsibilities:
+========================
+
+The runtime module is responsible for:
+1. Implementing MeshClient, MeshInbox, MeshOutbox, MeshContext, MeshAdmin
+2. Providing the blocking wait mechanism (WaiterRegistry)
+3. Routing events based on subscriptions (EventRouter)
+4. Assembling components for node usage (create_mesh_client)
+
+Architecture Position:
+======================
+
+    ┌──────────────────────────────────────────────────────────────────┐
+    │                            nodes                                  │
+    │               (CC, Scheduler, Webhook implementations)           │
+    └────────────────────────────────┬─────────────────────────────────┘
+                                     │ uses
+                                     ▼
+    ┌──────────────────────────────────────────────────────────────────┐
+    │                           runtime                                 │
+    │                                                                   │
+    │  ┌────────────────┐  ┌───────────────┐  ┌──────────────────────┐ │
+    │  │  MeshClient    │  │ WaiterRegistry │  │    EventRouter      │ │
+    │  │  (assembler)   │  │  (blocking)    │  │    (routing)        │ │
+    │  └────────────────┘  └───────────────┘  └──────────────────────┘ │
+    │  ┌────────────────┐  ┌───────────────┐  ┌──────────────────────┐ │
+    │  │   MeshInbox    │  │   MeshOutbox  │  │    MeshContext       │ │
+    │  │   MeshAdmin    │  │               │  │                      │ │
+    │  └────────────────┘  └───────────────┘  └──────────────────────┘ │
+    └────────────────────────────────┬─────────────────────────────────┘
+                                     │ uses
+                                     ▼
+    ┌─────────────────────────────────┬────────────────────────────────┐
+    │           transport              │           storage             │
+    │    (event delivery)              │    (control plane data)       │
+    └─────────────────────────────────┴────────────────────────────────┘
 
 Key Components:
 ===============
 
-MeshClient (client.py)
-    Main entry point for nodes to interact with the mesh.
-    Assembles inbox, outbox, and context into a unified interface.
-    
-    Example:
-        client = await create_mesh_client(
-            node_id="worker",
-            mesh_id="dev",
-            transport=sqlite_transport,
-            subscription_repo=sub_repo,
-        )
-        
-        async for envelope in client.inbox:
-            await process(envelope.event)
-            await envelope.ack()
+WaiterRegistry (waiter.py):
+    Manages blocking wait points for send_blocking() semantics.
+    - EventWaiter: Individual wait point (asyncio.Future based)
+    - MultiSubscriberWaiter: Aggregates responses from multiple subscribers
+    - WaiterRegistry: Global registry for waiter lookup
 
-MeshInbox (inbox.py)
-    Event input channel with reply interception.
-    Automatically routes reply events to WaiterRegistry.
+EventRouter (event_router.py):
+    Routes events based on subscription relationships.
+    - Queries SubscriptionRepository
+    - Creates event copies for each subscriber
+    - Identifies blocking vs non-blocking subscribers
 
-MeshOutbox (outbox.py)
-    Event output channel with blocking support.
-    - send(): Fire-and-persist
-    - send_blocking(): Wait for responses from blocking subscribers
-    - reply(): Respond to a blocking event
+MeshInboxImpl (inbox.py):
+    Wraps transport receive_events() with reply handling.
+    - Automatically resolves waiters when replies arrive
+    - Filters reply events from consumer iteration
 
-MeshContext (context.py)
-    Query interface for topology and event semantics.
-    Used by agent nodes for prompt generation.
+MeshOutboxImpl (outbox.py):
+    Combines routing with blocking support.
+    - send(): Fire-and-persist routing
+    - send_blocking(): Route + wait + aggregate
+    - reply(): Direct reply to sender
 
-MeshAdmin (admin.py)
-    Administrative interface for mesh configuration.
-    Node and subscription management.
+MeshContextImpl (context.py):
+    Provides topology and semantics queries.
+    - Subscription relationships
+    - Event type semantics
+    - Topology prompt generation
 
-WaiterRegistry (waiter.py)
-    Manages blocking waits for events.
-    Used internally by MeshOutbox for send_blocking().
+MeshAdminImpl (admin.py):
+    Administrative operations for mesh configuration.
+    - Node CRUD
+    - Subscription management
+    - Capability registration
 
-EventRouter (event_router.py)
-    Routes events to subscribers based on subscription relationships.
-    Implements sender-side dispatch pattern.
-
-Dependency Relationships:
-========================
-
-    nodes (uses)
-        ↓
-    MeshClient (assembles)
-        ├── MeshInbox ←── TransportBackend + WaiterRegistry
-        ├── MeshOutbox ←── TransportBackend + EventRouter + WaiterRegistry
-        └── MeshContext ←── SubscriptionRepository + CapabilityRepository
-        
-    EventRouter ←── SubscriptionRepository
-    MeshAdmin ←── NodeRepository + SubscriptionRepository + CapabilityRepository
+MeshClientImpl (client.py):
+    Assembles all components into unified interface.
+    - Factory: create_mesh_client()
+    - Properties: inbox, outbox, context
+    - Lifecycle: connect(), disconnect()
 
 Usage:
 ======
 
-Creating a client:
     from mosaic.runtime import create_mesh_client
     
+    # Create and connect client
+    client = await create_mesh_client(mesh_id="dev", node_id="worker")
+    
+    try:
+        # Receive events
+        async for envelope in client.inbox:
+            event = envelope.event
+            
+            # Process event
+            if event.event_type == "PreToolUse":
+                decision = await analyze_tool_use(event)
+                await client.outbox.reply(event.event_id, decision)
+            
+            await envelope.ack()
+    finally:
+        await client.disconnect()
+
+Dependency Injection:
+=====================
+
+Runtime components use dependency injection for flexibility:
+
+    # Custom transport
+    from mosaic.transport.kafka import create_kafka_transport
+    transport = create_kafka_transport(...)
     client = await create_mesh_client(
-        node_id="my-node",
-        mesh_id="my-mesh",
-        transport=my_transport,
-        subscription_repo=my_sub_repo,
+        mesh_id="prod",
+        node_id="worker",
+        transport=transport,
     )
 
-Using admin:
-    from mosaic.runtime import MeshAdminImpl
-    
-    admin = MeshAdminImpl(
-        mesh_id="my-mesh",
-        node_repo=my_node_repo,
-        subscription_repo=my_sub_repo,
-    )
-    await admin.create_node(node)
-    await admin.subscribe(subscription)
+For most use cases, the factory function with defaults is sufficient.
 """
 
-# Client - main entry point
-from .client import (
-    MeshClientImpl,
-    create_mesh_client,
-)
-
-# Channels
-from .inbox import MeshInboxImpl
-from .outbox import MeshOutboxImpl
-
-# Context and Admin
-from .context import MeshContextImpl
-from .admin import MeshAdminImpl
-
-# Infrastructure
+# Waiter components
 from .waiter import (
     EventWaiter,
+    MultiSubscriberWaiter,
     WaiterRegistry,
-    WaiterResponse,
+    WaiterState,
 )
+
+# Event routing
 from .event_router import (
     EventRouter,
     RoutingResult,
 )
 
-# Repository Protocols (for dependency injection)
-from .event_router import SubscriptionRepositoryProtocol
-from .admin import (
-    NodeRepositoryProtocol,
-    SubscriptionRepositoryProtocol as AdminSubscriptionProtocol,
-    CapabilityRepositoryProtocol,
+# Core interfaces implementation
+from .inbox import (
+    MeshInboxImpl,
+    FilteredInbox,
 )
+
+from .outbox import (
+    MeshOutboxImpl,
+)
+
 from .context import (
-    SubscriptionQueryProtocol,
-    CapabilityQueryProtocol,
+    MeshContextImpl,
+)
+
+from .admin import (
+    MeshAdminImpl,
+)
+
+from .client import (
+    MeshClientImpl,
+    create_mesh_client,
 )
 
 
 __all__ = [
-    # Main client
-    "MeshClientImpl",
-    "create_mesh_client",
-    
-    # Channel implementations
-    "MeshInboxImpl",
-    "MeshOutboxImpl",
-    
-    # Context and Admin
-    "MeshContextImpl",
-    "MeshAdminImpl",
-    
-    # Infrastructure
+    # Waiter components
     "EventWaiter",
+    "MultiSubscriberWaiter",
     "WaiterRegistry",
-    "WaiterResponse",
+    "WaiterState",
+    
+    # Event routing
     "EventRouter",
     "RoutingResult",
     
-    # Protocols (for type hints and dependency injection)
-    "SubscriptionRepositoryProtocol",
-    "NodeRepositoryProtocol",
-    "CapabilityRepositoryProtocol",
-    "SubscriptionQueryProtocol",
-    "CapabilityQueryProtocol",
+    # Core interface implementations
+    "MeshInboxImpl",
+    "FilteredInbox",
+    "MeshOutboxImpl",
+    "MeshContextImpl",
+    "MeshAdminImpl",
+    "MeshClientImpl",
+    
+    # Factory function (main entry point)
+    "create_mesh_client",
 ]
 

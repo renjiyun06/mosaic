@@ -1,42 +1,86 @@
 """
 Mosaic Runtime - MeshOutbox Implementation
 
-This module implements MeshOutbox, the event output channel for nodes.
-It provides three sending modes:
+This module provides the MeshOutbox implementation that combines event
+routing with the waiter system for blocking semantics.
 
-1. send(): Fire-and-persist (non-blocking)
-2. send_blocking(): Send and wait for responses
-3. reply(): Respond to a blocking event
+Architecture:
+=============
 
-Key Responsibilities:
-1. Route events to subscribers (using EventRouter)
-2. Manage blocking waits (using WaiterRegistry)
-3. Aggregate responses from multiple blocking subscribers
-4. Create and send reply events
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                         MeshOutboxImpl                          │
+    │                                                                 │
+    │  ┌─────────────────────────────────────────────────────────────┐│
+    │  │                       send()                                 ││
+    │  │  1. EventRouter.route_event() -> all subscribers            ││
+    │  │  2. Return immediately (fire-and-persist)                   ││
+    │  └─────────────────────────────────────────────────────────────┘│
+    │                                                                 │
+    │  ┌─────────────────────────────────────────────────────────────┐│
+    │  │                   send_blocking()                            ││
+    │  │  1. Get blocking subscribers from EventRouter               ││
+    │  │  2. Register MultiSubscriberWaiter                          ││
+    │  │  3. Route event to all subscribers                          ││
+    │  │  4. Wait for all blocking responses                         ││
+    │  │  5. Return AggregatedDecision                               ││
+    │  └─────────────────────────────────────────────────────────────┘│
+    │                                                                 │
+    │  ┌─────────────────────────────────────────────────────────────┐│
+    │  │                       reply()                                ││
+    │  │  1. Create reply event with reply_to field                  ││
+    │  │  2. Route directly to original sender                       ││
+    │  │  3. (Sender's inbox will resolve their waiter)              ││
+    │  └─────────────────────────────────────────────────────────────┘│
+    └─────────────────────────────────────────────────────────────────┘
 
-Design Notes:
-- send() routes via EventRouter and sends via TransportBackend
-- send_blocking() adds WaiterRegistry coordination
-- reply() creates a reply event and triggers sender's waiter
-- Aggregation uses one-vote-veto rule
+send_blocking Flow:
+===================
+
+    Sender                    Registry                 Subscribers
+      │                          │                          │
+      │ 1. send_blocking(event)  │                          │
+      │────────────────────────>│                          │
+      │                          │                          │
+      │ 2. register_multi()      │                          │
+      │<────────────────────────│                          │
+      │                          │                          │
+      │ 3. route_event() ─────────────────────────────────>│
+      │                          │                          │
+      │ 4. waiter.wait() ────────┤                          │
+      │     (blocked)            │                          │
+      │                          │ 5. Subscribers process   │
+      │                          │    and call reply()      │
+      │                          │<────────────────────────│
+      │                          │                          │
+      │ 6. waiter resolved       │                          │
+      │<────────────────────────│                          │
+      │                          │                          │
+      │ 7. Return AggregatedDecision                        │
+      │                          │                          │
+
+Design Principles:
+==================
+1. send() is fire-and-persist - no waiting
+2. send_blocking() combines routing + waiting + aggregation
+3. reply() is a convenience for subscribers
+4. All complexity is hidden behind simple interfaces
 """
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from mosaic.core.interfaces import MeshOutbox
-from mosaic.core.models import (
-    MeshEvent,
-    AggregatedDecision,
-    BlockingReply,
-)
-from mosaic.core.types import NodeId, MeshId, EventId, PermissionDecision
-from mosaic.core.exceptions import EventTimeoutError, EventNotFoundError
-from mosaic.transport.base import TransportBackend
-from mosaic.utils.id_generator import generate_event_id
+from mosaic.core.models import MeshEvent, AggregatedDecision
+from mosaic.core.types import NodeId, MeshId, EventId
+from mosaic.core.exceptions import EventNotFoundError
+
+from mosaic.transport import TransportBackend
 
 from .event_router import EventRouter
-from .waiter import WaiterRegistry, WaiterResponse
+from .waiter import WaiterRegistry
+
+from mosaic.utils.id_generator import generate_event_id
 
 
 logger = logging.getLogger(__name__)
@@ -44,39 +88,46 @@ logger = logging.getLogger(__name__)
 
 class MeshOutboxImpl(MeshOutbox):
     """
-    Implementation of MeshOutbox interface.
+    Implementation of MeshOutbox with routing and blocking support.
     
-    MeshOutboxImpl provides the sending capabilities for nodes:
+    MeshOutboxImpl provides three sending modes:
     
-    1. FIRE-AND-PERSIST: send() routes and persists events without waiting
+    1. send(): Fire-and-persist to all subscribers
+       - Routes to all matching subscribers
+       - Returns immediately
+       - No response expected
     
-    2. BLOCKING SEND: send_blocking() waits for all blocking subscribers
-       to respond, then aggregates their responses
+    2. send_blocking(): Send and wait for blocking subscribers
+       - Routes to all subscribers
+       - Waits for blocking subscribers to reply
+       - Aggregates responses (one-vote-veto)
+       - Returns AggregatedDecision
     
-    3. REPLY: reply() creates and sends a response to a blocking event
-    
-    The outbox coordinates multiple components:
-    - EventRouter: Determines who receives events
-    - TransportBackend: Persists and delivers events
-    - WaiterRegistry: Manages blocking waits
+    3. reply(): Respond to a received event
+       - Sends reply directly to original sender
+       - Triggers sender's waiter
     
     Usage:
         outbox = MeshOutboxImpl(
-            node_id, mesh_id, transport, router, waiter_registry
+            node_id="worker",
+            mesh_id="dev",
+            transport=transport_backend,
+            router=event_router,
+            waiter_registry=registry,
         )
         
-        # Fire-and-forget
+        # Fire-and-persist
         await outbox.send(event)
         
-        # Wait for responses
+        # Wait for blocking subscribers
         decision = await outbox.send_blocking(event, timeout=30.0)
         
-        # Reply to blocking event
-        await outbox.reply(event_id, {"decision": "allow"})
+        # Reply to an event
+        await outbox.reply(event_id="evt-123", payload={"decision": "allow"})
     
     Attributes:
-        node_id: The node this outbox sends events from
-        mesh_id: The mesh this outbox belongs to
+        node_id: The node this outbox belongs to
+        mesh_id: The mesh this outbox is in
     """
     
     def __init__(
@@ -91,11 +142,11 @@ class MeshOutboxImpl(MeshOutbox):
         Initialize the outbox.
         
         Args:
-            node_id: Node this outbox sends events from
-            mesh_id: Mesh this outbox belongs to
-            transport: Transport backend for sending events
-            router: Event router for determining subscribers
-            waiter_registry: Registry for managing blocking waits
+            node_id: The node this outbox belongs to
+            mesh_id: The mesh this outbox is in
+            transport: Transport backend for event delivery
+            router: Event router for subscription-based routing
+            waiter_registry: Registry for managing blocking waiters
         """
         self._node_id = node_id
         self._mesh_id = mesh_id
@@ -103,53 +154,44 @@ class MeshOutboxImpl(MeshOutbox):
         self._router = router
         self._waiter_registry = waiter_registry
         
-        logger.debug(f"MeshOutboxImpl initialized: node_id={node_id}, mesh_id={mesh_id}")
+        logger.debug(f"MeshOutboxImpl created for node {node_id}")
     
     @property
     def node_id(self) -> NodeId:
-        """The node this outbox sends events from."""
+        """The node this outbox belongs to."""
         return self._node_id
     
     @property
     def mesh_id(self) -> MeshId:
-        """The mesh this outbox belongs to."""
+        """The mesh this outbox is in."""
         return self._mesh_id
     
     async def send(self, event: MeshEvent) -> None:
         """
         Send an event to all subscribers (fire-and-persist).
         
-        The event is routed to all matching subscribers and persisted.
+        The event is persisted and routed to all matching subscribers.
         This method returns immediately without waiting for processing.
         
         Args:
-            event: The event to send (source_id should match this outbox)
+            event: The event to send (source_id should be set)
         
         Raises:
             EventDeliveryError: If event cannot be persisted
         """
-        logger.debug(
-            f"MeshOutboxImpl.send: event_id={event.event_id}, "
-            f"type={event.event_type}"
-        )
-        
-        # Route event to find all subscribers
-        routing_result = await self._router.route(event)
-        
-        if routing_result.total_count == 0:
-            logger.debug(f"MeshOutboxImpl.send: no subscribers for event {event.event_id}")
-            return
-        
-        # Send to all subscribers via transport
-        for routed_event in routing_result.routed_events:
-            logger.debug(
-                f"MeshOutboxImpl.send: delivering to {routed_event.target_id}"
+        # Ensure event has correct mesh_id and source_id
+        if event.source_id != self._node_id:
+            logger.warning(
+                f"Event source_id ({event.source_id}) doesn't match "
+                f"outbox node_id ({self._node_id}). Sending anyway."
             )
-            await self._transport.send_event(routed_event)
+        
+        # Route to all subscribers
+        recipients = await self._router.route_event(event)
         
         logger.debug(
-            f"MeshOutboxImpl.send: completed event_id={event.event_id}, "
-            f"delivered to {routing_result.total_count} subscribers"
+            f"Event sent: {event.event_id} [{event.event_type}] "
+            f"to {len(recipients)} subscribers"
         )
     
     async def send_blocking(
@@ -161,12 +203,16 @@ class MeshOutboxImpl(MeshOutbox):
         Send an event and wait for all blocking subscribers to respond.
         
         This method:
-        1. Routes event to find all subscribers
-        2. Sends to non-blocking subscribers immediately
-        3. Registers waiter for blocking subscribers
-        4. Sends to blocking subscribers
-        5. Waits for all blocking responses (or timeout)
-        6. Aggregates responses using one-vote-veto
+        1. Finds all blocking subscribers
+        2. Sends the event to ALL subscribers (blocking and non-blocking)
+        3. Waits for all BLOCKING subscribers to respond (or timeout)
+        4. Aggregates responses using one-vote-veto
+        
+        Aggregation Rule (one-vote-veto):
+            - Any DENY -> final DENY
+            - Any ASK (no DENY) -> final ASK
+            - All ALLOW -> final ALLOW
+            - Timeout -> treat as DENY
         
         Args:
             event: The event to send
@@ -176,79 +222,60 @@ class MeshOutboxImpl(MeshOutbox):
             AggregatedDecision with final decision and individual replies
         
         Raises:
-            EventTimeoutError: If timeout expires before all responses
+            EventDeliveryError: If event cannot be delivered
         """
-        logger.debug(
-            f"MeshOutboxImpl.send_blocking: event_id={event.event_id}, "
-            f"type={event.event_type}, timeout={timeout}"
+        # Get all subscribers
+        all_subs = await self._router.get_subscribers(
+            source_id=event.source_id,
+            event_type=event.event_type,
         )
         
-        # Route event
-        routing_result = await self._router.route(event)
+        # Separate blocking and non-blocking
+        blocking_subs = [s for s in all_subs if s.is_blocking()]
+        non_blocking_subs = [s for s in all_subs if not s.is_blocking()]
         
-        # If no blocking subscribers, just send normally
-        if not routing_result.has_blocking:
-            logger.debug(
-                f"MeshOutboxImpl.send_blocking: no blocking subscribers, "
-                f"falling back to normal send"
-            )
-            await self.send(event)
+        logger.debug(
+            f"send_blocking: event={event.event_id}, "
+            f"blocking={len(blocking_subs)}, non_blocking={len(non_blocking_subs)}"
+        )
+        
+        # If no blocking subscribers, just send and return ALLOW
+        if not blocking_subs:
+            # Route to non-blocking subscribers
+            await self._router.route_event(event, subscriptions=non_blocking_subs)
+            
             return AggregatedDecision(
-                final_decision=PermissionDecision.ALLOW.value,
+                final_decision="allow",
                 individual_replies=[],
                 reasons=[],
+                timed_out_subscribers=[],
             )
         
-        # Send to non-blocking subscribers first (they don't need waiter)
-        for routed_event in routing_result.routed_events:
-            is_blocking = any(
-                sub.source_id == routed_event.target_id
-                for sub in routing_result.blocking_subscriptions
-            )
-            if not is_blocking:
-                logger.debug(
-                    f"MeshOutboxImpl.send_blocking: sending to non-blocking "
-                    f"subscriber {routed_event.target_id}"
-                )
-                await self._transport.send_event(routed_event)
-        
-        # Register waiter for blocking subscribers
-        waiter = await self._waiter_registry.register(
+        # Register multi-subscriber waiter
+        blocking_ids = [s.source_id for s in blocking_subs]
+        waiter = await self._waiter_registry.register_multi(
             event_id=event.event_id,
-            expected_count=routing_result.blocking_count,
+            subscriber_ids=blocking_ids,
         )
         
         try:
-            # Send to blocking subscribers
-            for routed_event in routing_result.routed_events:
-                is_blocking = any(
-                    sub.source_id == routed_event.target_id
-                    for sub in routing_result.blocking_subscriptions
-                )
-                if is_blocking:
-                    logger.debug(
-                        f"MeshOutboxImpl.send_blocking: sending to blocking "
-                        f"subscriber {routed_event.target_id}"
-                    )
-                    await self._transport.send_event(routed_event)
+            # Route to ALL subscribers (blocking and non-blocking)
+            await self._router.route_event(event, subscriptions=all_subs)
             
-            # Wait for responses
-            responses = await waiter.wait(timeout=timeout)
+            # Wait for blocking subscribers
+            decision = await waiter.wait(timeout=timeout)
             
-            # Aggregate responses
-            return self._aggregate_responses(event.event_id, responses)
-            
-        except EventTimeoutError:
-            # Some subscribers didn't respond in time
-            # Aggregate what we have, treating timeouts as DENY
-            return self._aggregate_responses(
-                event.event_id,
-                waiter.responses,
-                timed_out=routing_result.get_blocking_subscriber_ids(),
+            logger.info(
+                f"Blocking event completed: {event.event_id}, "
+                f"decision={decision.final_decision}"
             )
-        finally:
-            # Always clean up waiter
+            
+            return decision
+        
+        except Exception as e:
+            # Ensure waiter is cleaned up on error
             await self._waiter_registry.unregister(event.event_id)
+            raise
     
     async def reply(
         self,
@@ -258,22 +285,25 @@ class MeshOutboxImpl(MeshOutbox):
         """
         Reply to a blocking event.
         
-        Creates a reply event and sends it to the original sender.
-        The reply will trigger the sender's waiter.
+        When a node receives a blocking event (!EventName), it should
+        send a reply. This method:
+        1. Looks up the original event to find the sender
+        2. Creates a reply event with reply_to field set
+        3. Sends it directly to the original sender
+        4. The sender's inbox will resolve their waiter
         
         Args:
             event_id: The event being replied to
             payload: Reply data (format depends on event type)
+                     For PreToolUse: {"decision": "allow/deny/ask", "reason": "..."}
         
         Raises:
-            EventNotFoundError: If the event doesn't exist
+            EventNotFoundError: If the event_id doesn't exist
+            EventDeliveryError: If reply cannot be delivered
         """
-        logger.debug(
-            f"MeshOutboxImpl.reply: replying to event_id={event_id}"
-        )
-        
         # Get the original event to find the sender
         original_event = await self._transport.get_event(event_id)
+        
         if original_event is None:
             raise EventNotFoundError(event_id)
         
@@ -284,107 +314,60 @@ class MeshOutboxImpl(MeshOutbox):
             source_id=self._node_id,
             target_id=original_event.source_id,  # Reply to original sender
             event_type="NodeMessage",
+            timestamp=datetime.utcnow(),
             reply_to=event_id,
             payload=payload,
         )
         
-        # Send reply directly (no routing needed)
+        # Send directly to original sender (bypass subscription routing)
         await self._transport.send_event(reply_event)
         
         logger.debug(
-            f"MeshOutboxImpl.reply: sent reply {reply_event.event_id} "
-            f"to {original_event.source_id} for event {event_id}"
+            f"Reply sent: {reply_event.event_id} -> {original_event.source_id} "
+            f"(reply_to={event_id})"
         )
     
-    def _aggregate_responses(
+    async def send_to(
         self,
-        event_id: EventId,
-        responses: list[WaiterResponse],
-        timed_out: list[NodeId] | None = None,
-    ) -> AggregatedDecision:
+        target_id: NodeId,
+        event_type: str,
+        payload: dict[str, Any],
+        event_id: Optional[EventId] = None,
+    ) -> MeshEvent:
         """
-        Aggregate responses from multiple blocking subscribers.
+        Send an event directly to a specific node (bypassing subscriptions).
         
-        Uses one-vote-veto rule:
-        - Any DENY -> final DENY
-        - Any ASK (no DENY) -> final ASK
-        - All ALLOW -> final ALLOW
-        - Timeout subscribers count as DENY
+        This is useful for direct node-to-node communication without
+        relying on subscription relationships.
         
         Args:
-            event_id: The event that was sent
-            responses: Responses received
-            timed_out: List of subscribers that timed out
+            target_id: The target node ID
+            event_type: The event type
+            payload: Event payload
+            event_id: Optional event ID (generated if not provided)
         
         Returns:
-            AggregatedDecision with final decision
+            The sent event
+        
+        Raises:
+            EventDeliveryError: If delivery fails
         """
-        timed_out = timed_out or []
+        event = MeshEvent(
+            event_id=event_id or generate_event_id(),
+            mesh_id=self._mesh_id,
+            source_id=self._node_id,
+            target_id=target_id,
+            event_type=event_type,
+            timestamp=datetime.utcnow(),
+            payload=payload,
+        )
         
-        # Convert responses to BlockingReply objects
-        individual_replies = [
-            BlockingReply(
-                event_id=event_id,
-                subscriber_id=resp.subscriber_id,
-                payload=resp.payload,
-            )
-            for resp in responses
-        ]
-        
-        # Collect all decisions and reasons
-        decisions = []
-        reasons = []
-        
-        for resp in responses:
-            decision = resp.payload.get("decision", PermissionDecision.ALLOW.value)
-            decisions.append(decision)
-            
-            reason = resp.payload.get("reason")
-            if reason:
-                reasons.append(f"[{resp.subscriber_id}] {reason}")
-        
-        # Add timeout entries as DENY
-        for node_id in timed_out:
-            if node_id not in [r.subscriber_id for r in responses]:
-                decisions.append(PermissionDecision.DENY.value)
-                reasons.append(f"[{node_id}] Timed out waiting for response")
-        
-        # Apply one-vote-veto aggregation
-        final_decision = self._one_vote_veto(decisions)
+        # Send directly via transport
+        await self._transport.send_event(event)
         
         logger.debug(
-            f"MeshOutboxImpl._aggregate_responses: event_id={event_id}, "
-            f"decisions={decisions}, final={final_decision}"
+            f"Direct event sent: {event.event_id} -> {target_id} [{event_type}]"
         )
         
-        return AggregatedDecision(
-            final_decision=final_decision,
-            individual_replies=individual_replies,
-            reasons=reasons,
-            timed_out_subscribers=timed_out,
-        )
-    
-    def _one_vote_veto(self, decisions: list[str]) -> str:
-        """
-        Apply one-vote-veto aggregation rule.
-        
-        Args:
-            decisions: List of decision strings
-        
-        Returns:
-            Aggregated decision string
-        """
-        if not decisions:
-            return PermissionDecision.ALLOW.value
-        
-        # Any DENY -> final DENY
-        if any(d == PermissionDecision.DENY.value for d in decisions):
-            return PermissionDecision.DENY.value
-        
-        # Any ASK -> final ASK
-        if any(d == PermissionDecision.ASK.value for d in decisions):
-            return PermissionDecision.ASK.value
-        
-        # All ALLOW -> final ALLOW
-        return PermissionDecision.ALLOW.value
+        return event
 

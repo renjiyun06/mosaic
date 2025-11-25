@@ -2,71 +2,370 @@
 Mosaic Runtime - Event Router
 
 This module provides event routing based on subscription relationships.
-The EventRouter is responsible for determining which nodes should receive
-an event when a node produces it.
+The EventRouter is responsible for:
+1. Looking up subscribers for an event
+2. Creating event copies for each subscriber
+3. Sending events via the transport layer
+4. Identifying blocking subscribers
 
-Key Responsibilities:
-1. Query subscription relationships (from storage)
-2. Match events against subscription patterns
-3. Create copies of events for each subscriber
-4. Distinguish blocking vs non-blocking subscribers
+Architecture:
+=============
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                        EventRouter                               │
+    └─────────────────────────────────────────────────────────────────┘
+                │                                      │
+                │ Query subscriptions                  │ Send events
+                ▼                                      ▼
+    ┌─────────────────────┐                ┌─────────────────────────┐
+    │  SubscriptionRepo   │                │   TransportBackend      │
+    │  (storage module)   │                │  (transport module)     │
+    └─────────────────────┘                └─────────────────────────┘
+
+Event Flow:
+===========
+
+    1. Node produces event (e.g., PreToolUse from CC node)
+                    │
+                    ▼
+    2. EventRouter.route_event(event)
+                    │
+                    ├──> Query SubscriptionRepository
+                    │    "Who subscribes to this node for this event type?"
+                    │
+                    ├──> For each subscriber:
+                    │    - Clone event
+                    │    - Set target_id = subscriber
+                    │    - Send via transport
+                    │
+                    ▼
+    3. Events delivered to subscriber inboxes
 
 Design Principles:
-1. SENDER-SIDE DISPATCH: The sending node (via router) decides who receives
-2. SUBSCRIPTION-DRIVEN: Routing is determined by subscription relationships
-3. TRANSPARENT: Router doesn't interpret event payload or session info
-4. STATELESS: Router queries subscriptions on-demand (no caching)
+==================
+1. Router only handles ROUTING - no waiting logic
+2. Blocking/non-blocking determined by subscription, passed to caller
+3. Router is stateless - all state in storage and transport
+4. Router does NOT interpret session_scope - that's for agent nodes
 
-Note on Dependencies:
-The EventRouter depends on storage repositories to query subscriptions.
-It uses the Protocol pattern to define the required interface, allowing
-for different storage implementations.
+Separation of Concerns:
+=======================
+- EventRouter: "Where should this event go?"
+- WaiterRegistry: "How do we wait for replies?"
+- MeshOutbox: Combines router + waiter for send_blocking()
 """
 
 import logging
-from typing import Protocol, runtime_checkable
+from typing import Optional
 
 from mosaic.core.models import MeshEvent, Subscription
-from mosaic.core.types import NodeId, MeshId, EventId
+from mosaic.core.types import MeshId, NodeId, EventId
+from mosaic.storage import SubscriptionRepository
+
+from mosaic.transport import TransportBackend
 
 
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Repository Protocol (for dependency injection)
-# =============================================================================
-
-@runtime_checkable
-class SubscriptionRepositoryProtocol(Protocol):
+class EventRouter:
     """
-    Protocol defining the subscription query interface.
+    Routes events to subscribers based on subscription relationships.
     
-    This protocol defines what EventRouter needs from the storage layer.
-    The actual implementation lives in mosaic.storage.repositories.
+    EventRouter queries the subscription repository to find who should
+    receive an event, then uses the transport backend to deliver it.
     
-    Using Protocol enables:
-    - Type checking without concrete dependencies
-    - Easy testing with mock implementations
-    - Clear interface boundaries
+    Usage:
+        router = EventRouter(
+            mesh_id="dev",
+            subscription_repo=sub_repo,
+            transport=transport_backend,
+        )
+        
+        # Route to all subscribers
+        await router.route_event(event)
+        
+        # Get blocking subscribers (for send_blocking)
+        blocking = await router.get_blocking_subscribers(
+            source_id="worker",
+            event_type="PreToolUse"
+        )
+    
+    Attributes:
+        mesh_id: The mesh this router serves
+        subscription_repo: Repository for subscription queries
+        transport: Transport backend for event delivery
     """
     
-    async def get_by_target(
+    def __init__(
         self,
         mesh_id: MeshId,
-        target_id: NodeId,
-    ) -> list[Subscription]:
+        subscription_repo: SubscriptionRepository,
+        transport: TransportBackend,
+    ) -> None:
         """
-        Get all subscriptions where node is being subscribed to.
+        Initialize the event router.
         
         Args:
-            mesh_id: The mesh to query
-            target_id: The node being subscribed to (produces events)
+            mesh_id: The mesh this router serves
+            subscription_repo: Repository for subscription queries
+            transport: Transport backend for event delivery
+        """
+        self._mesh_id = mesh_id
+        self._subscription_repo = subscription_repo
+        self._transport = transport
+        
+        logger.debug(f"EventRouter initialized for mesh {mesh_id}")
+    
+    @property
+    def mesh_id(self) -> MeshId:
+        """The mesh this router serves."""
+        return self._mesh_id
+    
+    async def get_subscribers(
+        self,
+        source_id: NodeId,
+        event_type: str,
+    ) -> list[Subscription]:
+        """
+        Get all subscribers for a node's event type.
+        
+        This returns subscriptions where:
+        - target_id = source_id (they subscribe to this node)
+        - event_pattern matches the event_type (or is "*")
+        
+        Args:
+            source_id: The node producing the event
+            event_type: The type of event being produced
         
         Returns:
-            List of subscriptions where target_id is the subscribed node
+            List of matching subscriptions
         """
-        ...
+        # Get all subscriptions where this node is the target (being subscribed to)
+        all_subs = await self._subscription_repo.get_by_target(
+            mesh_id=self._mesh_id,
+            target_id=source_id,
+        )
+        
+        # Filter to subscriptions that match this event type
+        matching = [
+            sub for sub in all_subs
+            if sub.matches_event(event_type)
+        ]
+        
+        logger.debug(
+            f"get_subscribers: source_id={source_id}, event_type={event_type}, "
+            f"found={len(matching)} of {len(all_subs)} total"
+        )
+        
+        return matching
+    
+    async def get_blocking_subscribers(
+        self,
+        source_id: NodeId,
+        event_type: str,
+    ) -> list[Subscription]:
+        """
+        Get subscribers with blocking subscriptions for an event.
+        
+        Blocking subscriptions use the "!" prefix in event_pattern
+        (e.g., "!PreToolUse"). These require the sender to wait for
+        a response.
+        
+        Args:
+            source_id: The node producing the event
+            event_type: The type of event being produced
+        
+        Returns:
+            List of subscriptions that are blocking
+        """
+        all_subs = await self.get_subscribers(source_id, event_type)
+        
+        blocking = [sub for sub in all_subs if sub.is_blocking()]
+        
+        logger.debug(
+            f"get_blocking_subscribers: source_id={source_id}, "
+            f"event_type={event_type}, blocking={len(blocking)}"
+        )
+        
+        return blocking
+    
+    async def get_non_blocking_subscribers(
+        self,
+        source_id: NodeId,
+        event_type: str,
+    ) -> list[Subscription]:
+        """
+        Get subscribers with non-blocking subscriptions for an event.
+        
+        Non-blocking subscriptions don't require waiting for a response.
+        
+        Args:
+            source_id: The node producing the event
+            event_type: The type of event being produced
+        
+        Returns:
+            List of subscriptions that are non-blocking
+        """
+        all_subs = await self.get_subscribers(source_id, event_type)
+        
+        non_blocking = [sub for sub in all_subs if not sub.is_blocking()]
+        
+        logger.debug(
+            f"get_non_blocking_subscribers: source_id={source_id}, "
+            f"event_type={event_type}, non_blocking={len(non_blocking)}"
+        )
+        
+        return non_blocking
+    
+    async def route_event(
+        self,
+        event: MeshEvent,
+        subscriptions: Optional[list[Subscription]] = None,
+    ) -> list[NodeId]:
+        """
+        Route an event to all matching subscribers.
+        
+        This method:
+        1. Finds all matching subscriptions (if not provided)
+        2. For each subscriber, creates a copy of the event with target_id set
+        3. Sends each copy via the transport layer
+        
+        Args:
+            event: The event to route (source_id must be set)
+            subscriptions: Optional pre-queried subscriptions.
+                          If None, queries based on event.source_id and event.event_type
+        
+        Returns:
+            List of node IDs that received the event
+        
+        Raises:
+            EventDeliveryError: If event delivery fails
+        """
+        # Get subscriptions if not provided
+        if subscriptions is None:
+            subscriptions = await self.get_subscribers(
+                source_id=event.source_id,
+                event_type=event.event_type,
+            )
+        
+        if not subscriptions:
+            logger.debug(
+                f"No subscribers for event: source_id={event.source_id}, "
+                f"event_type={event.event_type}"
+            )
+            return []
+        
+        # Route to each subscriber
+        recipients: list[NodeId] = []
+        
+        for subscription in subscriptions:
+            # Create a copy of the event with target_id set
+            routed_event = MeshEvent(
+                event_id=event.event_id,
+                mesh_id=event.mesh_id,
+                source_id=event.source_id,
+                target_id=subscription.source_id,  # source_id in subscription is the subscriber
+                event_type=event.event_type,
+                timestamp=event.timestamp,
+                session_trace=event.session_trace,
+                reply_to=event.reply_to,
+                payload=event.payload,
+            )
+            
+            # Send via transport
+            await self._transport.send_event(routed_event)
+            recipients.append(subscription.source_id)
+            
+            logger.debug(
+                f"Event routed: {event.event_id} -> {subscription.source_id} "
+                f"[{subscription.event_pattern}]"
+            )
+        
+        logger.info(
+            f"Event {event.event_id} routed to {len(recipients)} subscribers: "
+            f"{recipients}"
+        )
+        
+        return recipients
+    
+    async def route_to_specific(
+        self,
+        event: MeshEvent,
+        target_id: NodeId,
+    ) -> None:
+        """
+        Route an event to a specific target node.
+        
+        This bypasses subscription lookup and sends directly to the target.
+        Used for reply events where the target is known.
+        
+        Args:
+            event: The event to send
+            target_id: The target node ID
+        
+        Raises:
+            EventDeliveryError: If delivery fails
+        """
+        # Create event with target set
+        routed_event = MeshEvent(
+            event_id=event.event_id,
+            mesh_id=event.mesh_id,
+            source_id=event.source_id,
+            target_id=target_id,
+            event_type=event.event_type,
+            timestamp=event.timestamp,
+            session_trace=event.session_trace,
+            reply_to=event.reply_to,
+            payload=event.payload,
+        )
+        
+        # Send via transport
+        await self._transport.send_event(routed_event)
+        
+        logger.debug(
+            f"Event routed directly: {event.event_id} -> {target_id}"
+        )
+    
+    async def route_reply(
+        self,
+        original_event: MeshEvent,
+        reply_payload: dict,
+        reply_event_id: EventId,
+        reply_source_id: NodeId,
+    ) -> None:
+        """
+        Route a reply event back to the original sender.
+        
+        This is a convenience method for creating and routing reply events.
+        
+        Args:
+            original_event: The event being replied to
+            reply_payload: The reply payload
+            reply_event_id: ID for the reply event
+            reply_source_id: Node sending the reply
+        
+        Raises:
+            EventDeliveryError: If delivery fails
+        """
+        # Create reply event
+        reply_event = MeshEvent(
+            event_id=reply_event_id,
+            mesh_id=original_event.mesh_id,
+            source_id=reply_source_id,
+            target_id=original_event.source_id,  # Reply goes back to original sender
+            event_type="NodeMessage",
+            reply_to=original_event.event_id,
+            payload=reply_payload,
+        )
+        
+        # Send via transport (direct to target)
+        await self._transport.send_event(reply_event)
+        
+        logger.debug(
+            f"Reply routed: {reply_event_id} -> {original_event.source_id} "
+            f"(reply_to={original_event.event_id})"
+        )
 
 
 # =============================================================================
@@ -75,215 +374,47 @@ class SubscriptionRepositoryProtocol(Protocol):
 
 class RoutingResult:
     """
-    Result of routing an event.
+    Result of an event routing operation.
     
-    Contains the lists of subscribers, separated by blocking vs non-blocking.
-    Also holds the prepared event copies ready for delivery.
+    This provides detailed information about where an event was routed,
+    including which subscribers are blocking vs non-blocking.
     
     Attributes:
-        blocking_subscriptions: Subscriptions requiring sender to wait
-        non_blocking_subscriptions: Fire-and-forget subscriptions
-        routed_events: Events ready for delivery (target_id set)
-    """
-    
-    def __init__(self) -> None:
-        self.blocking_subscriptions: list[Subscription] = []
-        self.non_blocking_subscriptions: list[Subscription] = []
-        self.routed_events: list[MeshEvent] = []
-    
-    @property
-    def has_blocking(self) -> bool:
-        """Check if there are any blocking subscribers."""
-        return len(self.blocking_subscriptions) > 0
-    
-    @property
-    def blocking_count(self) -> int:
-        """Number of blocking subscribers."""
-        return len(self.blocking_subscriptions)
-    
-    @property
-    def total_count(self) -> int:
-        """Total number of subscribers."""
-        return len(self.blocking_subscriptions) + len(self.non_blocking_subscriptions)
-    
-    def get_blocking_subscriber_ids(self) -> list[NodeId]:
-        """Get list of blocking subscriber node IDs."""
-        return [sub.source_id for sub in self.blocking_subscriptions]
-
-
-# =============================================================================
-# Event Router
-# =============================================================================
-
-class EventRouter:
-    """
-    Routes events to subscribers based on subscription relationships.
-    
-    The EventRouter is the core component that implements sender-side dispatch.
-    When a node produces an event, the router:
-    1. Queries all subscriptions where this node is the target
-    2. Filters subscriptions by event type match
-    3. Separates blocking and non-blocking subscriptions
-    4. Creates event copies for each subscriber
-    
-    Important: The router does NOT send events. It only determines WHO should
-    receive them. The actual sending is done by MeshOutbox.
-    
-    Usage:
-        router = EventRouter(mesh_id, subscription_repo)
-        
-        event = MeshEvent(source_id="worker", event_type="PreToolUse", ...)
-        result = await router.route(event)
-        
-        for routed_event in result.routed_events:
-            await transport.send_event(routed_event)
-        
-        if result.has_blocking:
-            # Need to wait for responses from blocking subscribers
-            ...
+        event_id: The routed event's ID
+        blocking_subscribers: List of blocking subscription recipients
+        non_blocking_subscribers: List of non-blocking subscription recipients
     """
     
     def __init__(
         self,
-        mesh_id: MeshId,
-        subscription_repo: SubscriptionRepositoryProtocol,
+        event_id: EventId,
+        blocking_subscribers: list[Subscription],
+        non_blocking_subscribers: list[Subscription],
     ) -> None:
-        """
-        Initialize the event router.
-        
-        Args:
-            mesh_id: The mesh this router operates in
-            subscription_repo: Repository for querying subscriptions
-        """
-        self.mesh_id = mesh_id
-        self._subscription_repo = subscription_repo
-        
-        logger.debug(f"EventRouter initialized for mesh_id={mesh_id}")
+        """Initialize the routing result."""
+        self.event_id = event_id
+        self.blocking_subscribers = blocking_subscribers
+        self.non_blocking_subscribers = non_blocking_subscribers
     
-    async def route(self, event: MeshEvent) -> RoutingResult:
-        """
-        Route an event to all matching subscribers.
-        
-        This method:
-        1. Gets all subscriptions where source is target
-        2. Filters by event type pattern
-        3. Creates event copies with target_id set
-        4. Returns routing result with blocking/non-blocking separation
-        
-        Args:
-            event: The event to route (source_id must be set)
-        
-        Returns:
-            RoutingResult with prepared events and subscription info
-        """
-        result = RoutingResult()
-        
-        # Get all subscriptions where this node is being subscribed to
-        subscriptions = await self._subscription_repo.get_by_target(
-            mesh_id=self.mesh_id,
-            target_id=event.source_id,
-        )
-        
-        logger.debug(
-            f"EventRouter: found {len(subscriptions)} subscriptions for "
-            f"source_id={event.source_id}, event_type={event.event_type}"
-        )
-        
-        # Filter and categorize subscriptions
-        for sub in subscriptions:
-            if not sub.matches_event(event.event_type):
-                continue
-            
-            # Create event copy with target_id set
-            routed_event = self._create_routed_event(event, sub.source_id)
-            result.routed_events.append(routed_event)
-            
-            # Categorize by blocking
-            if sub.is_blocking():
-                result.blocking_subscriptions.append(sub)
-                logger.debug(
-                    f"EventRouter: blocking subscriber {sub.source_id} "
-                    f"for pattern {sub.event_pattern}"
-                )
-            else:
-                result.non_blocking_subscriptions.append(sub)
-                logger.debug(
-                    f"EventRouter: non-blocking subscriber {sub.source_id} "
-                    f"for pattern {sub.event_pattern}"
-                )
-        
-        logger.debug(
-            f"EventRouter: routing complete for event_id={event.event_id}, "
-            f"blocking={result.blocking_count}, "
-            f"non_blocking={len(result.non_blocking_subscriptions)}"
-        )
-        
-        return result
+    @property
+    def has_blocking(self) -> bool:
+        """Check if there are any blocking subscribers."""
+        return len(self.blocking_subscribers) > 0
     
-    async def get_blocking_subscribers(
-        self,
-        source_id: NodeId,
-        event_type: str,
-    ) -> list[Subscription]:
-        """
-        Get blocking subscribers for an event type.
-        
-        This is a convenience method for checking if blocking waits are needed
-        before actually creating the event.
-        
-        Args:
-            source_id: The node that would produce the event
-            event_type: The type of event
-        
-        Returns:
-            List of blocking subscriptions that match
-        """
-        subscriptions = await self._subscription_repo.get_by_target(
-            mesh_id=self.mesh_id,
-            target_id=source_id,
-        )
-        
-        return [
-            sub for sub in subscriptions
-            if sub.is_blocking() and sub.matches_event(event_type)
-        ]
+    @property
+    def blocking_node_ids(self) -> list[NodeId]:
+        """Get IDs of blocking subscriber nodes."""
+        return [sub.source_id for sub in self.blocking_subscribers]
     
-    async def has_blocking_subscribers(
-        self,
-        source_id: NodeId,
-        event_type: str,
-    ) -> bool:
-        """
-        Check if there are any blocking subscribers for an event type.
-        
-        Args:
-            source_id: The node that would produce the event
-            event_type: The type of event
-        
-        Returns:
-            True if there are blocking subscribers
-        """
-        blocking = await self.get_blocking_subscribers(source_id, event_type)
-        return len(blocking) > 0
+    @property
+    def all_recipients(self) -> list[NodeId]:
+        """Get IDs of all recipients."""
+        blocking = [sub.source_id for sub in self.blocking_subscribers]
+        non_blocking = [sub.source_id for sub in self.non_blocking_subscribers]
+        return blocking + non_blocking
     
-    def _create_routed_event(
-        self,
-        original: MeshEvent,
-        target_id: NodeId,
-    ) -> MeshEvent:
-        """
-        Create a copy of an event with target_id set.
-        
-        We need to create copies because each subscriber gets their own
-        event instance with different target_id.
-        
-        Args:
-            original: The original event
-            target_id: The subscriber node ID
-        
-        Returns:
-            New MeshEvent with target_id set
-        """
-        # Use Pydantic's model_copy for efficient copying
-        return original.model_copy(update={"target_id": target_id})
+    @property
+    def total_recipients(self) -> int:
+        """Get total number of recipients."""
+        return len(self.blocking_subscribers) + len(self.non_blocking_subscribers)
 

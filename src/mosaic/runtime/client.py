@@ -1,19 +1,79 @@
 """
 Mosaic Runtime - MeshClient Implementation
 
-This module implements MeshClient, the main entry point for nodes to interact
-with the Mosaic mesh. MeshClient is an ASSEMBLER that combines lower-level
-components (transport, waiter, router) into a unified interface.
+This module provides the MeshClient implementation that assembles all
+runtime components into a unified interface for nodes.
 
-Key Responsibilities:
-1. Assemble inbox, outbox, and context components
-2. Manage connection lifecycle
-3. Provide unified interface for nodes
+MeshClient is the main entry point for nodes to interact with the
+Mosaic event system. It combines:
+- MeshInbox: For receiving events
+- MeshOutbox: For sending events
+- MeshContext: For topology and semantics queries
 
-Design Notes:
-- MeshClient is the ONLY interface nodes should use
-- All complexity (transport, routing, waiting) is hidden behind this interface
-- Dependencies are injected via constructor for testability
+Architecture:
+=============
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                        MeshClientImpl                           │
+    │                                                                 │
+    │  ┌──────────────────────────────────────────────────────────┐   │
+    │  │                    Shared Components                      │   │
+    │  │                                                          │   │
+    │  │  ┌────────────────┐  ┌────────────────┐                  │   │
+    │  │  │ WaiterRegistry │  │  EventRouter   │                  │   │
+    │  │  └────────────────┘  └────────────────┘                  │   │
+    │  └──────────────────────────────────────────────────────────┘   │
+    │                                                                 │
+    │  ┌────────────────────────────────────────────────────────────┐ │
+    │  │                      User-Facing APIs                       │ │
+    │  │                                                            │ │
+    │  │  ┌──────────────┐  ┌──────────────┐  ┌───────────────────┐ │ │
+    │  │  │   Inbox      │  │   Outbox     │  │     Context       │ │ │
+    │  │  │ (receive)    │  │  (send)      │  │  (query)          │ │ │
+    │  │  └──────────────┘  └──────────────┘  └───────────────────┘ │ │
+    │  └────────────────────────────────────────────────────────────┘ │
+    │                                                                 │
+    │  ┌────────────────────────────────────────────────────────────┐ │
+    │  │                   External Dependencies                     │ │
+    │  │                                                            │ │
+    │  │  ┌────────────────┐  ┌────────────────────────────────────┐ │ │
+    │  │  │ Transport      │  │      Storage Repositories          │ │ │
+    │  │  │ Backend        │  │  (Subscription, Node, Capability)  │ │ │
+    │  │  └────────────────┘  └────────────────────────────────────┘ │ │
+    │  └────────────────────────────────────────────────────────────┘ │
+    └─────────────────────────────────────────────────────────────────┘
+
+Lifecycle:
+==========
+
+    1. Create: MeshClientImpl is created with dependencies
+    2. Connect: connect() initializes all components
+    3. Use: Node uses inbox/outbox/context for event handling
+    4. Disconnect: disconnect() releases resources
+
+    client = await create_mesh_client(mesh_id="dev", node_id="worker")
+    await client.connect()
+    
+    try:
+        async for envelope in client.inbox:
+            await process(envelope.event)
+            await envelope.ack()
+    finally:
+        await client.disconnect()
+
+Factory Function:
+=================
+
+The recommended way to create a MeshClient is via the factory function:
+
+    client = await create_mesh_client(
+        mesh_id="dev",
+        node_id="worker",
+        transport=sqlite_transport,  # Optional: uses default SQLite
+        storage_db=database_manager,  # Optional: uses default DB
+    )
+
+This handles all the dependency injection and component wiring.
 """
 
 import logging
@@ -21,17 +81,23 @@ from typing import Optional
 
 from mosaic.core.interfaces import MeshClient, MeshInbox, MeshOutbox, MeshContext
 from mosaic.core.types import NodeId, MeshId
-from mosaic.transport.base import TransportBackend
+from mosaic.core.exceptions import TransportConnectionError
+
+from mosaic.transport import TransportBackend
+from mosaic.transport.sqlite import create_sqlite_transport
+from mosaic.storage import (
+    DatabaseManager,
+    get_database,
+    NodeRepository,
+    SubscriptionRepository,
+    CapabilityRepository,
+)
 
 from .waiter import WaiterRegistry
-from .event_router import EventRouter, SubscriptionRepositoryProtocol
+from .event_router import EventRouter
 from .inbox import MeshInboxImpl
 from .outbox import MeshOutboxImpl
-from .context import (
-    MeshContextImpl,
-    SubscriptionQueryProtocol,
-    CapabilityQueryProtocol,
-)
+from .context import MeshContextImpl
 
 
 logger = logging.getLogger(__name__)
@@ -39,40 +105,28 @@ logger = logging.getLogger(__name__)
 
 class MeshClientImpl(MeshClient):
     """
-    Implementation of MeshClient interface.
+    Implementation of MeshClient that assembles all runtime components.
     
-    MeshClientImpl is the main entry point for nodes to interact with the
-    Mosaic mesh. It assembles and coordinates lower-level components:
-    
-    - TransportBackend: Event persistence and delivery
-    - WaiterRegistry: Blocking wait management
-    - EventRouter: Subscription-based routing
-    - MeshInbox: Event input channel
-    - MeshOutbox: Event output channel
-    - MeshContext: Topology and semantics queries
-    
-    Lifecycle:
-    1. Create: MeshClientImpl is instantiated with dependencies
-    2. Connect: connect() initializes transport and starts inbox
-    3. Use: Node uses inbox/outbox/context for event handling
-    4. Disconnect: disconnect() releases all resources
+    MeshClientImpl is the main entry point for nodes to interact with
+    the Mosaic event system. It provides:
+    - inbox: For receiving events (with automatic reply handling)
+    - outbox: For sending events (with blocking support)
+    - context: For topology and semantics queries
     
     Usage:
-        # Create client with dependencies
         client = MeshClientImpl(
             node_id="worker",
             mesh_id="dev",
-            transport=sqlite_transport,
+            transport=transport_backend,
             subscription_repo=sub_repo,
             capability_repo=cap_repo,
         )
-        
-        # Connect and use
         await client.connect()
         
         try:
             async for envelope in client.inbox:
-                await process(envelope.event)
+                event = envelope.event
+                await process(event)
                 await envelope.ack()
         finally:
             await client.disconnect()
@@ -90,21 +144,21 @@ class MeshClientImpl(MeshClient):
         node_id: NodeId,
         mesh_id: MeshId,
         transport: TransportBackend,
-        subscription_repo: SubscriptionRepositoryProtocol,
-        capability_repo: Optional[CapabilityQueryProtocol] = None,
+        subscription_repo: SubscriptionRepository,
+        capability_repo: CapabilityRepository,
     ) -> None:
         """
-        Initialize the MeshClient.
+        Initialize the client.
         
-        This constructor creates all internal components but does NOT
-        connect to the transport. Call connect() to establish connections.
+        Note: This creates the client but does not connect it.
+        Call connect() before using inbox/outbox.
         
         Args:
             node_id: This node's identifier
-            mesh_id: The mesh to connect to
+            mesh_id: The mesh this client belongs to
             transport: Transport backend for event delivery
             subscription_repo: Repository for subscription queries
-            capability_repo: Repository for capability queries (optional)
+            capability_repo: Repository for capability queries
         """
         self._node_id = node_id
         self._mesh_id = mesh_id
@@ -112,17 +166,16 @@ class MeshClientImpl(MeshClient):
         self._subscription_repo = subscription_repo
         self._capability_repo = capability_repo
         
-        # Connection state
-        self._connected = False
+        # Shared components (created on connect)
+        self._waiter_registry: Optional[WaiterRegistry] = None
+        self._router: Optional[EventRouter] = None
         
-        # Create shared components
-        self._waiter_registry = WaiterRegistry()
-        self._router = EventRouter(mesh_id, subscription_repo)
-        
-        # Create channel components (but don't activate until connect)
+        # User-facing components (created on connect)
         self._inbox: Optional[MeshInboxImpl] = None
         self._outbox: Optional[MeshOutboxImpl] = None
         self._context: Optional[MeshContextImpl] = None
+        
+        self._connected = False
         
         logger.debug(
             f"MeshClientImpl created: node_id={node_id}, mesh_id={mesh_id}"
@@ -140,162 +193,138 @@ class MeshClientImpl(MeshClient):
     
     @property
     def inbox(self) -> MeshInbox:
-        """
-        Event input channel.
-        
-        Raises:
-            RuntimeError: If client is not connected
-        """
-        if not self._connected or self._inbox is None:
-            raise RuntimeError("MeshClient not connected. Call connect() first.")
+        """Event input channel."""
+        if self._inbox is None:
+            raise RuntimeError("Client not connected. Call connect() first.")
         return self._inbox
     
     @property
     def outbox(self) -> MeshOutbox:
-        """
-        Event output channel.
-        
-        Raises:
-            RuntimeError: If client is not connected
-        """
-        if not self._connected or self._outbox is None:
-            raise RuntimeError("MeshClient not connected. Call connect() first.")
+        """Event output channel."""
+        if self._outbox is None:
+            raise RuntimeError("Client not connected. Call connect() first.")
         return self._outbox
     
     @property
     def context(self) -> MeshContext:
-        """
-        Topology and semantics queries.
-        
-        Raises:
-            RuntimeError: If client is not connected
-        """
-        if not self._connected or self._context is None:
-            raise RuntimeError("MeshClient not connected. Call connect() first.")
+        """Topology and semantics queries."""
+        if self._context is None:
+            raise RuntimeError("Client not connected. Call connect() first.")
         return self._context
     
     async def connect(self) -> None:
         """
         Connect to the mesh.
         
-        This initializes the transport and creates all channel components.
-        After connect(), inbox/outbox/context are ready for use.
+        This initializes all components and prepares the client
+        for event handling.
         
         Raises:
             TransportConnectionError: If connection fails
-            RuntimeError: If already connected
         """
         if self._connected:
-            raise RuntimeError("MeshClient already connected")
+            logger.debug(f"Client {self._node_id} already connected")
+            return
         
-        logger.info(f"MeshClient connecting: node_id={self._node_id}")
+        logger.info(f"Connecting client: {self._node_id}")
         
-        # Initialize transport
-        await self._transport.initialize()
+        try:
+            # Initialize transport if needed
+            await self._transport.initialize()
+            
+            # Create shared components
+            self._waiter_registry = WaiterRegistry()
+            
+            self._router = EventRouter(
+                mesh_id=self._mesh_id,
+                subscription_repo=self._subscription_repo,
+                transport=self._transport,
+            )
+            
+            # Create inbox
+            self._inbox = MeshInboxImpl(
+                node_id=self._node_id,
+                mesh_id=self._mesh_id,
+                transport=self._transport,
+                waiter_registry=self._waiter_registry,
+            )
+            
+            # Create outbox
+            self._outbox = MeshOutboxImpl(
+                node_id=self._node_id,
+                mesh_id=self._mesh_id,
+                transport=self._transport,
+                router=self._router,
+                waiter_registry=self._waiter_registry,
+            )
+            
+            # Create context
+            self._context = MeshContextImpl(
+                node_id=self._node_id,
+                mesh_id=self._mesh_id,
+                subscription_repo=self._subscription_repo,
+                capability_repo=self._capability_repo,
+            )
+            
+            self._connected = True
+            
+            logger.info(f"Client connected: {self._node_id}")
         
-        # Create inbox
-        self._inbox = MeshInboxImpl(
-            node_id=self._node_id,
-            mesh_id=self._mesh_id,
-            transport=self._transport,
-            waiter_registry=self._waiter_registry,
-        )
-        
-        # Create outbox
-        self._outbox = MeshOutboxImpl(
-            node_id=self._node_id,
-            mesh_id=self._mesh_id,
-            transport=self._transport,
-            router=self._router,
-            waiter_registry=self._waiter_registry,
-        )
-        
-        # Create context
-        # Note: subscription_repo satisfies both SubscriptionRepositoryProtocol
-        # (for router) and SubscriptionQueryProtocol (for context) because
-        # both protocols define the same methods
-        self._context = MeshContextImpl(
-            node_id=self._node_id,
-            mesh_id=self._mesh_id,
-            subscription_repo=self._subscription_repo,  # type: ignore
-            capability_repo=self._capability_repo,
-        )
-        
-        self._connected = True
-        
-        logger.info(f"MeshClient connected: node_id={self._node_id}")
+        except Exception as e:
+            logger.error(f"Failed to connect client {self._node_id}: {e}")
+            raise TransportConnectionError(
+                transport_type="mesh",
+                reason=str(e),
+            ) from e
     
     async def disconnect(self) -> None:
         """
         Disconnect from the mesh.
         
-        This releases all resources and closes connections.
-        After disconnect(), the client cannot be used.
+        This releases transport resources and closes channels.
+        After disconnect, the client cannot be used.
         """
         if not self._connected:
-            logger.debug("MeshClient.disconnect: already disconnected")
             return
         
-        logger.info(f"MeshClient disconnecting: node_id={self._node_id}")
+        logger.info(f"Disconnecting client: {self._node_id}")
         
         # Close inbox
         if self._inbox is not None:
             await self._inbox.close()
-            self._inbox = None
         
-        # Reject all pending waiters
-        from mosaic.core.exceptions import TransportUnavailableError
-        await self._waiter_registry.reject_all(
-            TransportUnavailableError("Client disconnected")
-        )
+        # Clear any pending waiters
+        if self._waiter_registry is not None:
+            await self._waiter_registry.clear()
         
-        # Close transport
-        await self._transport.close()
+        # Note: We don't close the transport here because it may be shared
+        # The transport should be closed by whoever created it
         
-        # Clear references
+        self._inbox = None
         self._outbox = None
         self._context = None
+        self._router = None
+        self._waiter_registry = None
         self._connected = False
         
-        logger.info(f"MeshClient disconnected: node_id={self._node_id}")
+        logger.info(f"Client disconnected: {self._node_id}")
     
     def is_connected(self) -> bool:
         """Check if the client is connected."""
         return self._connected
     
     # =========================================================================
-    # Additional Helper Methods
+    # Context Manager Protocol
     # =========================================================================
     
-    @property
-    def waiter_registry(self) -> WaiterRegistry:
-        """
-        Access to the internal waiter registry.
-        
-        This is primarily for testing and debugging. Normal node code
-        should not need direct access.
-        """
-        return self._waiter_registry
+    async def __aenter__(self) -> "MeshClientImpl":
+        """Async context manager entry."""
+        await self.connect()
+        return self
     
-    @property
-    def router(self) -> EventRouter:
-        """
-        Access to the internal event router.
-        
-        This is primarily for testing and debugging.
-        """
-        return self._router
-    
-    async def get_pending_events_count(self) -> int:
-        """
-        Get the number of pending events for this node.
-        
-        Useful for monitoring and load balancing decisions.
-        
-        Returns:
-            Number of events waiting to be processed
-        """
-        return await self._transport.get_pending_count(self._node_id)
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Async context manager exit."""
+        await self.disconnect()
 
 
 # =============================================================================
@@ -303,41 +332,61 @@ class MeshClientImpl(MeshClient):
 # =============================================================================
 
 async def create_mesh_client(
-    node_id: NodeId,
     mesh_id: MeshId,
-    transport: TransportBackend,
-    subscription_repo: SubscriptionRepositoryProtocol,
-    capability_repo: Optional[CapabilityQueryProtocol] = None,
+    node_id: NodeId,
+    transport: Optional[TransportBackend] = None,
+    storage_db: Optional[DatabaseManager] = None,
     auto_connect: bool = True,
 ) -> MeshClientImpl:
     """
-    Factory function to create and optionally connect a MeshClient.
+    Factory function to create a configured MeshClient.
     
-    This is the recommended way to create MeshClient instances.
+    This is the recommended way to create a MeshClient. It handles
+    all dependency injection and component wiring.
     
     Args:
-        node_id: This node's identifier
         mesh_id: The mesh to connect to
-        transport: Transport backend for event delivery
-        subscription_repo: Repository for subscription queries
-        capability_repo: Repository for capability queries (optional)
-        auto_connect: If True, connect before returning
+        node_id: This node's identifier
+        transport: Transport backend (default: creates SQLite transport)
+        storage_db: Storage database manager (default: uses global DB)
+        auto_connect: If True, connect() is called automatically
     
     Returns:
-        Configured MeshClientImpl instance
+        Configured MeshClientImpl (connected if auto_connect=True)
     
     Example:
-        client = await create_mesh_client(
-            node_id="worker",
-            mesh_id="dev",
-            transport=SQLiteTransportBackend(...),
-            subscription_repo=SubscriptionRepository(...),
-        )
+        # Simple usage with defaults
+        client = await create_mesh_client(mesh_id="dev", node_id="worker")
         
-        # Client is already connected, ready to use
-        async for envelope in client.inbox:
-            ...
+        try:
+            async for envelope in client.inbox:
+                await process(envelope.event)
+                await envelope.ack()
+        finally:
+            await client.disconnect()
+        
+        # Or with context manager
+        async with await create_mesh_client("dev", "worker") as client:
+            async for envelope in client.inbox:
+                ...
     """
+    logger.debug(
+        f"Creating mesh client: mesh_id={mesh_id}, node_id={node_id}"
+    )
+    
+    # Get or create transport
+    if transport is None:
+        transport = create_sqlite_transport(mesh_id)
+    
+    # Get or create storage DB
+    if storage_db is None:
+        storage_db = await get_database()
+    
+    # Create repositories
+    subscription_repo = SubscriptionRepository(storage_db)
+    capability_repo = CapabilityRepository(storage_db)
+    
+    # Create client
     client = MeshClientImpl(
         node_id=node_id,
         mesh_id=mesh_id,
@@ -346,6 +395,7 @@ async def create_mesh_client(
         capability_repo=capability_repo,
     )
     
+    # Auto-connect if requested
     if auto_connect:
         await client.connect()
     
