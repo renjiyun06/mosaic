@@ -16,19 +16,19 @@ Architecture:
     ┌─────────────────────────────────────────────────────────────────┐
     │                        MeshContextImpl                          │
     │                                                                 │
-    │  ┌──────────────────────────┐   ┌────────────────────────────┐ │
-    │  │   Topology Queries       │   │   Semantics Queries        │ │
-    │  │                          │   │                            │ │
-    │  │  - Who do I subscribe to?│   │  - What does PreToolUse    │ │
-    │  │  - Who subscribes to me? │   │    mean?                   │ │
-    │  │  - Blocking subscribers? │   │  - What's the payload      │ │
-    │  │                          │   │    schema?                 │ │
-    │  └──────────────────────────┘   └────────────────────────────┘ │
+    │  ┌──────────────────────────┐   ┌────────────────────────────┐  │
+    │  │   Topology Queries       │   │   Semantics Queries        │  │
+    │  │                          │   │                            │  │
+    │  │  - Who do I subscribe to?│   │  - What does PreToolUse    │  │
+    │  │  - Who subscribes to me? │   │    mean?                   │  │
+    │  │  - Blocking subscribers? │   │  - What's the payload      │  │
+    │  │                          │   │    schema?                 │  │
+    │  └──────────────────────────┘   └────────────────────────────┘  │
     │              │                              │                   │
     │              ▼                              ▼                   │
-    │  ┌──────────────────────────┐   ┌────────────────────────────┐ │
-    │  │  SubscriptionRepository  │   │   CapabilityRepository     │ │
-    │  └──────────────────────────┘   └────────────────────────────┘ │
+    │  ┌──────────────────────────┐   ┌────────────────────────────┐  │
+    │  │  SubscriptionRepository  │   │   CapabilityRepository     │  │
+    │  └──────────────────────────┘   └────────────────────────────┘  │
     └─────────────────────────────────────────────────────────────────┘
 
 Use Cases:

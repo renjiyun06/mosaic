@@ -10,7 +10,6 @@ Architecture:
 
     ┌─────────────┐                      ┌─────────────┐
     │   Sender    │                      │  Receiver   │
-    │   (Hook)    │                      │ (Auditor)   │
     └──────┬──────┘                      └──────┬──────┘
            │                                    │
            │ 1. send_blocking(event)            │
@@ -24,7 +23,7 @@ Architecture:
            │                              - Decide allow/deny
            │                              - Call reply()
            │                                    │
-           │ <─────── reply ───────────────────│
+           │ <─────── reply ────────────────────│
            │                                    │
            │ 3. Waiter receives reply           │
            │    - Resolve future                │

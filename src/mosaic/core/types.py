@@ -32,12 +32,12 @@ class NodeType(str, Enum):
     
     # Agent nodes (have Session concept)
     CLAUDE_CODE = "cc"          # Claude Code instance
-    GEMINI = "gemini"           # Google Gemini (future)
+    GEMINI = "gemini"           # Google Gemini
+    CURSOR = "cursor"           # Cursor
     
     # System nodes (no Session concept)
     SCHEDULER = "scheduler"     # Time-based event producer
     WEBHOOK = "webhook"         # HTTP-to-event bridge
-    GENERIC = "generic"         # Custom node type
 
 
 class NodeState(str, Enum):

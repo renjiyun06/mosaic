@@ -30,11 +30,6 @@ from mosaic.core.models import MeshEvent
 from mosaic.core.types import MeshId, NodeId, EventId, EventStatus
 
 
-# Re-export EventEnvelope from core for convenience
-# Transport implementations should inherit from core.interfaces.EventEnvelope
-EventEnvelopeBase = EventEnvelope
-
-
 class TransportBackend(ABC):
     """
     Abstract interface for event transport backends.
@@ -168,7 +163,7 @@ class TransportBackend(ABC):
         Args:
             event_id: The event to reject
             requeue: If True, event returns to PENDING.
-                    If False, event is marked as FAILED.
+                     If False, event is marked as FAILED.
         
         Raises:
             EventNotFoundError: If the event doesn't exist
