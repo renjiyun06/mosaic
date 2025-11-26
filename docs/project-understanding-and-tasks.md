@@ -43,7 +43,7 @@
 6. **文档产出**：
    - `docs/architecture/cc-node-event-integration.md`：更新了 Session Scope 策略、Backend Session 说明
    - `docs/architecture/crash-recovery.md`：完整的崩溃恢复设计
-   - `docs/architecture/concepts-glossary.md`：所有核心概念的术语词汇表
+   - `docs/reference/glossary.md`：所有核心概念的术语词汇表
 
 ---
 
@@ -737,7 +737,7 @@ asyncio.run(cc.run())  # ❌ 方法不存在
 9. **✅ 完整文档产出**
    - `cc-node-event-integration.md`：CC 节点与事件系统集成设计（已全面更新）
    - `crash-recovery.md`：崩溃恢复设计（新增）
-   - `concepts-glossary.md`：核心概念词汇表（新增）
+   - `docs/reference/glossary.md`：核心概念词汇表（新增）
 
 ### 3.4 待明确的设计决策（部分已解决）
 

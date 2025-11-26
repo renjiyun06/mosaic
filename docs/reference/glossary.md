@@ -29,6 +29,10 @@
 
 **别名**：无（不再使用 Claude Code Mesh / CCM）
 
+**相关文档**：
+- [核心概念指南](../user-guide/core-concepts.md)：适合初学者的快速入门指南。
+- [架构设计](../module-architecture.md)：系统的模块划分和架构设计。
+
 **层级**：最顶层
 
 ---
@@ -50,15 +54,15 @@
 - **独立目录**：`~/.mosaic/<mesh_id>/` 存放 Socket、日志等运行时数据
 
 **生命周期**：
-- 创建：`ccm init --mesh-id <mesh_id>`
-- 启动：`ccm daemon start --mesh-id <mesh_id>`
-- 停止：`ccm daemon stop --mesh-id <mesh_id>`
+- 创建：`mosaic init --mesh-id <mesh_id>`
+- 启动：`mosaic daemon start --mesh-id <mesh_id>`
+- 停止：`mosaic daemon stop --mesh-id <mesh_id>`
 
 **示例**：
 ```bash
 # 创建两个独立的 Mesh 实例
-ccm init --mesh-id dev-mesh
-ccm init --mesh-id prod-mesh
+mosaic init --mesh-id dev-mesh
+mosaic init --mesh-id prod-mesh
 
 # 目录结构
 ~/.mosaic/
@@ -87,8 +91,8 @@ ccm init --mesh-id prod-mesh
 
 **查询**：
 ```bash
-ccm topology           # 查看当前 Mesh 的拓扑
-ccm topology --graph   # 可视化拓扑图
+mosaic topology           # 查看当前 Mesh 的拓扑
+mosaic topology --graph   # 可视化拓扑图
 ```
 
 ---
@@ -177,7 +181,7 @@ ccm topology --graph   # 可视化拓扑图
 
 **启动方式**：
 ```bash
-ccm chat worker  # CLI 启动 Claude Code 进程
+mosaic chat worker  # CLI 启动 Claude Code 进程
 ```
 
 **实现**：外部 `claude` 进程 + `InteractiveAgentProxy`
@@ -579,7 +583,7 @@ class MeshContext:
 
 **启动方式**：
 ```bash
-ccm chat worker    # 创建新的用户会话
+mosaic chat worker    # 创建新的用户会话
 ```
 
 ---
@@ -595,7 +599,7 @@ ccm chat worker    # 创建新的用户会话
 
 **启动方式**：
 ```bash
-ccm program auditor
+mosaic program auditor
 ```
 
 ---
@@ -611,7 +615,7 @@ ccm program auditor
 
 **启动方式**：
 ```bash
-ccm run worker
+mosaic run worker
 ```
 
 ---
@@ -627,7 +631,7 @@ ccm run worker
 
 **启动方式**：
 - 自动启动（Interactive 节点启动时）
-- 手动启动：`ccm start logger`
+- 手动启动：`mosaic start logger`
 
 ---
 
@@ -685,7 +689,7 @@ class SessionProfile:
 
 **使用**：
 ```bash
-ccm sub auditor worker "!PreToolUse" --session-profile auditor-strict
+mosaic sub auditor worker "!PreToolUse" --session-profile auditor-strict
 ```
 
 ---
@@ -807,22 +811,22 @@ ccm sub auditor worker "!PreToolUse" --session-profile auditor-strict
 
 ```bash
 # 创建 CC 节点
-ccm create worker --path ./worker --type cc
+mosaic create worker --path ./worker --type cc
 
 # 配置重启策略
-ccm config worker set restart-policy always
-ccm config worker set max-retries 5
+mosaic config worker set restart-policy always
+mosaic config worker set max-retries 5
 ```
 
 ### 13.2 建立订阅
 
 ```bash
 # 阻塞订阅（审计）
-ccm sub auditor worker "!PreToolUse" \
+mosaic sub auditor worker "!PreToolUse" \
     --session-scope upstream-session
 
 # 非阻塞订阅（日志）
-ccm sub logger worker "*" \
+mosaic sub logger worker "*" \
     --session-scope round-robin \
     --session-filter backend-only
 ```
@@ -831,20 +835,20 @@ ccm sub logger worker "*" \
 
 ```bash
 # 启动 Daemon
-ccm daemon start
+mosaic daemon start
 
 # 交互模式（前端）
-ccm run worker
+mosaic run worker
 
 # 后台模式
-ccm start logger
+mosaic start logger
 
 # 编程模式（培训）
-ccm program auditor
+mosaic program auditor
 
 # 查看状态
-ccm ps
-ccm status worker
+mosaic ps
+mosaic status worker
 ```
 
 ---

@@ -2,7 +2,7 @@
 
 > **文档用途**: 定义节点进程崩溃后的恢复机制  
 > **创建日期**: 2025-11-24  
-> **前置文档**: `event-system-spec.md`, `concepts-glossary.md`
+> **前置文档**: `event-system-spec.md`, `reference/glossary.md`
 
 ---
 
