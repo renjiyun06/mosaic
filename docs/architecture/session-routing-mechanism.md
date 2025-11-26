@@ -23,9 +23,12 @@ $$ \text{TargetSessionID} = f(\text{Event}, \text{Strategy}) $$
 
 ```python
 class SessionTrace:
-    """上游节点的会话上下文快照"""
-    node_id: str              # 产生事件的节点 ID
+    """
+    事件中的上游上下文元数据。
+    用于下游节点计算路由目标，不决定下游的具体行为。
+    """
     upstream_session_id: str  # 产生事件时的会话 ID
+    event_seq: int            # 会话内的事件序号 (用于乱序重排与去重)
 ```
 
 ### 路由函数的签名
@@ -53,23 +56,29 @@ def route_event(event: MeshEvent, config: dict) -> str:
     # 伪代码示例
     # 默认合并：来自同一上游会话的所有事件，进入同一个下游会话
     # Topic隔离：不同 Topic 的事件，进入不同的下游会话
-    target_session_id = hash(event.source_id, event.session_trace.upstream_session_id, config.topic)
+    # 必须包含 mesh_id 以确保全局唯一性
+    target_session_id = hash(event.mesh_id, event.source_id, event.session_trace.upstream_session_id, config.topic)
     ```
 *   **典型参数**：
     *   `topic` (string, optional): 隔离命名空间。用于将同一上游的不同事件流分流到不同会话。
+    *   `buffer_size` / `buffer_timeout`: 缓冲参数（通常较少用于镜像模式，但在高频审计场景可用）。
 *   **使用示例**：
     ```bash
     # 场景：审计节点需要“跟随”Worker的每个操作，保持完整的上下文连贯性。
     mosaic sub auditor worker "!PreToolUse" --session-routing-strategy mirroring
 
-    # 场景：审计节点希望将“安全审计”和“性能日志”分流到两个独立的平行会话中处理。
-    mosaic sub auditor worker "!PreToolUse" \
+    # 场景：同一 Auditor 针对不同类型的敏感操作，建立隔离的镜像审计会话。
+    # 1. 文件操作 -> 路由到 "file_audit" 会话（从文件加载 Prompt）
+    mosaic sub auditor worker "FileWrite,FileDelete" \
         --session-routing-strategy mirroring \
-        --param topic=security
-
-    mosaic sub auditor worker "PostToolUse" \
+        --param topic=file_audit \
+        --param prompt_file="prompts/file_auditor.md"
+    
+    # 2. 网络操作 -> 路由到 "net_audit" 会话（从文件加载 Prompt）
+    mosaic sub auditor worker "Http,Curl" \
         --session-routing-strategy mirroring \
-        --param topic=performance
+        --param topic=net_audit \
+        --param prompt_file="prompts/net_auditor.md"
     ```
 
 ### 3.2 任务模式 (Tasking)
@@ -80,20 +89,25 @@ def route_event(event: MeshEvent, config: dict) -> str:
     ```python
     # 一一对应：为每个EventID生成一个唯一的TargetSessionID
     # 具体实现通常使用 UUID 或 Hash(EventID)
+    # EventID 本身是全局唯一的 UUID，因此不需要额外的 Seed
     target_session_id = generate_unique_id(seed=event.event_id)
     ```
 *   **典型参数**：
-    *   `concurrency` (int): 最大并发数。超过限制的任务将排队或拒绝。
-    *   `profile` (string): 会话启动模板（如 "strict_auditor"）。
+    *   `prompt` (string): 会话启动时的系统提示词文本。
+    *   `prompt_file` (string): 提示词文件路径。如果是相对路径，则相对于节点 workspace 查找。
+    *   `buffer_size` (int): 缓冲事件数量。凑够 N 个事件后合并为一个批次发送，节省 Token。
+    *   `buffer_timeout` (int): 缓冲最大等待时间（秒）。
 *   **使用示例**：
     ```bash
     # 场景：代码分析节点，对每次 Git 提交（事件）进行独立分析，互不干扰。
     mosaic sub analyzer git_watcher "PushEvent" --session-routing-strategy tasking
 
-    # 场景：资源受限的分析节点，最多同时运行 5 个分析任务。
-    mosaic sub analyzer git_watcher "PushEvent" \
+    # 场景：批量分析报警。从文件中加载严格的分析规则。
+    mosaic sub analyzer monitor "Alert" \
         --session-routing-strategy tasking \
-        --param concurrency=5
+        --param buffer_size=10 \
+        --param buffer_timeout=60 \
+        --param prompt_file="prompts/strict_analysis.md"
     ```
 
 ### 3.3 聚合模式 (Aggregation)
@@ -103,14 +117,21 @@ def route_event(event: MeshEvent, config: dict) -> str:
 *   **计算公式**：
     ```python
     # 如果指定了 name，则为命名会话；否则为默认全局会话
-    target_session_id = f"global:{config.name}" if config.name else "global_primary"
+    # 全局会话在 Mesh 内唯一
+    target_session_id = f"{event.mesh_id}:global:{config.name}" if config.name else f"{event.mesh_id}:global_primary"
     ```
 *   **典型参数**：
     *   `name` (string): 聚合会话的名称。
+    *   `buffer_size` (int): 凑够 N 个事件再投递给会话。
+    *   `buffer_timeout` (int): 最多等待 T 秒。
 *   **使用示例**：
     ```bash
     # 场景：中央日志节点，将所有 Worker 的日志汇总到一个主会话中进行摘要。
-    mosaic sub logger worker "*" --session-routing-strategy aggregation
+    # 关键优化：每 20 条日志打包处理一次，避免频繁 LLM 调用消耗 Token。
+    mosaic sub logger worker "*" \
+        --session-routing-strategy aggregation \
+        --param buffer_size=20 \
+        --param buffer_timeout=300
 
     # 场景：运维中心，专门用一个 "incident_room" 会话来处理所有节点的报警事件。
     mosaic sub ops_center "*" "Alert" \
