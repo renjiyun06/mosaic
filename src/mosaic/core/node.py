@@ -1,4 +1,5 @@
 import asyncio
+import signal
 from pathlib import Path
 from abc import ABC, abstractmethod
 from mosaic.core.models import MeshEvent
@@ -21,14 +22,47 @@ class BaseNode(ABC):
         self._running = False
         self._daemon_sock = Path.home() / ".mosaic" / self._mesh_id / "daemon.sock"
     
+
     @abstractmethod
     async def process_event(self, event: MeshEvent): ...
     @abstractmethod
     async def on_start(self): ...
     @abstractmethod
     async def on_shutdown(self): ...
-    async def start(self): ...
-    async def _run_forever(self): ...
+
+
+    async def start(self):
+        self._running = True
+        loop = asyncio.get_running_loop()
+        def signal_handler():
+            asyncio.create_task(self._handle_stop_signal())
+
+        loop.add_signal_handler(signal.SIGINT, signal_handler)
+        loop.add_signal_handler(signal.SIGTERM, signal_handler)
+        try:
+            await self._client.connect()
+            await self.on_start()
+            heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            await self._run_forever()
+        finally:
+            self._running = False
+            heartbeat_task.cancel()
+            await self.on_shutdown()
+            await self._client.disconnect()
+
+
+    async def _run_forever(self):
+        async for envelope in self._client.inbox:
+            if not self._running:
+                break
+                
+            try:
+                await self.process_event(envelope.event)
+                await envelope.ack()
+            except Exception as e:
+                await envelope.nack(reason=str(e))
+
+
     async def _heartbeat_loop(self):
         while self._running:
             try:
@@ -43,4 +77,7 @@ class BaseNode(ABC):
             
             await asyncio.sleep(5)
     
-    async def _handle_stop_signal(self): ...
+
+    async def _handle_stop_signal(self):
+        self._running = False
+        await self._client.inbox.interrupt()
