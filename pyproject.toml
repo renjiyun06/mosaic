@@ -19,4 +19,4 @@ build-backend = "hatchling.build"
 packages = ["src/mosaic"]
 
 [project.scripts]
-mosaic = "mosaic.cli.main:cli"
+mosaic = "mosaic.cli.main:mosaic"

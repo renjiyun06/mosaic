@@ -1,13 +1,9 @@
-from abc import ABC, abstractmethod
 from typing import AsyncIterator
 from mosaic.core.models import MeshEvent
+from mosaic.core.transport import TransportBackend
 
-class TransportBackend(ABC):
-    @abstractmethod
+class KafkaTransportBackend(TransportBackend):
     async def connect(self): ...
-    @abstractmethod
     async def disconnect(self): ...
-    @abstractmethod
-    async def send(self, event: MeshEvent): ...
-    @abstractmethod
+    async def send(self, event: MeshEvent) -> None: ...
     async def receive(self) -> AsyncIterator[MeshEvent]:...
