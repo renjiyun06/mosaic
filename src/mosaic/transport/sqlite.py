@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import AsyncIterator, List
+from typing import AsyncIterator, List, Optional
 from mosaic.core.models import MeshEvent
 from mosaic.core.transport import TransportBackend
 from mosaic.core.types import MeshID, NodeID
@@ -36,3 +36,5 @@ class SqliteTransportBackend(TransportBackend):
         await self._signal_client.notify(event.target_id)
 
     async def receive(self) -> AsyncIterator[MeshEvent]: ...
+    async def ack(self, event: MeshEvent): ...
+    async def nack(self, event: MeshEvent, reason: Optional[str] = None): ...

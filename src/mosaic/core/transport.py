@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 from mosaic.core.models import MeshEvent
 
 class TransportBackend(ABC):
@@ -11,3 +11,7 @@ class TransportBackend(ABC):
     async def send(self, event: MeshEvent): ...
     @abstractmethod
     async def receive(self) -> AsyncIterator[MeshEvent]:...
+    @abstractmethod
+    async def ack(self, event: MeshEvent): ...
+    @abstractmethod
+    async def nack(self, event: MeshEvent, reason: Optional[str] = None): ...

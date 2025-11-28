@@ -21,3 +21,8 @@ class MeshStatus(StrEnum):
 class NodeStatus(StrEnum):
     STARTED = "started"
     STOPPED = "stopped"
+
+class TransportType(StrEnum):
+    SQLITE = "sqlite"
+    KAFKA = "kafka"
+    REDIS = "redis"
