@@ -7,7 +7,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from mosaic.core.catalog import NODE_CATALOG
 from mosaic.core.models import Node
@@ -86,27 +86,6 @@ class NodeMonitor:
         if node_id in self._nodes:
             self._nodes[node_id].last_heartbeat = time.time()
             
-    def get_dead_nodes(self) -> List[NodeID]:
-        dead_nodes = []
-        now = time.time()
-        for node_id, state in self._nodes.items():
-            if state.status != NodeStatus.RUNNING:
-                dead_nodes.append(node_id)
-                continue
-                
-            if now - state.last_heartbeat > self._timeout:
-                dead_nodes.append(node_id)
-                continue
-                
-        return dead_nodes
-
-    def get_running_nodes(self) -> Dict[NodeID, NodeState]:
-        return {
-            nid: state 
-            for nid, state in self._nodes.items() 
-            if state.pid is not None
-        }
-        
     def get_node_state(self, node_id: NodeID) -> Optional[NodeState]:
         return self._nodes.get(node_id)
 
@@ -204,7 +183,23 @@ class Daemon:
             state.status = NodeStatus.STOPPED
             state.pid = None
 
-    async def _monitor_loop(self): ...
+    async def _monitor_loop(self):
+        while self._running:
+            for node_id, state in self._monitor._nodes.items():
+                
+                if state.status != NodeStatus.RUNNING:
+                    continue
+                    
+                now = time.time()
+                if now - state.last_heartbeat > self._monitor._timeout:
+                    await self._handle_crash(node_id)
+                    continue
+                    
+                if not self._process_manager.is_running(state.pid):
+                    state.status = NodeStatus.CRASHED
+                    await self._handle_crash(node_id)
+            
+            await asyncio.sleep(1.0) 
 
     async def _handle_crash(self, node_id: NodeID):
         state = self._monitor.get_node_state(node_id)
