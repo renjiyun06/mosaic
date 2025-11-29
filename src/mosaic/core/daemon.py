@@ -64,6 +64,15 @@ class ProcessManager:
         except OSError as e:
             return False
 
+    def reap_zombies(self):
+        try:
+            while True:
+                pid, _ = os.waitpid(-1, os.WNOHANG)
+                if pid <= 0:
+                    break
+        except (ChildProcessError, OSError):
+            pass
+
 class NodeMonitor:
     def __init__(self, timeout_seconds: float = 30.0):
         self._nodes: Dict[NodeID, NodeState] = {}
@@ -164,6 +173,9 @@ class DaemonControlServer:
 class Daemon:
     def __init__(self, mesh_id: MeshID):
         self._mesh_id = mesh_id
+        self._nodes: Dict[NodeID, Node] = {}
+        for node in list_nodes(mesh_id):
+            self._nodes[node.node_id] = node
         self._root_dir = Path.home() / ".mosaic" / mesh_id
         self._root_dir.mkdir(parents=True, exist_ok=True)
         
@@ -180,11 +192,9 @@ class Daemon:
         self._running = True
         
         await self._server.start()
-        
-        all_nodes = list_nodes(self._mesh_id)
-        for node in all_nodes:
+        for node_id, node in self._nodes.items():
+            self._monitor.register_node(node)
             await self.start_node(node)
-        
         logger.info(f"Starting monitor task for mesh {self._mesh_id}")
         self._monitor_task = asyncio.create_task(self._monitor_loop())
         logger.info(f"Daemon for mesh {self._mesh_id} started")
@@ -214,7 +224,6 @@ class Daemon:
 
     async def start_node(self, node: Node):
         logger.info(f"Starting node {node.node_id} for mesh {self._mesh_id}")
-        self._monitor.register_node(node)
         
         try:
             pid = self._process_manager.spawn_node(node)
@@ -236,6 +245,7 @@ class Daemon:
 
     async def _monitor_loop(self):
         while self._running:
+            self._process_manager.reap_zombies()
             logger.info(f"Monitoring nodes for mesh {self._mesh_id}")
             for node_id, state in self._monitor._nodes.items():
                 
@@ -264,7 +274,7 @@ class Daemon:
             delay = self._recovery.get_backoff_delay(state.crash_count)
             state.status = NodeStatus.BACKOFF
             await asyncio.sleep(delay)
-            await self.start_node(node_id, state.node_type, state.config)
+            await self.start_node(self._nodes[node_id])
         else:
             state.status = NodeStatus.FAILED
 
