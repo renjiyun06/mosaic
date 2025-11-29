@@ -18,10 +18,10 @@ class DummyNode(BaseNode):
         pass
 
     async def on_start(self):
-        logger.info(f"Dummy node {self._node_id} for mesh {self._mesh_id} started")
+        logger.info(f"Dummy node {self.node_id} for mesh {self.mesh_id} started")
     
     async def on_shutdown(self):
-        logger.info(f"Dummy node {self._node_id} for mesh {self._mesh_id} stopped")
+        logger.info(f"Dummy node {self.node_id} for mesh {self.mesh_id} stopped")
 
 async def main(mesh_id: MeshID, node_id: NodeID, transport: TransportType, config: Dict[str, str]):
     node = DummyNode(mesh_id, node_id, transport, config)
@@ -34,6 +34,7 @@ if __name__ == "__main__":
     parser.add_argument("--transport", type=str, default=TransportType.SQLITE)
     parser.add_argument("--config", type=str, required=False)
     args = parser.parse_args()
+    logger.info(f"Starting dummy node {args.node_id} for mesh {args.mesh_id} with transport {args.transport} and config {args.config}")
     if args.config:
         config = json.loads(args.config)
     else:

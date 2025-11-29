@@ -41,7 +41,7 @@ class ProcessManager:
             "--node-id", 
             node.node_id,
             "--config",
-            json.dumps(node.config)
+            json.dumps(node.config or {})
         ]
         
         process = subprocess.Popen(cmd, cwd=os.getcwd())
@@ -61,7 +61,7 @@ class ProcessManager:
         try:
             os.kill(pid, SIGNULL)
             return True
-        except OSError:
+        except OSError as e:
             return False
 
 class NodeMonitor:
@@ -219,7 +219,9 @@ class Daemon:
         try:
             pid = self._process_manager.spawn_node(node)
             self._monitor.update_pid(node.node_id, pid)
-        except Exception as _:
+            logger.info(f"Node {node.node_id} for mesh {self._mesh_id} started with PID {pid}")
+        except Exception as e:
+            logger.error(f"Failed to start node {node.node_id} for mesh {self._mesh_id}: {e}")
             state = self._monitor.get_node_state(node.node_id)
             if state:
                 state.status = NodeStatus.FAILED
@@ -239,16 +241,16 @@ class Daemon:
                 
                 if state.status != NodeStatus.RUNNING:
                     continue
+
+                if not self._process_manager.is_running(state.pid):
+                    logger.info(f"Node {node_id} for mesh {self._mesh_id} crashed")
+                    state.status = NodeStatus.CRASHED
+                    await self._handle_crash(node_id)
                     
                 now = time.time()
                 if now - state.last_heartbeat > self._monitor._timeout:
                     await self._handle_crash(node_id)
                     continue
-                    
-                if not self._process_manager.is_running(state.pid):
-                    logger.info(f"Node {node_id} for mesh {self._mesh_id} crashed")
-                    state.status = NodeStatus.CRASHED
-                    await self._handle_crash(node_id)
             
             await asyncio.sleep(1.0) 
 
