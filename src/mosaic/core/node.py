@@ -1,5 +1,6 @@
 import asyncio
 import signal
+import json
 from pathlib import Path
 from abc import ABC, abstractmethod
 from mosaic.core.models import MeshEvent
@@ -67,9 +68,19 @@ class BaseNode(ABC):
         while self._running:
             try:
                 if self._daemon_sock.exists():
-                    _, writer = await asyncio.open_unix_connection(str(self._daemon_sock))
-                    writer.write(f"{self._node_id}\n".encode())
+                    reader, writer = await asyncio.open_unix_connection(str(self._daemon_sock))
+                    
+                    request = {
+                        "type": "heartbeat",
+                        "node_id": self._node_id
+                    }
+                    
+                    writer.write(json.dumps(request).encode() + b'\n')
                     await writer.drain()
+                    
+                    # Wait for response (optional but good practice)
+                    await reader.readline()
+                    
                     writer.close()
                     await writer.wait_closed()
             except Exception:

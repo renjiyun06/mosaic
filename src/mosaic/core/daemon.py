@@ -96,7 +96,7 @@ class RecoveryManager:
     def get_backoff_delay(self, crash_count: int) -> float:
         return min(30, 2 ** crash_count)
 
-class HeartbeatServer:
+class DaemonControlServer:
     def __init__(self, daemon: 'Daemon', socket_path: Path):
         self._daemon = daemon
         self._socket_path = socket_path
@@ -121,17 +121,38 @@ class HeartbeatServer:
     async def handle_client(self, reader, writer):
         try:
             data = await reader.readline()
-            message = data.decode().strip()
+            if not data:
+                return
+                
+            try:
+                request = json.loads(data.decode().strip())
+                response = await self._dispatch_command(request)
+            except json.JSONDecodeError:
+                response = {"status": "error", "error": "Invalid JSON"}
+            except Exception as e:
+                response = {"status": "error", "error": str(e)}
             
-            node_id = message
-            if node_id:
-                self._daemon._monitor.record_heartbeat(node_id)
-            
+            writer.write(json.dumps(response).encode() + b'\n')
             await writer.drain()
-        except Exception as e:
+        except Exception:
             pass
         finally:
             writer.close()
+
+    async def _dispatch_command(self, request: Dict[str, str]) -> Dict[str, str]:
+        cmd_type = request.get("type")
+        
+        if cmd_type == "heartbeat":
+            node_id = request.get("node_id")
+            if node_id:
+                self._daemon._monitor.record_heartbeat(node_id)
+            return {"status": "ok"}
+            
+        elif cmd_type == "stop":
+            asyncio.create_task(self._daemon.stop())
+            return {"status": "ok"}
+            
+        return {"status": "error", "error": f"Unknown command: {cmd_type}"}
 
 class Daemon:
     def __init__(self, mesh_id: MeshID):
@@ -142,7 +163,7 @@ class Daemon:
         self._process_manager = ProcessManager()
         self._monitor = NodeMonitor()
         self._recovery = RecoveryManager()
-        self._server = HeartbeatServer(self, self._root_dir / "daemon.sock")
+        self._server = DaemonControlServer(self, self._root_dir / "daemon.sock")
         self._running = False
 
     async def start(self):
@@ -214,3 +235,16 @@ class Daemon:
             await self.start_node(node_id, state.node_type, state.config)
         else:
             state.status = NodeStatus.FAILED
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mesh-id", required=True)
+    args = parser.parse_args()
+    
+    daemon = Daemon(args.mesh_id)
+    try:
+        asyncio.run(daemon.start())
+    except KeyboardInterrupt:
+        asyncio.run(daemon.stop())

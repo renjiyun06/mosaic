@@ -35,7 +35,7 @@ class Subscription(BaseModel): ...
 class EventDefinition(BaseModel):
     name: str   # domain.entity.action, e.g., "cc.tool.pre_tool_use
     description: str    # llm friendly    
-    schema_json: Dict[str, Any]
+    payload_schema: Dict[str, Any]
 
 class NodeCapability(BaseModel):
     type: NodeType
