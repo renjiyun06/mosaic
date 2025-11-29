@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from contextlib import contextmanager
 from typing import Iterator, List, Optional
-from mosaic.core.types import MeshID, MeshStatus, NodeID, NodeType, NodeStatus
+from mosaic.core.types import MeshID, MeshStatus, NodeID, NodeType
 from mosaic.core.models import Mesh, Node, Subscription
 
 _DB_PATH = Path.home() / ".mosaic" / "mosaic.db"
@@ -11,7 +11,6 @@ _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meshes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     mesh_id TEXT NOT NULL UNIQUE,
-    status TEXT NOT NULL DEFAULT 'stopped',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -22,7 +21,6 @@ CREATE TABLE IF NOT EXISTS nodes (
     mesh_id TEXT NOT NULL,
     type TEXT NOT NULL,
     config TEXT,
-    status TEXT NOT NULL DEFAULT 'stopped',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -61,7 +59,7 @@ def get_mesh(mesh_id: MeshID) -> Optional[Mesh]:
     with _get_conn() as conn:
         row = conn.execute("SELECT * FROM meshes WHERE mesh_id = ?", (mesh_id,)).fetchone()
         if row:
-            return Mesh(mesh_id=row["mesh_id"], status=MeshStatus(row["status"]))
+            return Mesh(mesh_id=row["mesh_id"])
 
 def list_meshes() -> List[Mesh]:
     with _get_conn() as conn:
@@ -86,7 +84,6 @@ def get_node(mesh_id: MeshID, node_id: NodeID) -> Optional[Node]:
                 mesh_id=row["mesh_id"], 
                 type=NodeType(row["type"]), 
                 config=json.loads(row["config"]), 
-                status=NodeStatus(row["status"])
             )
         return None
 
@@ -99,7 +96,6 @@ def list_nodes(mesh_id: MeshID) -> List[Node]:
                 mesh_id=row["mesh_id"], 
                 type=NodeType(row["type"]), 
                 config=json.loads(row["config"]), 
-                status=NodeStatus(row["status"])
             ) for row in rows
         ]
 

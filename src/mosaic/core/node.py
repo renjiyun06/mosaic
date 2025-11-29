@@ -68,7 +68,7 @@ class BaseNode(ABC):
             try:
                 if self._daemon_sock.exists():
                     _, writer = await asyncio.open_unix_connection(str(self._daemon_sock))
-                    writer.write(b"PING\n")
+                    writer.write(f"{self._node_id}\n".encode())
                     await writer.drain()
                     writer.close()
                     await writer.wait_closed()

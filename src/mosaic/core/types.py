@@ -16,12 +16,15 @@ class NodeType(StrEnum):
     DUMMY = "dummy"
 
 class MeshStatus(StrEnum):
-    STARTED = "started"
+    RUNNING = "running"
     STOPPED = "stopped"
 
 class NodeStatus(StrEnum):
-    STARTED = "started"
+    RUNNING = "running"
     STOPPED = "stopped"
+    FAILED = "failed"
+    CRASHED = "crashed"
+    BACKOFF = "backoff"
 
 class TransportType(StrEnum):
     SQLITE = "sqlite"
