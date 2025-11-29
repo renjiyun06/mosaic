@@ -2,10 +2,11 @@ import click
 from click import argument, option
 from typing import Dict
 from rich.console import Console
+
+import mosaic.core.meta as meta
 from mosaic.cli.base import CustomGroup, CustomCommand, parse_config
 from mosaic.core.models import Node
 from mosaic.core.types import NodeType
-import mosaic.core.meta as meta
 
 console = Console()
 

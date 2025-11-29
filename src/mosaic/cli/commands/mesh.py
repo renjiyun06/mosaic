@@ -6,8 +6,9 @@ import click
 from click import argument
 from pathlib import Path
 from rich.console import Console
-from mosaic.cli.base import CustomGroup, CustomCommand
+
 import mosaic.core.meta as meta
+from mosaic.cli.base import CustomGroup, CustomCommand
 from mosaic.core.models import Mesh
 
 console = Console()

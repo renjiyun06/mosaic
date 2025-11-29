@@ -1,10 +1,10 @@
 import click
 from rich.console import Console
 
+import mosaic.core.meta as meta
 from mosaic.cli.base import CustomGroup, CustomCommand
 from mosaic.cli.commands.mesh import mesh
 from mosaic.cli.commands.node import node
-import mosaic.core.meta as meta
 
 console = Console()
 

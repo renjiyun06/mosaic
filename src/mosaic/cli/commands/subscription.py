@@ -1,4 +1,5 @@
 import click
+
 from mosaic.cli.base import CustomGroup
 
 @click.group(name="subscription", cls=CustomGroup)
