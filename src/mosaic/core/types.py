@@ -13,6 +13,7 @@ class NodeType(StrEnum):
     OPENHANDS = "openhands"
     SCHEDULER = "scheduler"
     WEBHOOK = "webhook"
+    DUMMY = "dummy"
 
 class MeshStatus(StrEnum):
     STARTED = "started"

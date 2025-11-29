@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 from pydantic import BaseModel
 from mosaic.core.types import MeshID, NodeID, NodeType, EventID
@@ -13,7 +13,7 @@ class MeshEvent(BaseModel):
     mesh_id: MeshID
     source_id: NodeID
     target_id: NodeID
-    type: str
+    type: str   # EventDefinition.name
     payload: Dict[str, Any]
     session_trace: Optional[SessionTrace]
     reply_to: Optional[EventID]
@@ -31,5 +31,14 @@ class Node(BaseModel):
     status: NodeStatus = NodeStatus.STOPPED
 
 class Subscription(BaseModel): ...
-class EventDefinition(BaseModel): ...
-class NodeCapability(BaseModel): ...
+
+class EventDefinition(BaseModel):
+    name: str   # domain.entity.action, e.g., "cc.tool.pre_tool_use
+    description: str    # llm friendly    
+    schema_json: Dict[str, Any]
+
+class NodeCapability(BaseModel):
+    type: NodeType
+    produced_events: List[str]
+    consumed_events: List[str]
+    description: str
