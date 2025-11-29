@@ -13,6 +13,9 @@ from mosaic.core.catalog import NODE_CATALOG
 from mosaic.core.models import Node
 from mosaic.core.types import NodeType, NodeStatus, MeshID, NodeID
 from mosaic.core.meta import list_nodes
+from mosaic.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 SIGNULL = 0
 
@@ -103,6 +106,7 @@ class DaemonControlServer:
         self._server = None
 
     async def start(self):
+        logger.info(f"Starting daemon control server at {self._socket_path}")
         if self._socket_path.exists():
             self._socket_path.unlink()
             
@@ -167,17 +171,21 @@ class Daemon:
         self._running = False
 
     async def start(self):
+        logger.info(f"Starting daemon for mesh {self._mesh_id}")
         self._running = True
         
         await self._server.start()
         
         all_nodes = list_nodes(self._mesh_id)
         for node in all_nodes:
+            logger.info(f"Starting node {node.node_id} for mesh {self._mesh_id}")
             await self.start_node(node)
             
         asyncio.create_task(self._monitor_loop())
+        logger.info(f"Daemon for mesh {self._mesh_id} started")
 
     async def stop(self):
+        logger.info(f"Stopping daemon for mesh {self._mesh_id}")
         self._running = False
         await self._server.stop()
         
@@ -206,6 +214,7 @@ class Daemon:
 
     async def _monitor_loop(self):
         while self._running:
+            logger.info(f"Monitoring nodes for mesh {self._mesh_id}")
             for node_id, state in self._monitor._nodes.items():
                 
                 if state.status != NodeStatus.RUNNING:
