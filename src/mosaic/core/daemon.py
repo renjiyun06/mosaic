@@ -217,8 +217,7 @@ class Daemon:
         await self._server.stop()
         
         all_nodes = list_nodes(self._mesh_id)
-        for node in all_nodes:
-            self.stop_node(node.node_id)
+        await asyncio.gather(*(self.stop_node(node.node_id) for node in all_nodes))
         
         self._stop_event.set()
 
@@ -235,13 +234,32 @@ class Daemon:
             if state:
                 state.status = NodeStatus.FAILED
 
-    def stop_node(self, node_id: NodeID):
+    async def stop_node(self, node_id: NodeID):
         logger.info(f"Stopping node {node_id} for mesh {self._mesh_id}")
         state = self._monitor.get_node_state(node_id)
         if state and state.pid:
             self._process_manager.kill_node(state.pid)
+            if not await self._wait_for_pid_exit(state.pid):
+                self._process_manager.kill_node(state.pid, force=True)
+            
             state.status = NodeStatus.STOPPED
             state.pid = None
+
+    async def _wait_for_pid_exit(self, pid: int, timeout: float = 5.0) -> bool:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                wpid, _ = os.waitpid(pid, os.WNOHANG)
+                if wpid == pid:
+                    return True
+            except ChildProcessError:
+                if not self._process_manager.is_running(pid):
+                    return True
+            except OSError:
+                pass
+                
+            await asyncio.sleep(0.1)
+        return False
 
     async def _monitor_loop(self):
         while self._running:
