@@ -75,7 +75,7 @@ def stop(mesh_id: str):
     socket_path = Path.home() / ".mosaic" / mesh_id / "daemon.sock"
     
     if not socket_path.exists():
-        console.print("Daemon is not running", style="yellow")
+        console.print(f"Daemon for mesh {mesh_id} is not running", style="yellow")
         return
 
     async def send_stop():

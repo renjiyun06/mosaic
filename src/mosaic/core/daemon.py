@@ -100,7 +100,8 @@ class RecoveryManager:
         return min(30, 2 ** crash_count)
 
 class DaemonControlServer:
-    def __init__(self, daemon: 'Daemon', socket_path: Path):
+    def __init__(self, mesh_id: MeshID, daemon: 'Daemon', socket_path: Path):
+        self._mesh_id = mesh_id
         self._daemon = daemon
         self._socket_path = socket_path
         self._server = None
@@ -147,12 +148,14 @@ class DaemonControlServer:
         cmd_type = request.get("type")
         
         if cmd_type == "heartbeat":
+            logger.info(f"Received heartbeat command for node {request.get('node_id')} in mesh {self._mesh_id}")
             node_id = request.get("node_id")
             if node_id:
                 self._daemon._monitor.record_heartbeat(node_id)
             return {"status": "ok"}
             
         elif cmd_type == "stop":
+            logger.info(f"Received stop command for mesh {self._mesh_id}")
             asyncio.create_task(self._daemon.stop())
             return {"status": "ok"}
             
@@ -167,8 +170,10 @@ class Daemon:
         self._process_manager = ProcessManager()
         self._monitor = NodeMonitor()
         self._recovery = RecoveryManager()
-        self._server = DaemonControlServer(self, self._root_dir / "daemon.sock")
+        self._server = DaemonControlServer(self._mesh_id, self, self._root_dir / "daemon.sock")
         self._running = False
+        self._stop_event = asyncio.Event()
+        self._monitor_task = None
 
     async def start(self):
         logger.info(f"Starting daemon for mesh {self._mesh_id}")
@@ -178,23 +183,37 @@ class Daemon:
         
         all_nodes = list_nodes(self._mesh_id)
         for node in all_nodes:
-            logger.info(f"Starting node {node.node_id} for mesh {self._mesh_id}")
             await self.start_node(node)
-            
-        asyncio.create_task(self._monitor_loop())
+        
+        logger.info(f"Starting monitor task for mesh {self._mesh_id}")
+        self._monitor_task = asyncio.create_task(self._monitor_loop())
         logger.info(f"Daemon for mesh {self._mesh_id} started")
+        await self._stop_event.wait()
+        logger.info(f"Daemon for mesh {self._mesh_id} stopped")
 
     async def stop(self):
         logger.info(f"Stopping daemon for mesh {self._mesh_id}")
         self._running = False
+        
+        if self._monitor_task:
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+            self._monitor_task = None
+            logger.info(f"Monitor task cancelled for mesh {self._mesh_id}")
+        
         await self._server.stop()
         
         all_nodes = list_nodes(self._mesh_id)
         for node in all_nodes:
-            await self.stop_node(node.node_id)
+            self.stop_node(node.node_id)
         
+        self._stop_event.set()
 
     async def start_node(self, node: Node):
+        logger.info(f"Starting node {node.node_id} for mesh {self._mesh_id}")
         self._monitor.register_node(node)
         
         try:
@@ -205,7 +224,8 @@ class Daemon:
             if state:
                 state.status = NodeStatus.FAILED
 
-    async def stop_node(self, node_id: NodeID):
+    def stop_node(self, node_id: NodeID):
+        logger.info(f"Stopping node {node_id} for mesh {self._mesh_id}")
         state = self._monitor.get_node_state(node_id)
         if state and state.pid:
             self._process_manager.kill_node(state.pid)
@@ -226,6 +246,7 @@ class Daemon:
                     continue
                     
                 if not self._process_manager.is_running(state.pid):
+                    logger.info(f"Node {node_id} for mesh {self._mesh_id} crashed")
                     state.status = NodeStatus.CRASHED
                     await self._handle_crash(node_id)
             
