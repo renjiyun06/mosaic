@@ -111,14 +111,39 @@ def status(mesh_id: str):
     if not mesh:
         console.print(f"Mesh {mesh_id} not found", style="red")
         return
-    console.print(f"{mesh.mesh_id} - {mesh.status}")
+    
+    socket_path = Path.home() / ".mosaic" / mesh_id / "daemon.sock"
+    if not socket_path.exists():
+        console.print(f"Daemon for mesh {mesh_id} is not running", style="yellow")
+        return
+    
+    # Send status request to the daemon
+    async def send_status():
+        try:
+            reader, writer = await asyncio.open_unix_connection(str(socket_path))
+            request = {"type": "status"}
+            writer.write(json.dumps(request).encode() + b'\n')
+            await writer.drain()
+            response = await reader.readline()
+            data = json.loads(response.decode())
+            if data.get("status") == "ok":
+                status = json.loads(data.get('data'))
+                console.print(f"Mesh {mesh_id} status: {status.get(mesh_id)}", style="green")
+                for node_id, node_status in status.get('nodes', {}).items():
+                    console.print(f"Node {node_id} status: {node_status}", style="green")
+            else:
+                console.print(f"Failed to get mesh status: {data.get('error')}", style="red")
+        except Exception as e:
+            console.print(f"Error communicating with daemon: {e}", style="red")
+    
+    asyncio.run(send_status())
 
 
 @mesh.command(cls=CustomCommand, name="list")
 def list_mesh():
     """List all Mosaic Meshes"""
     for mesh in meta.list_meshes():
-        console.print(f"{mesh.mesh_id} - {mesh.status}")
+        console.print(f"{mesh.mesh_id}")
 
 
 @mesh.command(cls=CustomCommand, name="list-nodes")
@@ -126,4 +151,4 @@ def list_mesh():
 def list_nodes(mesh_id: str):
     """List all nodes in a Mosaic Mesh"""
     for node in meta.list_nodes(mesh_id):
-        console.print(f"{node.node_id} - {node.type} - {node.status}")
+        console.print(f"{node.node_id} - {node.type}")

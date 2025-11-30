@@ -1,10 +1,15 @@
+import subprocess
+import os
 from typing import Dict
+from rich.console import Console
 
 from mosaic.nodes.agent.base import AgentNode
 from mosaic.core.types import MeshID, NodeID, TransportType
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+console = Console()
 
 class ClaudeCodeNode(AgentNode):
     def __init__(self, mesh_id: MeshID, node_id: NodeID, transport: TransportType, config: Dict[str, str]):
@@ -15,3 +20,14 @@ class ClaudeCodeNode(AgentNode):
 
     async def on_shutdown(self):
         logger.info(f"ClaudeCodeNode {self.node_id} for mesh {self.mesh_id} stopped")
+
+    async def chat(self):
+        workspace = self.config.get("workspace", None)
+        if not workspace:
+            console.print(f"cc node {self.node_id} for mesh {self.mesh_id} has no workspace", style="red")
+            return
+
+        os.chdir(workspace)
+        subprocess.run([
+            "claude"
+        ])

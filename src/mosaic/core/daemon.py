@@ -11,7 +11,7 @@ from typing import Dict, Optional
 
 from mosaic.core.catalog import NODE_CATALOG
 from mosaic.core.models import Node
-from mosaic.core.types import NodeType, NodeStatus, MeshID, NodeID
+from mosaic.core.types import NodeType, NodeStatus, MeshID, NodeID, MeshStatus
 from mosaic.core.meta import list_nodes
 from mosaic.utils.logger import get_logger
 
@@ -167,6 +167,15 @@ class DaemonControlServer:
             logger.info(f"Received stop command for mesh {self._mesh_id}")
             asyncio.create_task(self._daemon.stop())
             return {"status": "ok"}
+
+        elif cmd_type == "status":
+            # Get the mesh and nodes status
+            logger.info(f"Received status command for mesh {self._mesh_id}")
+            status = {
+                self._mesh_id: self._daemon.get_mesh_status(),
+                "nodes": self._daemon.get_all_node_statuses()
+            }
+            return {"status": "ok", "data": json.dumps(status)}
             
         return {"status": "error", "error": f"Unknown command: {cmd_type}"}
 
@@ -295,6 +304,19 @@ class Daemon:
             await self.start_node(self._nodes[node_id])
         else:
             state.status = NodeStatus.FAILED
+
+    def get_mesh_status(self) -> MeshStatus:
+        if self._running:
+            return MeshStatus.RUNNING
+        else:
+            return MeshStatus.STOPPED
+
+    def get_all_node_statuses(self) -> Dict[NodeID, NodeStatus]:
+        statuses = {}
+        for node_id, state in self._monitor._nodes.items():
+            statuses[node_id] = state.status
+        return statuses
+
 
 if __name__ == "__main__":
     import argparse

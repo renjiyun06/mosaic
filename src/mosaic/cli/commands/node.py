@@ -1,3 +1,5 @@
+import asyncio
+from pathlib import Path
 import click
 from click import argument, option
 from typing import Dict
@@ -6,7 +8,9 @@ from rich.console import Console
 import mosaic.core.meta as meta
 from mosaic.cli.base import CustomGroup, CustomCommand, parse_config
 from mosaic.core.models import Node
-from mosaic.core.types import NodeType
+from mosaic.core.types import NodeType, TransportType
+from mosaic.core.catalog import NODE_CATALOG
+from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
 
 console = Console()
 
@@ -35,6 +39,7 @@ def create(node_id: str, mesh_id: str, type: str, config: Dict[str, str]):
     
     meta.create_node(Node(node_id=node_id, mesh_id=mesh_id, type=type, config=config))
     console.print(f"Node {node_id} created", style="green")
+
 
 @node.command(cls=CustomCommand)
 @argument("node_id", type=str, required=True)
@@ -77,14 +82,22 @@ def chat(node_id: str, mesh_id: str):
         console.print(f"Node {node_id} not found", style="red")
         return
 
-    if node.type not in [
-        NodeType.CLAUDE_CODE, 
-        NodeType.CODEX, 
-        NodeType.GEMINI, 
-        NodeType.CURSOR, 
-        NodeType.OPENHANDS
-    ]:
+    socket_path = Path.home() / ".mosaic" / mesh_id / "daemon.sock"
+    if not socket_path.exists():
+        console.print(f"Daemon for mesh {mesh_id} is not running", style="yellow")
+        return
+
+    if node.type == NodeType.CLAUDE_CODE:
+        cc = ClaudeCodeNode(node.mesh_id, node.node_id, TransportType.SQLITE, node.config)
+        asyncio.run(cc.chat())
+    elif node.type == NodeType.CODEX:
+        pass
+    elif node.type == NodeType.GEMINI:
+        pass
+    elif node.type == NodeType.CURSOR:
+        pass
+    elif node.type == NodeType.OPENHANDS:
+        pass
+    else:
         console.print(f"Node {node_id} is not an agent node", style="red")
         return
-    
-    
