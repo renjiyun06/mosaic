@@ -35,3 +35,56 @@ def create(node_id: str, mesh_id: str, type: str, config: Dict[str, str]):
     
     meta.create_node(Node(node_id=node_id, mesh_id=mesh_id, type=type, config=config))
     console.print(f"Node {node_id} created", style="green")
+
+@node.command(cls=CustomCommand)
+@argument("node_id", type=str, required=True)
+@option("--mesh-id", type=str, required=True)
+def program(node_id: str, mesh_id: str):
+    """Program a Mosaic Mesh Agent Node"""
+    if not meta.get_mesh(mesh_id):
+        console.print(f"Mesh {mesh_id} not found", style="red")
+        return
+    
+    node = meta.get_node(mesh_id, node_id)
+    if not node:
+        console.print(f"Node {node_id} not found", style="red")
+        return
+    
+    if node.type not in [
+        NodeType.CLAUDE_CODE, 
+        NodeType.CODEX, 
+        NodeType.GEMINI, 
+        NodeType.CURSOR, 
+        NodeType.OPENHANDS
+    ]:
+        console.print(f"Node {node_id} is not an agent node", style="red")
+        return
+    
+    # TODO
+
+
+@node.command(cls=CustomCommand)
+@argument("node_id", type=str, required=True)
+@option("--mesh-id", type=str, required=True)
+def chat(node_id: str, mesh_id: str):
+    """Chat with a Mosaic Mesh Agent Node"""
+    if not meta.get_mesh(mesh_id):
+        console.print(f"Mesh {mesh_id} not found", style="red")
+        return
+    
+    node = meta.get_node(mesh_id, node_id)
+    if not node:
+        console.print(f"Node {node_id} not found", style="red")
+        return
+
+    if node.type not in [
+        NodeType.CLAUDE_CODE, 
+        NodeType.CODEX, 
+        NodeType.GEMINI, 
+        NodeType.CURSOR, 
+        NodeType.OPENHANDS
+    ]:
+        console.print(f"Node {node_id} is not an agent node", style="red")
+        return
+    
+    

@@ -9,3 +9,9 @@ logger = get_logger(__name__)
 class ClaudeCodeNode(AgentNode):
     def __init__(self, mesh_id: MeshID, node_id: NodeID, transport: TransportType, config: Dict[str, str]):
         super().__init__(mesh_id, node_id, transport, config)
+
+    async def on_start(self):
+        logger.info(f"ClaudeCodeNode {self.node_id} for mesh {self.mesh_id} started")
+
+    async def on_shutdown(self):
+        logger.info(f"ClaudeCodeNode {self.node_id} for mesh {self.mesh_id} stopped")
