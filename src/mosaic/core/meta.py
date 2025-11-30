@@ -4,7 +4,7 @@ from pathlib import Path
 from contextlib import contextmanager
 from typing import Iterator, List, Optional
 
-from mosaic.core.types import MeshID, MeshStatus, NodeID, NodeType
+from mosaic.core.types import MeshID, MeshStatus, NodeID, NodeType, SessionRoutingStrategy
 from mosaic.core.models import Mesh, Node, Subscription
 
 _DB_PATH = Path.home() / ".mosaic" / "mosaic.db"
@@ -23,9 +23,23 @@ CREATE TABLE IF NOT EXISTS nodes (
     type TEXT NOT NULL,
     config TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(mesh_id, node_id)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_mesh_node_unique ON nodes (mesh_id, node_id);
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mesh_id TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    event_pattern TEXT NOT NULL,
+    is_blocking BOOLEAN NOT NULL,
+    session_routing_strategy TEXT NOT NULL,
+    session_routing_strategy_config TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(mesh_id, source_id, target_id, event_pattern)
+);
 """
 
 def _ensure_initialized():
@@ -100,5 +114,18 @@ def list_nodes(mesh_id: MeshID) -> List[Node]:
             ) for row in rows
         ]
 
-def delete_node(mesh_id: MeshID, node_id: NodeID): ...
-def add_subscription(sub: Subscription): ...
+def add_subscription(sub: Subscription):
+    with _get_conn() as conn:
+        conn.execute(
+            "INSERT INTO subscriptions (mesh_id, source_id, target_id, event_pattern, is_blocking, session_routing_strategy, session_routing_strategy_config) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (sub.mesh_id, sub.source_id, sub.target_id, sub.event_pattern, sub.is_blocking, sub.session_routing_strategy, json.dumps(sub.session_routing_strategy_config))
+        )
+        conn.commit()
+
+def get_subscriptions_by_source(mesh_id: MeshID, source_id: NodeID) -> List[Subscription]:
+    with _get_conn() as conn:
+        rows = conn.execute("SELECT * FROM subscriptions WHERE mesh_id = ? AND source_id = ?", (mesh_id, source_id)).fetchall()
+        return [
+            Subscription(mesh_id=row["mesh_id"], source_id=row["source_id"], target_id=row["target_id"], event_pattern=row["event_pattern"], is_blocking=row["is_blocking"], session_routing_strategy=SessionRoutingStrategy(row["session_routing_strategy"]), session_routing_strategy_config=json.loads(row["session_routing_strategy_config"]))
+            for row in rows
+        ]

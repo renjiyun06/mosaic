@@ -30,3 +30,8 @@ class TransportType(StrEnum):
     SQLITE = "sqlite"
     KAFKA = "kafka"
     REDIS = "redis"
+
+class SessionRoutingStrategy(StrEnum):
+    MIRRORING = "mirroring"
+    TASKING = "tasking"
+    STATEFUL = "stateful"

@@ -1,13 +1,17 @@
-from abc import ABC
-from typing import Dict
+from abc import ABC, abstractmethod
+from typing import Dict, Any
 
 from mosaic.core.node import BaseNode
 from mosaic.core.types import MeshID, NodeID, TransportType
 from mosaic.core.models import MeshEvent
 
-class SessionRoutingStrategy(ABC): ...
+class SessionRoutingStrategy(ABC):
+    @abstractmethod
+    def route(self, event: MeshEvent, config: Dict[str, Any]) -> str: ...
+
 class MirroringStrategy(SessionRoutingStrategy): ...
 class TaskingStrategy(SessionRoutingStrategy): ...
+class StatefulStrategy(SessionRoutingStrategy): ...
 
 
 class AgentNode(BaseNode):

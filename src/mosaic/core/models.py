@@ -1,8 +1,16 @@
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from pydantic import BaseModel
-from mosaic.core.types import MeshID, NodeID, NodeType, EventID
-from mosaic.core.types import MeshStatus, NodeStatus
+
+from mosaic.core.types import (
+    MeshID, 
+    NodeID, 
+    NodeType, 
+    EventID, 
+    MeshStatus, 
+    NodeStatus, 
+    SessionRoutingStrategy,
+)
 
 class SessionTrace(BaseModel):
     upstream_session_id: str
@@ -30,7 +38,14 @@ class Node(BaseModel):
     config: Dict[str, str]
     status: NodeStatus = NodeStatus.STOPPED
 
-class Subscription(BaseModel): ...
+class Subscription(BaseModel):
+    mesh_id: MeshID
+    source_id: NodeID
+    target_id: NodeID
+    event_pattern: str
+    is_blocking: bool
+    session_routing_strategy: SessionRoutingStrategy
+    session_routing_strategy_config: Dict[str, Any]
 
 class EventDefinition(BaseModel):
     name: str   # domain.entity.action, e.g., "cc.tool.pre_tool_use

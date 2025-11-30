@@ -22,7 +22,7 @@ class BaseNode(ABC):
         else:
             raise ValueError(f"Unsupported transport: {transport}")
         
-        self.client = MeshClient(transport_backend)
+        self._client = MeshClient(transport_backend)
         self._running = False
         self._daemon_sock = Path.home() / ".mosaic" / self.mesh_id / "daemon.sock"
     
@@ -44,7 +44,7 @@ class BaseNode(ABC):
         loop.add_signal_handler(signal.SIGINT, signal_handler)
         loop.add_signal_handler(signal.SIGTERM, signal_handler)
         try:
-            await self.client.connect()
+            await self._client.connect()
             await self.on_start()
             heartbeat_task = asyncio.create_task(self._heartbeat_loop())
             await self._run_forever()
@@ -54,11 +54,11 @@ class BaseNode(ABC):
             self._running = False
             heartbeat_task.cancel()
             await self.on_shutdown()
-            await self.client.disconnect()
+            await self._client.disconnect()
 
 
     async def _run_forever(self):
-        async for envelope in self.client.inbox:
+        async for envelope in self._client.inbox:
             if not self._running:
                 break
                 
@@ -96,4 +96,10 @@ class BaseNode(ABC):
 
     async def _handle_stop_signal(self):
         self._running = False
-        await self.client.inbox.interrupt()
+        await self._client.inbox.interrupt()
+
+    async def send(self, event: MeshEvent):
+        await self._client.outbox.send(event)
+
+    async def send_blocking(self, event: MeshEvent, timeout: float):
+        await self._client.outbox.send_blocking(event, timeout)

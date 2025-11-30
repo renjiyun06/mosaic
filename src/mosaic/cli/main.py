@@ -5,6 +5,7 @@ import mosaic.core.meta as meta
 from mosaic.cli.base import CustomGroup, CustomCommand
 from mosaic.cli.commands.mesh import mesh
 from mosaic.cli.commands.node import node
+from mosaic.cli.commands.subscription import subscription
 
 console = Console()
 
@@ -25,3 +26,4 @@ def reset():
 
 mosaic.add_command(mesh)
 mosaic.add_command(node)
+mosaic.add_command(subscription)
