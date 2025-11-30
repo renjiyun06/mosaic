@@ -129,3 +129,8 @@ def get_subscriptions_by_source(mesh_id: MeshID, source_id: NodeID) -> List[Subs
             Subscription(mesh_id=row["mesh_id"], source_id=row["source_id"], target_id=row["target_id"], event_pattern=row["event_pattern"], is_blocking=row["is_blocking"], session_routing_strategy=SessionRoutingStrategy(row["session_routing_strategy"]), session_routing_strategy_config=json.loads(row["session_routing_strategy_config"]))
             for row in rows
         ]
+
+def delete_subscription(mesh_id: MeshID, source_id: NodeID, target_id: NodeID):
+    with _get_conn() as conn:
+        conn.execute("DELETE FROM subscriptions WHERE mesh_id = ? AND source_id = ? AND target_id = ?", (mesh_id, source_id, target_id))
+        conn.commit()
