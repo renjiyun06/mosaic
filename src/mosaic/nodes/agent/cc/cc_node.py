@@ -1,4 +1,3 @@
-import subprocess
 import os
 from typing import Dict
 from rich.console import Console
@@ -28,6 +27,4 @@ class ClaudeCodeNode(AgentNode):
             return
 
         os.chdir(workspace)
-        subprocess.run([
-            "claude"
-        ])
+        
