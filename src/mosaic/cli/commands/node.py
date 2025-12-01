@@ -55,17 +55,20 @@ def program(node_id: str, mesh_id: str):
         console.print(f"Node {node_id} not found", style="red")
         return
     
-    if node.type not in [
-        NodeType.CLAUDE_CODE, 
-        NodeType.CODEX, 
-        NodeType.GEMINI, 
-        NodeType.CURSOR, 
-        NodeType.OPENHANDS
-    ]:
+    if node.type == NodeType.CLAUDE_CODE:
+        cc = ClaudeCodeNode(node.mesh_id, node.node_id, TransportType.SQLITE, node.config)
+        asyncio.run(cc.program())
+    elif node.type == NodeType.CODEX:
+        pass
+    elif node.type == NodeType.GEMINI:
+        pass
+    elif node.type == NodeType.CURSOR:
+        pass
+    elif node.type == NodeType.OPENHANDS:
+        pass
+    else:
         console.print(f"Node {node_id} is not an agent node", style="red")
         return
-    
-    # TODO
 
 
 @node.command(cls=CustomCommand)

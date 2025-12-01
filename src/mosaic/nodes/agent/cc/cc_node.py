@@ -15,10 +15,12 @@ class ClaudeCodeNode(AgentNode):
         super().__init__(mesh_id, node_id, transport, config)
 
     async def on_start(self):
-        logger.info(f"ClaudeCodeNode {self.node_id} for mesh {self.mesh_id} started")
+        logger.info(f"cc node {self.node_id} for mesh {self.mesh_id} started")
 
     async def on_shutdown(self):
-        logger.info(f"ClaudeCodeNode {self.node_id} for mesh {self.mesh_id} stopped")
+        logger.info(f"cc node {self.node_id} for mesh {self.mesh_id} stopped")
+
+    async def program(self): ...
 
     async def chat(self):
         workspace = self.config.get("workspace", None)
