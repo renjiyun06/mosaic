@@ -80,8 +80,13 @@ class ClaudeCodeSession(Session):
     
 
     async def process_event(self, event: MeshEvent) -> bool: ...
-    async def process_hook_event(self, event: Dict[str, Any]) -> Dict[str, Any]: ...
-
+    async def process_hook_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        # 1. Transform event to MeshEvent
+        # 2. Check if the event is blocking based on the subscription
+        # 3. If not blocking, just send the event and return a trivial response
+        # 4. If blocking, use send_blocking to wait for the response which is also a MeshEvent.
+        #    Then transform the MeshEvent to the specific hook output format and return it
+        pass
 
     async def chat(self):
         async def receive_cc_response(): ...
