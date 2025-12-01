@@ -14,7 +14,7 @@ def mosaic():
     """Mosaic CLI"""
     pass
 
-@mosaic.command(cls=CustomCommand)
+@mosaic.command(cls=CustomCommand, hidden=True)
 def reset():
     """Reset the Mosaic"""
     confirmed = click.confirm("Are you sure you want to reset the Mosaic?", default=False)

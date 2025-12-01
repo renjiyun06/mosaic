@@ -35,3 +35,8 @@ class SessionRoutingStrategy(StrEnum):
     MIRRORING = "mirroring"
     TASKING = "tasking"
     STATEFUL = "stateful"
+
+class AgentRunningMode(StrEnum):
+    CHAT = "chat"
+    PROGRAM = "program"
+    BACKGROUND = "background"

@@ -151,4 +151,4 @@ def list_mesh():
 def list_nodes(mesh_id: str):
     """List all nodes in a Mosaic Mesh"""
     for node in meta.list_nodes(mesh_id):
-        console.print(f"{node.node_id} - {node.type}")
+        console.print(f"{node.node_id} - {node.type} - {node.config}")

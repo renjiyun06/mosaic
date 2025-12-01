@@ -37,6 +37,13 @@ def create(node_id: str, mesh_id: str, type: str, config: Dict[str, str]):
         console.print(f"Node {node_id} already exists", style="red")
         return
     
+    try:
+        if type == NodeType.CLAUDE_CODE:
+            ClaudeCodeNode.check_config(node_id, mesh_id, config)
+    except ValueError as e:
+        console.print(e, style="red")
+        return
+    
     meta.create_node(Node(node_id=node_id, mesh_id=mesh_id, type=type, config=config))
     console.print(f"Node {node_id} created", style="green")
 
