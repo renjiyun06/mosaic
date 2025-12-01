@@ -39,7 +39,7 @@ class MeshOutbox:
     async def send(self, event: MeshEvent):
         await self._transport.send(event)
 
-    async def send_blocking(self, event: MeshEvent, timeout: float): ...
+    async def send_blocking(self, event: MeshEvent, timeout: float) -> MeshEvent: ...
 
 class MeshClient:
     def __init__(self, transport: TransportBackend):

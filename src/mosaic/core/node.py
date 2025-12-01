@@ -101,5 +101,5 @@ class BaseNode(ABC):
     async def send(self, event: MeshEvent):
         await self._client.outbox.send(event)
 
-    async def send_blocking(self, event: MeshEvent, timeout: float):
-        await self._client.outbox.send_blocking(event, timeout)
+    async def send_blocking(self, event: MeshEvent, timeout: float) -> MeshEvent:
+        return await self._client.outbox.send_blocking(event, timeout)

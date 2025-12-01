@@ -78,19 +78,20 @@ class ClaudeCodeSession(Session):
         self._uninstall_settings_json()
         await self._hook_server.stop()
     
-    
+
     async def process_event(self, event: MeshEvent) -> bool: ...
     async def process_hook_event(self, event: Dict[str, Any]) -> Dict[str, Any]: ...
+
 
     async def chat(self):
         async def receive_cc_response(): ...
         prompt_session = PromptSession()
         while True:
-            user_input = prompt_session.prompt("> ")
+            user_input = await prompt_session.prompt_async("> ")
             if user_input.lower() in ["exit", "quit"]:
                 break
-            await self._cc_client.query(user_input)
-            await receive_cc_response()
+            response = await self._cc_client.query(user_input)
+            print(response)
 
 
     async def program(self):
