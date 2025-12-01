@@ -40,3 +40,11 @@ class AgentRunningMode(StrEnum):
     CHAT = "chat"
     PROGRAM = "program"
     BACKGROUND = "background"
+
+class ClaudeCodeHook(StrEnum):
+    PRE_TOOL_USE = "pre_tool_use"
+    POST_TOOL_USE = "post_tool_use"
+    USER_PROMPT_SUBMIT = "user_prompt_submit"
+    SESSION_START = "session_start"
+    SESSION_END = "session_end"
+    STOP = "stop"

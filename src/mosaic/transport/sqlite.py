@@ -68,7 +68,7 @@ class SqliteTransportBackend(TransportBackend):
         self._mesh_id = mesh_id
         self._node_id = node_id
         self._db_path = Path.home() / ".mosaic" / mesh_id / "events.db"
-        self._socket_dir = Path.home() / ".mosaic" / mesh_id / "sockets"
+        self._socket_dir = Path.home() / ".mosaic" / mesh_id / "sockets" / "sqlite_transport"
         self._socket_path = self._socket_dir / f"{node_id}.sock"
         self._repo = EventRepository(self._db_path)
         self._signal_client = SignalClient(self._socket_dir)
