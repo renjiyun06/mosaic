@@ -1,6 +1,8 @@
+import json
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from pydantic import BaseModel
+from jsonschema import validate
 
 from mosaic.core.types import (
     MeshID, 
@@ -14,7 +16,6 @@ from mosaic.core.types import (
 
 class SessionTrace(BaseModel):
     upstream_session_id: str
-    event_seq: int
 
 class MeshEvent(BaseModel):
     event_id: EventID
@@ -26,6 +27,13 @@ class MeshEvent(BaseModel):
     session_trace: Optional[SessionTrace]
     reply_to: Optional[EventID]
     created_at: datetime
+
+    def to_xml(self) -> str:
+        return f"""
+<event id="{self.event_id}" type="{self.type}" from="{self.source_id}">
+    <payload>{json.dumps(self.payload)}</payload>
+</event>
+""".strip()
 
 class Mesh(BaseModel):
     mesh_id: MeshID
@@ -51,6 +59,30 @@ class EventDefinition(BaseModel):
     name: str   # domain.entity.action, e.g., "cc.tool.pre_tool_use
     description: str    # llm friendly    
     payload_schema: Dict[str, Any]
+
+    def to_mesh_event(
+        self, 
+        event_id: EventID,
+        mesh_id: MeshID,
+        source_id: NodeID,
+        target_id: NodeID,
+        payload: Dict[str, Any],
+        session_trace: Optional[SessionTrace],
+        reply_to: Optional[EventID],
+        created_at: datetime
+    ) -> MeshEvent:
+        validate(payload, self.payload_schema)
+        return MeshEvent(
+            event_id=event_id,
+            mesh_id=mesh_id,
+            source_id=source_id,
+            target_id=target_id,
+            type=self.name,
+            payload=payload,
+            session_trace=session_trace,
+            reply_to=reply_to,
+            created_at=created_at,
+        )
 
 class NodeCapability(BaseModel):
     type: NodeType

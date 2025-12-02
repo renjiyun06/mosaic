@@ -12,10 +12,13 @@ from claude_agent_sdk import (
     ResultMessage
 )
 from prompt_toolkit.shortcuts import PromptSession
+from datetime import datetime
 
+import mosaic.core.meta as meta
 from mosaic.nodes.agent.base import AgentNode, Session
 from mosaic.core.types import AgentRunningMode, MeshID, NodeID, TransportType
-from mosaic.core.models import MeshEvent
+from mosaic.core.models import MeshEvent, SessionTrace
+from mosaic.nodes.agent.cc.hook_events import get_hook_event_type
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -79,14 +82,42 @@ class ClaudeCodeSession(Session):
         await self._hook_server.stop()
     
 
-    async def process_event(self, event: MeshEvent) -> bool: ...
+    async def process_event(self, event: MeshEvent):
+        async def receive_cc_response(): ...
+        await self._cc_client.query(event.to_xml())
+        await receive_cc_response()
+
+
     async def process_hook_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        # 1. Transform event to MeshEvent
-        # 2. Check if the event is blocking based on the subscription
-        # 3. If not blocking, just send the event and return a trivial response
-        # 4. If blocking, use send_blocking to wait for the response which is also a MeshEvent.
-        #    Then transform the MeshEvent to the specific hook output format and return it
-        pass
+        name = event["name"]
+        input = event["input"]
+        hook_event_type = get_hook_event_type(name)
+        mesh_event_type = hook_event_type.mesh_event_type()
+
+        blocking_mesh_events = []
+        subscriptions = meta.get_subscriptions_by_source_and_event_pattern(self.node.mesh_id, self.node.node_id, mesh_event_type)
+        for sub in subscriptions:
+            mesh_event = hook_event_type.from_hook_input(input).to_mesh_event(
+                event_id=str(uuid.uuid4()),
+                mesh_id=self.node.mesh_id,
+                source_id=self.node.node_id,
+                target_id=sub.target_id,
+                session_trace=SessionTrace(
+                    upstream_session_id=self.session_id
+                ),
+                reply_to=None,
+                created_at=datetime.now(),
+            )
+            if sub.is_blocking:
+                blocking_mesh_events.append(mesh_event)
+            else:
+                await self.node.send(mesh_event)
+        
+        if not blocking_mesh_events:
+            return hook_event_type.default_hook_output()
+
+        # TODO handle blocking events
+
 
     async def chat(self):
         async def receive_cc_response(): ...

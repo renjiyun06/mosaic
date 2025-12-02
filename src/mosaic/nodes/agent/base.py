@@ -86,6 +86,8 @@ class SessionManager:
 class SessionRoutingStrategy(ABC):
     @abstractmethod
     async def route(self, event: MeshEvent, subscription: Subscription) -> Session: ...
+    @abstractmethod
+    def session_retained(self, event: MeshEvent, subscription: Subscription) -> bool: ...
 
 class MirroringStrategy(SessionRoutingStrategy):
     def __init__(self, session_manager: 'SessionManager'):
@@ -167,10 +169,10 @@ class AgentNode(BaseNode):
                 logger.warning(f"Unknown session routing strategy: {strategy}")
                 return
             
-        session = await session_routing_strategy.route(event, subscription)
-        session_retained = await session.process_event(event)
-        if not session_retained:
-            await self._session_manager.close_session(session)
+            session = await session_routing_strategy.route(event, subscription)
+            await session.process_event(event)
+            if not session_routing_strategy.session_retained(event, subscription):
+                await self._session_manager.close_session(session)
     
 
     @abstractmethod
