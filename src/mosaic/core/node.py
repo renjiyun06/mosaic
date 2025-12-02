@@ -3,6 +3,7 @@ import signal
 import json
 from pathlib import Path
 from abc import ABC, abstractmethod
+
 from mosaic.core.models import MeshEvent
 from mosaic.core.client import MeshClient
 from mosaic.core.types import MeshID, NodeID, TransportType
