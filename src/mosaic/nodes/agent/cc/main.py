@@ -3,22 +3,38 @@ import json
 import argparse
 from typing import Dict
 
+from mosaic.core.types import TransportType
+from mosaic.core.client import MeshClient
 from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
-from mosaic.core.types import TransportType, MeshID, NodeID
+from mosaic.nodes.agent.types import AgentNodeRunningMode
 
-async def main(mesh_id: MeshID, node_id: NodeID, transport: TransportType, config: Dict[str, str]):
-    node = ClaudeCodeNode(mesh_id, node_id, transport, config)
-    await node.start()
+async def main(
+    mesh_id: str, 
+    node_id: str, 
+    transport: TransportType, 
+    config: Dict[str, str]
+):
+    cc_node = ClaudeCodeNode(
+        mesh_id, 
+        node_id, 
+        config, 
+        MeshClient(transport),
+        AgentNodeRunningMode.BACKGROUND
+    )
+    await cc_node.start()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--mesh-id", type=str, required=True)
     parser.add_argument("--node-id", type=str, required=True)
-    parser.add_argument("--transport", type=str, default=TransportType.SQLITE)
-    parser.add_argument("--config", type=str, required=False)
+    parser.add_argument("--transport", type=str, required=True)
+    parser.add_argument("--config", type=str, required=True)
     args = parser.parse_args()
-    if args.config:
-        config = json.loads(args.config)
-    else:
-        config = {}
-    asyncio.run(main(args.mesh_id, args.node_id, args.transport, config))
+    asyncio.run(
+        main(
+            args.mesh_id, 
+            args.node_id, 
+            args.transport, 
+            json.loads(args.config)
+        )
+    )

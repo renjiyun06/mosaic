@@ -1,31 +1,30 @@
 import json
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from pydantic import BaseModel
 from jsonschema import validate
 
 from mosaic.core.types import (
-    MeshID, 
-    NodeID, 
     NodeType, 
-    EventID, 
     MeshStatus, 
     NodeStatus, 
-    SessionRoutingStrategy,
 )
+from mosaic.nodes.agent.types import SessionRoutingStrategy
 
 class SessionTrace(BaseModel):
     upstream_session_id: str
+    downstream_session_id: Optional[str] = None
 
 class MeshEvent(BaseModel):
-    event_id: EventID
-    mesh_id: MeshID
-    source_id: NodeID
-    target_id: NodeID
+    event_id: str
+    mesh_id: str
+    source_id: str
+    target_id: str
     type: str   # EventDefinition.name
     payload: Dict[str, Any]
     session_trace: Optional[SessionTrace]
-    reply_to: Optional[EventID]
+    reply_to: Optional[str]
     created_at: datetime
 
     def to_xml(self) -> str:
@@ -36,24 +35,24 @@ class MeshEvent(BaseModel):
 """.strip()
 
 class Mesh(BaseModel):
-    mesh_id: MeshID
-    status: MeshStatus = MeshStatus.STOPPED
+    mesh_id: str
+
 
 class Node(BaseModel):
-    node_id: NodeID
-    mesh_id: MeshID
+    node_id: str
+    mesh_id: str
     type: NodeType
     config: Dict[str, str]
-    status: NodeStatus = NodeStatus.STOPPED
+
 
 class Subscription(BaseModel):
-    mesh_id: MeshID
-    source_id: NodeID
-    target_id: NodeID
+    mesh_id: str
+    source_id: str
+    target_id: str
     event_pattern: str
     is_blocking: bool
     session_routing_strategy: SessionRoutingStrategy
-    session_routing_strategy_config: Dict[str, Any]
+    session_routing_strategy_config: Dict[str, str]
 
 class EventDefinition(BaseModel):
     name: str   # domain.entity.action, e.g., "cc.tool.pre_tool_use
@@ -62,13 +61,13 @@ class EventDefinition(BaseModel):
 
     def to_mesh_event(
         self, 
-        event_id: EventID,
-        mesh_id: MeshID,
-        source_id: NodeID,
-        target_id: NodeID,
+        event_id: str,
+        mesh_id: str,
+        source_id: str,
+        target_id: str,
         payload: Dict[str, Any],
         session_trace: Optional[SessionTrace],
-        reply_to: Optional[EventID],
+        reply_to: Optional[str],
         created_at: datetime
     ) -> MeshEvent:
         validate(payload, self.payload_schema)

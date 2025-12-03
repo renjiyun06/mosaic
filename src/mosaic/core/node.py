@@ -1,35 +1,37 @@
 import asyncio
-import signal
+import os
 import json
-from pathlib import Path
+from typing import Dict
 from abc import ABC, abstractmethod
 
-from mosaic.core.models import MeshEvent
+import mosaic.core.util as core_util
 from mosaic.core.client import MeshClient
-from mosaic.core.types import MeshID, NodeID, TransportType
-from mosaic.transport.sqlite import SqliteTransportBackend
+from mosaic.core.models import MeshEvent
+from mosaic.core.types import NodeStatus
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 class BaseNode(ABC):
-    def __init__(self, mesh_id: MeshID, node_id: NodeID, transport: TransportType):
-        self.node_id = node_id
+    def __init__(
+        self, 
+        mesh_id: str, 
+        node_id: str, 
+        config: Dict[str, str], 
+        client: MeshClient
+    ):
         self.mesh_id = mesh_id
-
-        transport_backend = None
-        if transport == TransportType.SQLITE:
-            transport_backend = SqliteTransportBackend(mesh_id=mesh_id, node_id=node_id)
-        else:
-            raise ValueError(f"Unsupported transport: {transport}")
-        
-        self._client = MeshClient(transport_backend)
-        self._running = False
-        self._daemon_sock = Path.home() / ".mosaic" / self.mesh_id / "daemon.sock"
+        self.node_id = node_id
+        self.config = config
+        self.client = client
+        self._sock_server = None
+        self._event_processing_task = None
+        self._status = NodeStatus.STOPPED
+        self._pid_path = core_util.node_pid_path(mesh_id, node_id)
+        self._sock_path = core_util.node_sock_path(mesh_id, node_id)
     
-
     @abstractmethod
-    async def process_event(self, event: MeshEvent): ...
+    async def on_event(self, event: MeshEvent): ...
     @abstractmethod
     async def on_start(self): ...
     @abstractmethod
@@ -37,70 +39,150 @@ class BaseNode(ABC):
 
 
     async def start(self):
-        self._running = True
-        loop = asyncio.get_running_loop()
-        def signal_handler():
-            asyncio.create_task(self._handle_stop_signal())
+        logger.info(f"Starting node {self.node_id} in mesh {self.mesh_id}")
+        if self._status != NodeStatus.STOPPED:
+            raise RuntimeError(
+                f"Node {self.node_id} is already running in mesh {self.mesh_id}"
+            )
+        await self.client.connect()
+        await self._start_sock_server()
+        await self._start_event_processing_task()
+        await self.on_start()
+        self._pid_path.parent.mkdir(parents=True, exist_ok=True)
+        self._pid_path.write_text(str(os.getpid()))
+        self._status = NodeStatus.RUNNING
 
-        loop.add_signal_handler(signal.SIGINT, signal_handler)
-        loop.add_signal_handler(signal.SIGTERM, signal_handler)
-        try:
-            await self._client.connect()
-            await self.on_start()
-            heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-            await self._run_forever()
-        except Exception as e:
-            logger.error(f"Error starting node {self.node_id} for mesh {self.mesh_id}: {e}")
-        finally:
-            self._running = False
-            heartbeat_task.cancel()
-            await self.on_shutdown()
-            await self._client.disconnect()
+        logger.info(f"Node {self.node_id} in mesh {self.mesh_id} started")
 
-
-    async def _run_forever(self):
-        async for envelope in self._client.inbox:
-            if not self._running:
-                break
-                
-            try:
-                await self.process_event(envelope.event)
-                await envelope.ack()
-            except Exception as e:
-                await envelope.nack(reason=str(e))
-
-
-    async def _heartbeat_loop(self):
-        while self._running:
-            try:
-                if self._daemon_sock.exists():
-                    reader, writer = await asyncio.open_unix_connection(str(self._daemon_sock))
-                    
-                    request = {
-                        "type": "heartbeat",
-                        "node_id": self.node_id
-                    }
-                    
-                    writer.write(json.dumps(request).encode() + b'\n')
-                    await writer.drain()
-                    
-                    # Wait for response (optional but good practice)
-                    await reader.readline()
-                    
-                    writer.close()
-                    await writer.wait_closed()
-            except Exception:
-                pass
-            
-            await asyncio.sleep(5)
     
+    async def stop(self):
+        logger.info(f"Stopping node {self.node_id} in mesh {self.mesh_id}")
+        if self._status != NodeStatus.RUNNING:
+            raise ValueError(
+                f"Node {self.node_id} is not running in mesh {self.mesh_id}"
+            )
+        self._status = NodeStatus.STOPPING
+        await self.on_shutdown()
+        await self._stop_event_processing_task()
+        await self._stop_sock_server()
+        await self.client.disconnect()
+        
+        self._pid_path.unlink(missing_ok=True)
+        self._status = NodeStatus.STOPPED
 
-    async def _handle_stop_signal(self):
-        self._running = False
-        await self._client.inbox.interrupt()
+        logger.info(f"Node {self.node_id} in mesh {self.mesh_id} stopped")
 
-    async def send(self, event: MeshEvent):
-        await self._client.outbox.send(event)
 
-    async def send_blocking(self, event: MeshEvent, timeout: float) -> MeshEvent:
-        return await self._client.outbox.send_blocking(event, timeout)
+    async def _start_sock_server(self):
+        logger.info(
+            f"Starting Unix socket server for "
+            f"node {self.node_id} in mesh {self.mesh_id}"
+        )
+        if self._sock_path.exists():
+            logger.error(
+                f"Unix socket path {self._sock_path} already exists for "
+                f"node {self.node_id} in mesh {self.mesh_id}"
+            )
+            raise ValueError(
+                f"Unix socket path {self._sock_path} already exists for "
+                f"node {self.node_id} in mesh {self.mesh_id}"
+            )
+        self._sock_path.parent.mkdir(parents=True, exist_ok=True)
+        self._sock_server = await asyncio.start_unix_server(
+            self._handle_command,
+            path=str(self._sock_path)
+        )
+        logger.info(
+            f"Unix socket server for "
+            f"node {self.node_id} in mesh {self.mesh_id} started"
+        )
+
+    async def _stop_sock_server(self):
+        self._sock_path.unlink(missing_ok=True)
+        if self._sock_server:
+            self._sock_server.close()
+            await self._sock_server.wait_closed()
+        self._sock_server = None
+
+
+    async def _handle_command(self, reader, writer):
+        try:
+            length = int.from_bytes(await reader.read(4), "big")
+            request_content = await reader.read(length)
+            request = json.loads(request_content.decode("utf-8"))
+            command = request["command"]
+            response = None
+            if command == "stop":
+                await self.stop()
+                response = {
+                    "is_error": False
+                }
+            elif command == "status":
+                response = {
+                    "is_error": False,
+                    "status": self._status
+                }
+            elif command == "register_chat_session":
+                await self.register_chat_session(request["session_id"])
+                response = {
+                    "is_error": False
+                }
+            elif command == "unregister_chat_session":
+                await self.unregister_chat_session(request["session_id"])
+                response = {
+                    "is_error": False
+                }
+            elif command == "list_chat_sessions":
+                sessions = await self.list_chat_sessions()
+                response = {
+                    "is_error": False,
+                    "sessions": sessions
+                }
+            else:
+                response = {
+                    "is_error": True,
+                    "message": f"Invalid command: {command}"
+                }
+            
+            response_content = json.dumps(response).encode()
+            writer.write(len(response_content).to_bytes(4, "big"))
+            writer.write(response_content)
+            await writer.drain()
+        except Exception as e:
+            response = {
+                "is_error": True,
+                "message": str(e)
+            }
+            response_content = json.dumps(response).encode()
+            writer.write(len(response_content).to_bytes(4, "big"))
+            writer.write(response_content)
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+
+    async def _start_event_processing_task(self):
+        logger.info(
+            f"Starting event processing task for "
+            f"node {self.node_id} in mesh {self.mesh_id}"
+        )
+        self._event_processing_task = asyncio.create_task(
+            self._event_processing_loop()
+        )
+        logger.info(
+            f"Event processing task for "
+            f"node {self.node_id} in mesh {self.mesh_id} started"
+        )
+
+    
+    async def _stop_event_processing_task(self):
+        if self._event_processing_task:
+            self._event_processing_task.cancel()
+            self._event_processing_task = None
+
+
+    async def _event_processing_loop(self):
+        while self._status == NodeStatus.RUNNING:
+            event = await self.client.receive()
+            await self.on_event(event)

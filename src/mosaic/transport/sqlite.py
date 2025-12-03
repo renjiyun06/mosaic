@@ -64,7 +64,7 @@ class SignalListener:
 
 
 class SqliteTransportBackend(TransportBackend):
-    def __init__(self, mesh_id: MeshID, node_id: NodeID):
+    def __init__(self, mesh_id: str, node_id: str):
         self._mesh_id = mesh_id
         self._node_id = node_id
         self._db_path = Path.home() / ".mosaic" / mesh_id / "events.db"
