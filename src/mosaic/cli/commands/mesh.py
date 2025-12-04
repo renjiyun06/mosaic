@@ -12,13 +12,13 @@ admin_client = AdminClient()
 
 @click.group(name="mesh", cls=CustomGroup)
 def mesh():
-    """Manage the Mosaic Meshes"""
+    """manage the mosaic meshes"""
 
 
 @mesh.command(cls=CustomCommand)
 @option("--mesh-id", type=str, required=True)
 def create(mesh_id: str):
-    """Create a new Mosaic Mesh"""
+    """create a new mosaic mesh"""
     try:
         asyncio.run(admin_client.create_mesh(mesh_id))
         console.print(f"Mesh created", style="green")
@@ -29,7 +29,7 @@ def create(mesh_id: str):
 @mesh.command(cls=CustomCommand)
 @option("--mesh-id", type=str, required=True)
 def start(mesh_id: str):
-    """Start the Mosaic Daemon"""
+    """start the mosaic daemon"""
     try:
         asyncio.run(admin_client.start_mesh(mesh_id))
         console.print(f"Mesh {mesh_id} started", style="green")
@@ -40,7 +40,7 @@ def start(mesh_id: str):
 @mesh.command(cls=CustomCommand)
 @option("--mesh-id", type=str, required=True)
 def stop(mesh_id: str):
-    """Stop the Mosaic Daemon"""
+    """stop the mosaic daemon"""
     try:
         asyncio.run(admin_client.stop_mesh(mesh_id))
         console.print(f"Mesh {mesh_id} stopped", style="green")
@@ -51,7 +51,7 @@ def stop(mesh_id: str):
 @mesh.command(cls=CustomCommand)
 @option("--mesh-id", type=str, required=True)
 def status(mesh_id: str):
-    """Get the status of a Mosaic Mesh"""
+    """get the status of a mosaic mesh"""
     try:
         status = asyncio.run(admin_client.get_mesh_status(mesh_id))
         console.print(f"Mesh {mesh_id} status: {status}", style="green")
@@ -61,7 +61,7 @@ def status(mesh_id: str):
 
 @mesh.command(cls=CustomCommand, name="list")
 def list_mesh():
-    """List all Mosaic Meshes"""
+    """list all mosaic meshes"""
     try:
         meshes = asyncio.run(admin_client.list_meshes())
         for mesh in meshes:
@@ -73,7 +73,7 @@ def list_mesh():
 @mesh.command(cls=CustomCommand, name="list-nodes")
 @option("--mesh-id", type=str, required=True)
 def list_nodes(mesh_id: str):
-    """List all nodes in a Mosaic Mesh"""
+    """list all nodes in a mosaic mesh"""
     try:
         nodes = asyncio.run(admin_client.list_nodes(mesh_id))
         for node in nodes:

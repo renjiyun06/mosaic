@@ -48,7 +48,7 @@ def setup_logging() -> None:
     root_logger.addHandler(error_handler)
 
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(logging.WARNING)
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
 

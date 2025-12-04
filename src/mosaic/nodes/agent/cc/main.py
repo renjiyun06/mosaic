@@ -7,6 +7,7 @@ from mosaic.core.types import TransportType
 from mosaic.core.client import MeshClient
 from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
 from mosaic.nodes.agent.types import AgentNodeRunningMode
+from mosaic.transport.sqlite import SqliteTransportBackend
 
 async def main(
     mesh_id: str, 
@@ -14,11 +15,17 @@ async def main(
     transport: TransportType, 
     config: Dict[str, str]
 ):
+    transport_backend = None
+    if transport == TransportType.SQLITE:
+        transport_backend = SqliteTransportBackend()
+    else:
+        raise RuntimeError(f"Unsupported transport type: {transport}")
+    
     cc_node = ClaudeCodeNode(
         mesh_id, 
         node_id, 
         config, 
-        MeshClient(transport),
+        MeshClient(mesh_id, node_id,transport_backend),
         AgentNodeRunningMode.BACKGROUND
     )
     await cc_node.start()

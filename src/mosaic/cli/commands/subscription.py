@@ -14,7 +14,7 @@ admin_client = AdminClient()
 
 @click.group(name="sub", cls=CustomGroup)
 def subscription():
-    """Manage the Mosaic Mesh Subscriptions"""
+    """manage the mosaic mesh subscriptions"""
 
 
 @subscription.command(cls=CustomCommand, name="create")
@@ -37,7 +37,7 @@ def create(
     session_routing_strategy: str,
     session_routing_strategy_config: Dict[str, str],
 ):
-    """Create a new subscription in the mesh"""
+    """create a new subscription"""
     try:
         asyncio.run(
             admin_client.create_subscription(
@@ -55,7 +55,7 @@ def create(
 @option("--target-id", type=str, required=False)
 @option("--mesh-id", type=str, required=True)
 def list(source_id: str, target_id: Optional[str], mesh_id: str):
-    """List the subscriptions"""
+    """list subscriptions"""
     try:
         subscriptions = asyncio.run(
             admin_client.list_subscriptions(mesh_id, source_id, target_id)
@@ -86,10 +86,10 @@ def list(source_id: str, target_id: Optional[str], mesh_id: str):
 @option("--target-id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)
 def delete(source_id: str, target_id: str, mesh_id: str):
-    """Delete a subscription"""
+    """Delete subscription(s)"""
     try:
         asyncio.run(
-            admin_client.delete_subscription(mesh_id, source_id, target_id)
+            admin_client.delete_subscriptions(mesh_id, source_id, target_id)
         )
         console.print(f"Subscription deleted", style="green")
     except Exception as e:

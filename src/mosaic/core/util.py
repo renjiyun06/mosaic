@@ -1,5 +1,8 @@
 from pathlib import Path
 
+def mosaic_db_path() -> Path:
+    return Path.home() / ".mosaic" / "mosaic.db"
+
 def mesh_path(mesh_id: str) -> Path:
     return Path.home() / ".mosaic" / mesh_id
 

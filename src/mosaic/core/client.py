@@ -2,6 +2,8 @@ import subprocess
 import asyncio
 import sys
 import json
+import os
+import signal
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -15,7 +17,6 @@ from mosaic.nodes.agent.types import (
     SessionRoutingStrategy,
     AgentNodeRunningMode,
 )
-from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -32,12 +33,26 @@ class EventEnvelope:
         await self._transport.nack(self.event, reason)
 
 class MeshClient:
-    def __init__(self, transport: TransportBackend):
+    def __init__(
+        self, 
+        mesh_id: str,
+        node_id: str,
+        transport: TransportBackend):
+        self._mesh_id = mesh_id
+        self._node_id = node_id
         self._transport = transport
         self._connected = False
     
     async def connect(self):
+        logger.info(
+            f"Connecting to transport {self._transport.__class__.__name__} "
+            f"for node {self._node_id} in mesh {self._mesh_id}"
+        )
         await self._transport.connect()
+        logger.info(
+            f"Connected to transport {self._transport.__class__.__name__} "
+            f"for node {self._node_id} in mesh {self._mesh_id}"
+        )
         self._connected = True
     
     async def disconnect(self):
@@ -57,7 +72,8 @@ class MeshClient:
         event: MeshEvent, 
         timeout: float
     ) -> MeshEvent: ...
-    async def receive(self) -> MeshEvent: ...
+    async def receive(self) -> MeshEvent:
+        await asyncio.sleep(100000000000)
 
     async def get_subscription(
         self,
@@ -87,32 +103,35 @@ class AdminClient:
             raise RuntimeError(
                 f"Node {node_id} is not running in mesh {mesh_id}"
             )
-        async with asyncio.open_unix_connection(
-            str(sock_path)
-        ) as (reader, writer):
-            try:
-                request_content = json.dumps(req).encode()
-                writer.write(len(request_content).to_bytes(4, "big"))
-                writer.write(request_content)
-                await writer.drain()
-                length = int.from_bytes(await reader.read(4), "big")
-                response_content = await reader.read(length)
-                response = json.loads(response_content.decode("utf-8"))
-                if response.get("is_error"):
-                    raise RuntimeError(response.get("message"))
-                return response
-            finally:
-                writer.close()
-                await writer.wait_closed()
+
+        reader, writer = await asyncio.open_unix_connection(str(sock_path))
+        try:
+            request_content = json.dumps(req)
+            logger.info(
+                f"Sending request to node {node_id} in mesh {mesh_id}: "
+                f"{request_content}"
+            )
+            request_content_bytes = request_content.encode()
+            writer.write(len(request_content_bytes).to_bytes(4, "big"))
+            writer.write(request_content_bytes)
+            await writer.drain()
+            length = int.from_bytes(await reader.readexactly(4), "big")
+            response_content = (await reader.readexactly(length)).decode("utf-8")
+            response = json.loads(response_content)
+            if response.get("is_error"):
+                raise RuntimeError(response.get("message"))
+            return response
+        finally:
+            writer.close()
+            await writer.wait_closed()
 
 
     async def create_mesh(self, mesh_id: str):
-        mesh: Mesh = await core_repo.get_mesh(mesh_id)
+        mesh = await core_repo.get_mesh(mesh_id)
         if mesh:
             raise RuntimeError(f"Mesh {mesh_id} already exists")
-        mesh = Mesh(mesh_id)
+        mesh = Mesh(mesh_id=mesh_id)
         await core_repo.create_mesh(mesh)
-
 
     async def delete_mesh(self, mesh_id: str):
         raise RuntimeError("Deleting a mesh is not supported yet")
@@ -137,17 +156,22 @@ class AdminClient:
         node_type: NodeType, 
         config: Dict[str, str]
     ) -> Node:
-        mesh: Mesh = await core_repo.get_mesh(mesh_id)
+        mesh = await core_repo.get_mesh(mesh_id)
         if not mesh:
             raise RuntimeError(f"Mesh {mesh_id} not found")
 
-        node: Node = await core_repo.get_node(mesh_id, node_id)
+        node = await core_repo.get_node(mesh_id, node_id)
         if node:
             raise RuntimeError(
                 f"Node {node_id} already exists in mesh {mesh_id}"
             )
 
-        node = Node(node_id, mesh_id, node_type, config)
+        node = Node(
+            node_id=node_id, 
+            mesh_id=mesh_id, 
+            type=node_type, 
+            config=config
+        )
         await core_repo.create_node(node)
         return node
     
@@ -156,7 +180,7 @@ class AdminClient:
         raise RuntimeError("Deleting a node is not supported yet")
 
     async def list_nodes(self, mesh_id: str) -> List[Node]:
-        mesh: Mesh = await core_repo.get_mesh(mesh_id)
+        mesh = await core_repo.get_mesh(mesh_id)
         if not mesh:
             raise RuntimeError(f"Mesh {mesh_id} not found")
         return await core_repo.list_nodes(mesh_id)
@@ -165,9 +189,9 @@ class AdminClient:
         self, 
         mesh_id: str, 
         node_id: str,
-        transport: TransportType=TransportType.SQLITE
+        transport: TransportType
     ):
-        node: Node = await core_repo.get_node(mesh_id, node_id)
+        node = await core_repo.get_node(mesh_id, node_id)
         if not node:
             raise ValueError(f"Node {node_id} not found in mesh {mesh_id}")
 
@@ -200,7 +224,7 @@ class AdminClient:
     
 
     async def stop_node(self, mesh_id: str, node_id: str):
-        node: Node = await core_repo.get_node(mesh_id, node_id)
+        node = await core_repo.get_node(mesh_id, node_id)
         if not node:
             raise RuntimeError(f"Node {node_id} not found in mesh {mesh_id}")
 
@@ -210,26 +234,31 @@ class AdminClient:
                 f"Node {node_id} is not running in mesh {mesh_id}"
             )
 
-        chat_sessions = await self._request_node_server(
+        chat_sessions = (await self._request_node_server(
             mesh_id, node_id, { "command": "list_chat_sessions" }
-        )["sessions"]
+        )).get("sessions", [])
         
         if chat_sessions:
             raise RuntimeError(
                 f"Node {node_id} has active chat sessions in mesh {mesh_id}"
             )
 
-        await self._request_node_server(
-             mesh_id, node_id, { "command": "stop" }
-        )
-            
+        pid_path = core_util.node_pid_path(mesh_id, node_id)
+        if not pid_path.exists():
+            raise RuntimeError(
+                f"Node {node_id} is not running in mesh {mesh_id}"
+            )
+
+        pid = pid_path.read_text()
+        os.kill(int(pid), signal.SIGTERM)
+        
         
     async def get_node_status(
         self, 
         mesh_id: str, 
         node_id: str
     ) -> NodeStatus:
-        node: Node = await core_repo.get_node(mesh_id, node_id)
+        node = await core_repo.get_node(mesh_id, node_id)
         if not node:
             raise RuntimeError(f"Node {node_id} not found in mesh {mesh_id}")
 
@@ -296,6 +325,7 @@ class AdminClient:
             )
 
             if node.type == NodeType.CLAUDE_CODE:
+                from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
                 cc_node = ClaudeCodeNode(
                     mesh_id, 
                     node_id, 
@@ -345,6 +375,7 @@ class AdminClient:
             lock_path.touch()
 
             if node.type == NodeType.CLAUDE_CODE:
+                from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
                 cc_node = ClaudeCodeNode(
                     mesh_id, 
                     node_id, 
@@ -376,12 +407,11 @@ class AdminClient:
         session_routing_strategy: SessionRoutingStrategy,
         session_routing_strategy_config: Dict[str, str]
     ): ...
-    async def delete_subscription(
+    async def delete_subscriptions(
         self, 
         mesh_id: str, 
         source_id: str, 
-        target_id: str, 
-        event_pattern: str
+        target_id: str
     ): 
         raise RuntimeError("Deleting a subscription is not supported yet")
     

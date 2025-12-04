@@ -13,16 +13,16 @@ admin_client = AdminClient()
 
 @click.group(name="node", cls=CustomGroup)
 def node():
-    """Manage the Mosaic Mesh Nodes"""
+    """manage the mosaic mesh nodes"""
 
 
 @node.command(cls=CustomCommand)
-@option("--node_id", type=str, required=True)
+@option("--node-id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)
 @option("--type", type=str, required=True)
 @option("--config", "-c", multiple=True, callback=parse_config)
 def create(node_id: str, mesh_id: str, type: str, config: Dict[str, str]):
-    """Create a new Mosaic Mesh Node"""
+    """create a new mosaic mesh node"""
     try:
         asyncio.run(admin_client.create_node(mesh_id, node_id, type, config))
         console.print(
@@ -33,10 +33,35 @@ def create(node_id: str, mesh_id: str, type: str, config: Dict[str, str]):
 
 
 @node.command(cls=CustomCommand)
+@option("--node-id", type=str, required=True)
+@option("--mesh-id", type=str, required=True)
+@option("--transport", type=str, default="sqlite")
+def start(node_id: str, mesh_id: str, transport: str):
+    """start a mosaic mesh node"""
+    try:
+        asyncio.run(
+            admin_client.start_node(mesh_id, node_id, TransportType(transport))
+        )
+    except Exception as e:
+        console.print(e, style="red")
+
+
+@node.command(cls=CustomCommand)
+@option("--node-id", type=str, required=True)
+@option("--mesh-id", type=str, required=True)
+def stop(node_id: str, mesh_id: str):
+    """stop a mosaic mesh node"""
+    try:
+        asyncio.run(admin_client.stop_node(mesh_id, node_id))
+    except Exception as e:
+        console.print(e, style="red")
+
+
+@node.command(cls=CustomCommand)
 @option("--node_id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)
 def program(node_id: str, mesh_id: str):
-    """Program a Mosaic Mesh Agent Node"""
+    """program a mosaic mesh agent node"""
     try:
         asyncio.run(
             admin_client.program_node(mesh_id, node_id, TransportType.SQLITE)
@@ -49,7 +74,7 @@ def program(node_id: str, mesh_id: str):
 @option("--node_id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)
 def chat(node_id: str, mesh_id: str):
-    """Chat with a Mosaic Mesh Agent Node"""
+    """chat with a mosaic mesh agent node"""
     try:
         asyncio.run(
             admin_client.chat_node(mesh_id, node_id, TransportType.SQLITE)

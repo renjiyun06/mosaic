@@ -1,7 +1,8 @@
 import asyncio
 import os
 import json
-from typing import Dict
+import signal
+from typing import Dict, List
 from abc import ABC, abstractmethod
 
 import mosaic.core.util as core_util
@@ -29,6 +30,7 @@ class BaseNode(ABC):
         self._status = NodeStatus.STOPPED
         self._pid_path = core_util.node_pid_path(mesh_id, node_id)
         self._sock_path = core_util.node_sock_path(mesh_id, node_id)
+        self._stop_event = asyncio.Event()
     
     @abstractmethod
     async def on_event(self, event: MeshEvent): ...
@@ -36,6 +38,10 @@ class BaseNode(ABC):
     async def on_start(self): ...
     @abstractmethod
     async def on_shutdown(self): ...
+    async def register_chat_session(self, session_id: str): ...
+    async def unregister_chat_session(self, session_id: str): ...
+    async def list_chat_sessions(self) -> List[str]:
+        return []
 
 
     async def start(self):
@@ -50,9 +56,12 @@ class BaseNode(ABC):
         await self.on_start()
         self._pid_path.parent.mkdir(parents=True, exist_ok=True)
         self._pid_path.write_text(str(os.getpid()))
+        await self._add_sigterm_handler()
         self._status = NodeStatus.RUNNING
 
         logger.info(f"Node {self.node_id} in mesh {self.mesh_id} started")
+
+        await self._stop_event.wait()
 
     
     async def stop(self):
@@ -71,6 +80,7 @@ class BaseNode(ABC):
         self._status = NodeStatus.STOPPED
 
         logger.info(f"Node {self.node_id} in mesh {self.mesh_id} stopped")
+        self._stop_event.set()
 
 
     async def _start_sock_server(self):
@@ -107,17 +117,16 @@ class BaseNode(ABC):
 
     async def _handle_command(self, reader, writer):
         try:
-            length = int.from_bytes(await reader.read(4), "big")
-            request_content = await reader.read(length)
-            request = json.loads(request_content.decode("utf-8"))
+            length = int.from_bytes(await reader.readexactly(4), "big")
+            request_content = (await reader.readexactly(length)).decode("utf-8")
+            logger.info(
+                f"Node {self.node_id} in mesh {self.mesh_id} received command: "
+                f"{request_content}"
+            )
+            request = json.loads(request_content)
             command = request["command"]
             response = None
-            if command == "stop":
-                await self.stop()
-                response = {
-                    "is_error": False
-                }
-            elif command == "status":
+            if command == "status":
                 response = {
                     "is_error": False,
                     "status": self._status
@@ -181,8 +190,19 @@ class BaseNode(ABC):
             self._event_processing_task.cancel()
             self._event_processing_task = None
 
+        logger.info(
+            f"Event processing task for "
+            f"node {self.node_id} in mesh {self.mesh_id} stopped"
+        )
+
 
     async def _event_processing_loop(self):
         while self._status == NodeStatus.RUNNING:
             event = await self.client.receive()
-            await self.on_event(event)
+            if not event:
+                await self.on_event(event)
+
+    async def _add_sigterm_handler(self):
+        asyncio.get_running_loop().add_signal_handler(
+            signal.SIGTERM, lambda: asyncio.create_task(self.stop())
+        )

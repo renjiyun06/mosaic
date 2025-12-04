@@ -31,12 +31,7 @@ NODE_CATALOG = {
         "entry": ...
     },
     NodeType.DUMMY: {
-        "capability": NodeCapability(
-            type=NodeType.DUMMY,
-            produced_events=["*"],
-            consumed_events=["*"],
-            description=""
-        ),
+        "capability": ...,
         "entry": "mosaic.nodes.dummy"
     },
 }
