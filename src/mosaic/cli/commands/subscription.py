@@ -22,20 +22,21 @@ def subscription():
 @option("--target-id", type=str, required=True)
 @option("--event-pattern", type=str, required=True)
 @option("--mesh-id", type=str, required=True)
-@option("--session-routing-strategy", type=str, required=True)
+@option("--session-routing-strategy", type=str, required=False)
 @option(
     "--session-routing-strategy-config", 
     "-c", 
     multiple=True, 
-    callback=parse_config
+    callback=parse_config,
+    required=False
 )
 def create(
     source_id: str,
     target_id: str,
     event_pattern: str,
     mesh_id: str,
-    session_routing_strategy: str,
-    session_routing_strategy_config: Dict[str, str],
+    session_routing_strategy: Optional[str],
+    session_routing_strategy_config: Optional[Dict[str, str]],
 ):
     """create a new subscription"""
     try:
@@ -74,7 +75,8 @@ def list(source_id: str, target_id: Optional[str], mesh_id: str):
                 subscription.event_pattern, 
                 "Yes" if subscription.is_blocking else "No", 
                 subscription.session_routing_strategy, 
-                json.dumps(subscription.session_routing_strategy_config)
+                json.dumps(subscription.session_routing_strategy_config) \
+                    if subscription.session_routing_strategy_config else ""
             )
         console.print(table)
     except Exception as e:

@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 import mosaic.core.util as core_util
 import mosaic.core.repository as core_repo
 from mosaic.core.catalog import NODE_CATALOG
+from mosaic.core.events import get_event_names
 from mosaic.core.models import Mesh, MeshEvent, Subscription, Node
 from mosaic.core.transport import TransportBackend
 from mosaic.core.types import MeshStatus, NodeStatus, NodeType, TransportType
@@ -20,17 +21,6 @@ from mosaic.nodes.agent.types import (
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-class EventEnvelope:
-    def __init__(self, event: MeshEvent, transport: TransportBackend):
-        self.event = event
-        self._transport = transport
-    
-    async def ack(self):
-        await self._transport.ack(self.event)
-
-    async def nack(self, reason: Optional[str] = None):
-        await self._transport.nack(self.event, reason)
 
 class MeshClient:
     def __init__(
@@ -48,7 +38,16 @@ class MeshClient:
             f"Connecting to transport {self._transport.__class__.__name__} "
             f"for node {self._node_id} in mesh {self._mesh_id}"
         )
-        await self._transport.connect()
+        try:
+            await self._transport.connect()
+        except Exception as e:
+            logger.error(
+                f"Failed to connect to transport "
+                f"{self._transport.__class__.__name__} "
+                f"for node {self._node_id} in mesh {self._mesh_id}: {e}"
+            )
+            raise
+        
         logger.info(
             f"Connected to transport {self._transport.__class__.__name__} "
             f"for node {self._node_id} in mesh {self._mesh_id}"
@@ -66,14 +65,24 @@ class MeshClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         await self.disconnect()
 
-    async def send(self, event: MeshEvent): ...
+    async def send(self, event: MeshEvent):
+        await self._transport.send(event)
+
     async def send_blocking(
         self, 
         event: MeshEvent, 
         timeout: float
     ) -> MeshEvent: ...
+
+
     async def receive(self) -> MeshEvent:
-        await asyncio.sleep(100000000000)
+        return await self._transport.receive()
+
+    async def ack(self, event: MeshEvent):
+        await self._transport.ack(event)
+
+    async def nack(self, event: MeshEvent, reason: Optional[str] = None):
+        await self._transport.nack(event, reason)
 
     async def get_subscription(
         self,
@@ -88,8 +97,22 @@ class MeshClient:
         mesh_id: str,
         source_id: str,
         event_pattern: str
-    ) -> List[Subscription]: ...
+    ) -> List[Subscription]:
+        subscriptions = await core_repo.list_subscriptions(
+            mesh_id, source_id
+        )
+        return [subscription for subscription in subscriptions \
+            if subscription.event_pattern == event_pattern]
 
+    async def get_subscribers(
+        self,
+        mesh_id: str,
+        target_id: str,
+        event_pattern: str
+    ) -> List[Subscription]:
+        return await core_repo.list_subscribers(
+            mesh_id, target_id, event_pattern
+        )
 
 class AdminClient:
     async def _request_node_server(
@@ -404,9 +427,55 @@ class AdminClient:
         source_id: str,
         target_id: str,
         event_pattern: str,
-        session_routing_strategy: SessionRoutingStrategy,
-        session_routing_strategy_config: Dict[str, str]
-    ): ...
+        session_routing_strategy: Optional[SessionRoutingStrategy],
+        session_routing_strategy_config: Optional[Dict[str, str]]
+    ):
+        mesh = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+
+        source_node = await core_repo.get_node(mesh_id, source_id)
+        if not source_node:
+            raise RuntimeError(
+                f"Source node {source_id} not found in mesh {mesh_id}"
+            )
+        
+        target_node = await core_repo.get_node(mesh_id, target_id)
+        if not target_node:
+            raise RuntimeError(
+                f"Target node {target_id} not found in mesh {mesh_id}"
+            )
+        
+        event_patterns = event_pattern.split(",")
+        for event_pattern in event_patterns:
+            event_pattern = event_pattern.strip()
+            is_blocking = False
+            if event_pattern.startswith("@"):
+                is_blocking = True
+                event_pattern = event_pattern[1:].strip()
+            else:
+                is_blocking = False
+            
+            event_names = get_event_names(event_pattern)
+            for event_name in event_names:
+                subscription = await core_repo.get_subscription(
+                    mesh_id, source_id, target_id, event_name
+                )
+                if subscription:
+                    continue
+                subscription = Subscription(
+                    mesh_id=mesh_id,
+                    source_id=source_id,
+                    target_id=target_id,
+                    event_pattern=event_name,
+                    is_blocking=is_blocking,
+                    session_routing_strategy=session_routing_strategy,
+                    session_routing_strategy_config=\
+                        session_routing_strategy_config
+                )
+                await core_repo.create_subscription(subscription)
+        
+
     async def delete_subscriptions(
         self, 
         mesh_id: str, 
@@ -420,4 +489,27 @@ class AdminClient:
         mesh_id: str, 
         source_id: str, 
         target_id: Optional[str] = None
-    ) -> List[Subscription]: ...
+    ) -> List[Subscription]:
+        mesh = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+
+        source_node = await core_repo.get_node(mesh_id, source_id)
+        if not source_node:
+            raise RuntimeError(
+                f"Node {source_id} not found in mesh {mesh_id}"
+            )
+        
+        if target_id:
+            target_node = await core_repo.get_node(mesh_id, target_id)
+            if not target_node:
+                raise RuntimeError(
+                    f"Node {target_id} not found in mesh {mesh_id}"
+                )
+        
+        subscriptions = []
+        if target_id:
+            subscriptions = await core_repo.list_subscriptions(mesh_id, source_id, target_id)
+        else:
+            subscriptions = await core_repo.list_subscriptions(mesh_id, source_id)
+        return subscriptions

@@ -19,3 +19,6 @@ def cc_hook_server_sock_path(
     mesh_id: str, node_id: str
 ) -> Path:
     return mesh_path(mesh_id) / "nodes" / f"{node_id}" / "cc_hook_server.sock"
+
+def sqlite_transport_db_path(mesh_id: str) -> Path:
+    return mesh_path(mesh_id) / "events.db"

@@ -202,6 +202,7 @@ class BaseNode(ABC):
             if not event:
                 await self.on_event(event)
 
+
     async def _add_sigterm_handler(self):
         asyncio.get_running_loop().add_signal_handler(
             signal.SIGTERM, lambda: asyncio.create_task(self.stop())

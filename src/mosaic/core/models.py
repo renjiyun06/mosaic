@@ -51,8 +51,8 @@ class Subscription(BaseModel):
     target_id: str
     event_pattern: str
     is_blocking: bool
-    session_routing_strategy: SessionRoutingStrategy
-    session_routing_strategy_config: Dict[str, str]
+    session_routing_strategy: Optional[SessionRoutingStrategy] = None
+    session_routing_strategy_config: Optional[Dict[str, str]] = None
 
 class EventDefinition(BaseModel):
     name: str   # domain.entity.action, e.g., "cc.tool.pre_tool_use

@@ -24,3 +24,8 @@ class TransportType(StrEnum):
     SQLITE = "sqlite"
     KAFKA = "kafka"
     REDIS = "redis"
+
+class EventStatus(StrEnum):
+    PENDING = "pending"
+    ACKED = "acked"
+    NACKED = "nacked"

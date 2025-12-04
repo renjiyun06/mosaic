@@ -17,7 +17,7 @@ async def main(
 ):
     transport_backend = None
     if transport == TransportType.SQLITE:
-        transport_backend = SqliteTransportBackend()
+        transport_backend = SqliteTransportBackend(mesh_id, node_id)
     else:
         raise RuntimeError(f"Unsupported transport type: {transport}")
     

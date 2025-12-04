@@ -12,7 +12,7 @@ class CustomCommand(click.Command):
     def get_help_option(self, ctx):
         help_option = super().get_help_option(ctx)
         if help_option:
-            help_option.help = 'Show help for this command'
+            help_option.help = 'show help for this command'
         return help_option
 
 def parse_config(ctx, param, value) -> Dict[str, str]:

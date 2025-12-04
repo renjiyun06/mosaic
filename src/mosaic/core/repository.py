@@ -5,8 +5,9 @@ from typing import AsyncIterator
 from typing import List, Optional
 
 from mosaic.core.util import mosaic_db_path
-from mosaic.core.models import Mesh, Node
+from mosaic.core.models import Mesh, Node, Subscription
 from mosaic.core.types import NodeType
+from mosaic.nodes.agent.types import SessionRoutingStrategy
 
 _DB_PATH = mosaic_db_path()
 _SCHEMA_SQL = """
@@ -35,7 +36,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     target_id TEXT NOT NULL,
     event_pattern TEXT NOT NULL,
     is_blocking BOOLEAN NOT NULL,
-    session_routing_strategy TEXT NOT NULL,
+    session_routing_strategy TEXT,
     session_routing_strategy_config TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -131,5 +132,123 @@ async def list_nodes(mesh_id: str) -> List[Node]:
                 mesh_id=row["mesh_id"], 
                 type=NodeType(row["type"]), 
                 config=json.loads(row["config"])
+            ) for row in rows
+        ]
+
+
+async def create_subscription(subscription: Subscription):
+    async with _get_conn() as conn:
+        await conn.execute(
+            "INSERT INTO subscriptions \
+             (mesh_id, source_id, target_id, event_pattern, \
+              is_blocking, session_routing_strategy, \
+              session_routing_strategy_config) VALUES \
+             (?, ?, ?, ?, ?, ?, ?)",
+            (
+                subscription.mesh_id, 
+                subscription.source_id, 
+                subscription.target_id, 
+                subscription.event_pattern, 
+                subscription.is_blocking, 
+                subscription.session_routing_strategy, 
+                json.dumps(subscription.session_routing_strategy_config) \
+                    if subscription.session_routing_strategy_config else None
+            )
+        )
+        await conn.commit()
+
+
+async def get_subscription(
+    mesh_id: str, 
+    source_id: str, 
+    target_id: str, 
+    event_pattern: str
+) -> Optional[Subscription]:
+    async with _get_conn() as conn:
+        result = await conn.execute(
+            "SELECT * FROM subscriptions WHERE \
+             mesh_id = ? AND source_id = ? AND target_id = ? AND \
+             event_pattern = ?",
+            (mesh_id, source_id, target_id, event_pattern)
+        )
+        row = await result.fetchone()
+        if row:
+            return Subscription(
+                mesh_id=row["mesh_id"], 
+                source_id=row["source_id"], 
+                target_id=row["target_id"], 
+                event_pattern=row["event_pattern"], 
+                is_blocking=row["is_blocking"], 
+                session_routing_strategy=\
+                    SessionRoutingStrategy(row["session_routing_strategy"]) \
+                        if row["session_routing_strategy"] else None, 
+                session_routing_strategy_config=\
+                    json.loads(row["session_routing_strategy_config"]) \
+                        if row["session_routing_strategy_config"] else None
+            )
+        return None
+
+
+async def list_subscriptions(
+    mesh_id: str, 
+    source_id: str, 
+    target_id: Optional[str] = None
+) -> List[Subscription]:
+    async with _get_conn() as conn:
+        if target_id:
+            result = await conn.execute(
+                "SELECT * FROM subscriptions WHERE \
+                 mesh_id = ? AND source_id = ? AND target_id = ?",
+                (mesh_id, source_id, target_id)
+            )
+        else:
+            result = await conn.execute(
+                "SELECT * FROM subscriptions WHERE \
+                 mesh_id = ? AND source_id = ?",
+                (mesh_id, source_id)
+            )
+        rows = await result.fetchall()
+        return [
+            Subscription(
+                mesh_id=row["mesh_id"], 
+                source_id=row["source_id"], 
+                target_id=row["target_id"], 
+                event_pattern=row["event_pattern"], 
+                is_blocking=row["is_blocking"], 
+                session_routing_strategy=\
+                    SessionRoutingStrategy(row["session_routing_strategy"]) \
+                        if row["session_routing_strategy"] else None,    
+                session_routing_strategy_config=\
+                    json.loads(row["session_routing_strategy_config"]) \
+                    if row["session_routing_strategy_config"] else None
+            ) for row in rows
+        ]
+
+
+async def list_subscribers(
+    mesh_id: str,
+    target_id: str,
+    event_pattern: str
+) -> List[Subscription]:
+    async with _get_conn() as conn:
+        result = await conn.execute(
+            "SELECT * FROM subscriptions WHERE \
+             mesh_id = ? AND target_id = ? AND event_pattern = ?",
+            (mesh_id, target_id, event_pattern)
+        )
+        rows = await result.fetchall()
+        return [
+            Subscription(
+                mesh_id=row["mesh_id"], 
+                source_id=row["source_id"], 
+                target_id=row["target_id"], 
+                event_pattern=row["event_pattern"], 
+                is_blocking=row["is_blocking"], 
+                session_routing_strategy=\
+                    SessionRoutingStrategy(row["session_routing_strategy"])\
+                        if row["session_routing_strategy"] else None, 
+                session_routing_strategy_config=\
+                    json.loads(row["session_routing_strategy_config"]) \
+                        if row["session_routing_strategy_config"] else None
             ) for row in rows
         ]
