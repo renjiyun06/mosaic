@@ -59,7 +59,20 @@ class MeshClient:
     ) -> MeshEvent: ...
     async def receive(self) -> MeshEvent: ...
 
-    async def get_subscription(self, event: MeshEvent) -> Subscription: ...
+    async def get_subscription(
+        self,
+        mesh_id: str,
+        source_id: str,
+        target_id: str,
+        event_pattern: str
+    ) -> Optional[Subscription]: ...
+    
+    async def get_subscriptions(
+        self,
+        mesh_id: str,
+        source_id: str,
+        event_pattern: str
+    ) -> List[Subscription]: ...
 
 
 class AdminClient:

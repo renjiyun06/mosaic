@@ -23,6 +23,10 @@ class Session(ABC):
     async def close(self): ...
     @abstractmethod
     async def process_event(self, event: MeshEvent): ...
+    @abstractmethod
+    async def chat(self): ...
+    @abstractmethod
+    async def program(self): ...
 
 
 class SessionManager:
@@ -205,7 +209,19 @@ class AgentNode(BaseNode):
             if session:
                 await session.process_event(event)
         else:
-            subscription = await self.client.get_subscription(event)
+            subscription = await self.client.get_subscription(
+                self.mesh_id,
+                self.node_id,
+                event.target_id,
+                event.type
+            )
+            if not subscription:
+                logger.warning(
+                    f"No subscription found for event {event.type} from "
+                    f"{self.node_id} to {event.target_id} "
+                    f"in mesh {self.mesh_id}"
+                )
+                return
             routing_strategy = self._session_routing_strategies[
                 subscription.session_routing_strategy
             ]
