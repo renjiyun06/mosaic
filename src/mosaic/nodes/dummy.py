@@ -73,7 +73,7 @@ class DummyNode(BaseNode):
                     f"no subscriptions found for dummy.dummy_event"
                 )
             
-            await asyncio.sleep(1)
+            await asyncio.sleep(20)
 
 
     async def on_shutdown(self):

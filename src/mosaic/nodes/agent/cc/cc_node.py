@@ -83,10 +83,14 @@ class HookServer:
             if self._node.mode == AgentNodeRunningMode.PROGRAM:
                 response = hook_type.default_hook_output()
             else:
-                subsriptions = await self._node.client.get_subscriptions(
+                subsriptions = await self._node.client.get_subscribers(
                     self._node.mesh_id,
                     self._node.node_id,
                     hook.mesh_event_type
+                )
+                logger.info(
+                    f"Event {hook.mesh_event_type} has "
+                    f"{len(subsriptions)} subscribers"
                 )
                 event_definition = get_event_definition(hook.mesh_event_type)
                 if not subsriptions or not event_definition:
@@ -97,7 +101,7 @@ class HookServer:
                         mesh_event = hook.to_mesh_event(
                             self._node.mesh_id,
                             self._node.node_id,
-                            subscription.target_id
+                            subscription.source_id
                         )
                         if subscription.is_blocking:
                             blocking_events.append(mesh_event)
@@ -238,7 +242,10 @@ class ClaudeCodeSession(Session):
         
         prompt_session = PromptSession()
         while True:
-            user_input = await prompt_session.prompt_async("> ")
+            try:
+                user_input = await prompt_session.prompt_async("> ")
+            except KeyboardInterrupt:
+                break
             async with self._lock:
                 if user_input.lower() in ["exit", "/exit"]:
                     break

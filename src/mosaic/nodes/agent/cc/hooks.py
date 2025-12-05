@@ -176,7 +176,7 @@ class Notification(Hook):
 
 
 class UserPromptSubmit(Hook):
-    mesh_event_type: str = "cc.user.user_prompt_submit"
+    mesh_event_type: str = "cc.user_prompt_submit"
     prompt: str
 
     def to_mesh_event(
@@ -184,7 +184,20 @@ class UserPromptSubmit(Hook):
         mesh_id: str, 
         node_id: str,
         target_id: str
-    ) -> MeshEvent: ...
+    ) -> MeshEvent:
+        return get_event_definition(self.mesh_event_type).to_mesh_event(
+            event_id=str(uuid.uuid4()),
+            mesh_id=mesh_id,
+            source_id=node_id,
+            target_id=target_id,
+            payload=self.model_dump(exclude={"mesh_event_type", "session_id"}),
+            session_trace=SessionTrace(
+                upstream_session_id=self.session_id,
+                downstream_session_id=None
+            ),
+            reply_to=None,
+            created_at=datetime.now(),
+        )
 
     @classmethod
     def from_hook_input(cls, hook_input: Dict[str, Any]) -> 'Hook':
@@ -199,7 +212,7 @@ class UserPromptSubmit(Hook):
 
 
 class Stop(Hook):
-    mesh_event_type: str = "cc.agent.stop"
+    mesh_event_type: str = "cc.stop"
 
     def to_mesh_event(
         self, 
@@ -220,7 +233,7 @@ class Stop(Hook):
 
 
 class SubagentStop(Hook):
-    mesh_event_type: str = "cc.agent.subagent_stop"
+    mesh_event_type: str = "cc.subagent_stop"
 
     def to_mesh_event(
         self, 
