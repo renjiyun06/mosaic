@@ -3,11 +3,15 @@ import asyncio
 import click
 from click import option
 from typing import Dict, Optional
+from collections import defaultdict
 from rich.console import Console
-from rich.table import Table
+from rich.tree import Tree
 
 from mosaic.core.client import AdminClient
 from mosaic.cli.base import CustomGroup, CustomCommand, parse_config
+from mosaic.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 console = Console()
 admin_client = AdminClient()
@@ -55,31 +59,31 @@ def create(
 @option("--source-id", type=str, required=True)
 @option("--target-id", type=str, required=False)
 @option("--mesh-id", type=str, required=True)
-def list(source_id: str, target_id: Optional[str], mesh_id: str):
+def list_subs(source_id: str, target_id: Optional[str], mesh_id: str):
     """list subscriptions"""
     try:
         subscriptions = asyncio.run(
             admin_client.list_subscriptions(mesh_id, source_id, target_id)
         )
-        table = Table(title="")
-        table.add_column("Source")
-        table.add_column("Target")
-        table.add_column("Event Pattern")
-        table.add_column("Is Blocking")
-        table.add_column("Session Routing Strategy")
-        table.add_column("Session Routing Strategy Config")
-        for subscription in subscriptions:
-            table.add_row(
-                subscription.source_id, 
-                subscription.target_id, 
-                subscription.event_pattern, 
-                "Yes" if subscription.is_blocking else "No", 
-                subscription.session_routing_strategy, 
-                json.dumps(subscription.session_routing_strategy_config) \
-                    if subscription.session_routing_strategy_config else ""
-            )
-        console.print(table)
+
+        # Group by target_id
+        grouped = defaultdict(list)
+        for sub in subscriptions:
+            grouped[sub.target_id].append(sub)
+        
+        for target_id, subs in grouped.items():
+            tree = Tree(f"[bold cyan]{target_id}[/]")
+            for sub in subs:
+                blocking = "[red]blocking[/]" if sub.is_blocking else "[dim]non-blocking[/]"
+                routing = f", routing: {sub.session_routing_strategy}" if sub.session_routing_strategy else ""
+                config = f", config: {json.dumps(sub.session_routing_strategy_config, ensure_ascii=False)}" \
+                    if sub.session_routing_strategy_config else ""
+                tree.add(
+                    f"[green]{sub.event_pattern}[/] ({blocking}{routing}{config})"
+                )
+            console.print(tree)
     except Exception as e:
+        logger.error(f"Error listing subscriptions: {e}")
         console.print(e, style="red")
     
 
