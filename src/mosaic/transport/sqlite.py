@@ -102,11 +102,6 @@ class SqliteTransportBackend(TransportBackend):
 
     async def receive(self) -> MeshEvent:
         while True:
-            logger.info(
-                f"Receiving event from SQLite transport database "
-                f"at {self._db_path} "
-                f"for node {self._node_id} in mesh {self._mesh_id}"
-            )
             try:
                 result = await self._conn.execute(
                     "SELECT * FROM events WHERE \
@@ -114,8 +109,12 @@ class SqliteTransportBackend(TransportBackend):
                     (self._node_id, EventStatus.PENDING)
                 )
                 row = await result.fetchone()
-
                 if row:
+                    await self._conn.execute(
+                        "UPDATE events SET status = ? WHERE event_id = ?",
+                        (EventStatus.PROCESSING, row["event_id"])
+                    )
+                    await self._conn.commit()
                     logger.info(
                         f"Received event {row['event_id']} "
                         f"from SQLite transport database at {self._db_path} "
@@ -139,11 +138,6 @@ class SqliteTransportBackend(TransportBackend):
                         created_at=row["created_at"],
                     )
                 else:
-                    logger.info(
-                        f"No pending events found in SQLite transport database "
-                        f"at {self._db_path} "
-                        f"for node {self._node_id} in mesh {self._mesh_id}"
-                    )
                     await asyncio.sleep(1.0)
             except Exception as e:
                 logger.error(

@@ -107,20 +107,11 @@ class MeshClient:
         source_id: str,
         target_id: str,
         event_pattern: str
-    ) -> Optional[Subscription]: ...
-    
-    async def get_subscriptions(
-        self,
-        mesh_id: str,
-        source_id: str,
-        event_pattern: str
-    ) -> List[Subscription]:
-        subscriptions = await core_repo.list_subscriptions(
-            mesh_id, source_id
+    ) -> Optional[Subscription]:
+        return await core_repo.get_subscription(
+            mesh_id, source_id, target_id, event_pattern
         )
-        return [subscription for subscription in subscriptions \
-            if subscription.event_pattern == event_pattern]
-
+    
     async def get_subscribers(
         self,
         mesh_id: str,
@@ -482,6 +473,13 @@ class AdminClient:
             raise RuntimeError(
                 f"Target node {target_id} not found in mesh {mesh_id}"
             )
+
+        if session_routing_strategy and \
+            session_routing_strategy not in SessionRoutingStrategy:
+                raise RuntimeError(
+                    f"Invalid session routing strategy: "
+                    f"{session_routing_strategy}"
+                )
         
         event_patterns = event_pattern.split(",")
         for event_pattern in event_patterns:

@@ -76,7 +76,10 @@ class SessionManager:
         if topic not in self._sessions[strategy]:
             self._sessions[strategy][topic] = {}
         
-        session = await self._node.create_session()
+        session = await self._node.create_session(
+            self._node.mesh_id,
+            self._node.node_id
+        )
         await session.start()
         self._sessions[strategy][topic][upstream_session_id] = session
         self._session_id_to_session[session.session_id] = (
@@ -120,7 +123,7 @@ class MirroringStrategy(SessionRoutingStrategy):
         event: MeshEvent, 
         subscription: Subscription
     ) -> Session:
-        config = subscription.session_routing_strategy_config
+        config = subscription.session_routing_strategy_config or {}
         topic = config.get("topic", "default")
         session = await self._session_manager \
             .get_session_for_upstream_session(
@@ -142,7 +145,8 @@ class MirroringStrategy(SessionRoutingStrategy):
         self, 
         event: MeshEvent, 
         subscription: Subscription
-    ) -> bool: ...
+    ) -> bool:
+        return True
 
 
 class TaskingStrategy(SessionRoutingStrategy):
@@ -154,7 +158,7 @@ class TaskingStrategy(SessionRoutingStrategy):
         event: MeshEvent, 
         subscription: Subscription
     ) -> Session:
-        return await self._session_manager.create_session(
+        return await self._session_manager.create_session_for_upstream_session(
             Strategy.TASKING,
             "default",
             event.session_trace.upstream_session_id
@@ -209,6 +213,13 @@ class AgentNode(BaseNode):
 
     
     async def on_event(self, event: MeshEvent):
+        if event.target_id != self.node_id:
+            logger.warning(
+                f"Event {event.type} from {event.source_id} to {event.target_id} "
+                f"in mesh {self.mesh_id} is not for this node {self.node_id}"
+            )
+            return
+        
         if event.reply_to:
             session = None
             if self.mode == AgentNodeRunningMode.CHAT:
@@ -226,20 +237,36 @@ class AgentNode(BaseNode):
             subscription = await self.client.get_subscription(
                 self.mesh_id,
                 self.node_id,
-                event.target_id,
+                event.source_id,
                 event.type
             )
             if not subscription:
                 logger.warning(
-                    f"No subscription found for event {event.type} from "
-                    f"{self.node_id} to {event.target_id} "
-                    f"in mesh {self.mesh_id}"
+                    f"Node {self.node_id} in mesh {self.mesh_id} "
+                    f"has no subscription for event {event.type} from "
+                    f"{event.source_id}"
                 )
                 return
             routing_strategy = self._session_routing_strategies[
                 subscription.session_routing_strategy
             ]
-            session = await routing_strategy.route(event, subscription)
+            
+            try:
+                session = await routing_strategy.route(event, subscription)
+            except Exception as e:
+                import traceback
+                logger.error(
+                    f"Error routing event {event.event_id} "
+                    f"from {event.source_id}: "
+                    f"{traceback.format_exc()}"
+                )
+                raise e
+            
+            logger.info(
+                f"Routing event {event.event_id} from {event.source_id} to "
+                f"session {session.session_id} of node {self.node_id} in mesh "
+                f"{self.mesh_id}"
+            )
             await session.process_event(event)
             if not routing_strategy.session_retained(event, subscription):
                 await self._session_manager.close_session(session)

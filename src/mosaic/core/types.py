@@ -27,5 +27,6 @@ class TransportType(StrEnum):
 
 class EventStatus(StrEnum):
     PENDING = "pending"
+    PROCESSING = "processing"
     ACKED = "acked"
     NACKED = "nacked"

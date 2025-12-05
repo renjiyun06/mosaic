@@ -166,35 +166,53 @@ class ClaudeCodeSession(Session):
         self._event_processor_task = None
       
     async def start(self):
-        os.chdir(str(self.node.workspace))
-        if self.node.mode != AgentNodeRunningMode.PROGRAM:
-            self._event_queue = asyncio.Queue()
-            cc_options = ClaudeAgentOptions(
-                system_prompt={
-                    "type": "preset",
-                    "preset": "claude_code",
-                    "append": self.node.system_prompt
-                },
-                cwd=self.node.workspace,
-                permission_mode="bypassPermissions",
-                hooks={
-                    'UserPromptSubmit': [
-                        HookMatcher(hooks=[
-                            self.node.handle_hook
-                        ])
-                    ]
-                },
+        try:
+            logger.info(
+                f"Starting session {self.session_id} of node {self.node.node_id} "
+                f"in mesh {self.node.mesh_id}"
             )
-            
-            self._cc_client = ClaudeSDKClient(cc_options)
-            await self._cc_client.connect()
-            self._event_processor_task = asyncio.create_task(
-                self._event_processor_loop()
+            os.chdir(str(self.node.workspace))
+            if self.node.mode != AgentNodeRunningMode.PROGRAM:
+                self._event_queue = asyncio.Queue()
+                cc_options = ClaudeAgentOptions(
+                    system_prompt={
+                        "type": "preset",
+                        "preset": "claude_code",
+                        "append": self.node.system_prompt
+                    },
+                    cwd=self.node.workspace,
+                    permission_mode="bypassPermissions",
+                    hooks={
+                        'UserPromptSubmit': [
+                            HookMatcher(hooks=[
+                                self.node.handle_hook
+                            ])
+                        ]
+                    },
+                )
+                self._cc_client = ClaudeSDKClient(cc_options)
+                await self._cc_client.connect()
+                self._event_processor_task = asyncio.create_task(
+                    self._event_processor_loop()
+                )
+                self._status = ClaudeCodeSessionStatus.STARTED
+            logger.info(
+                f"Session {self.session_id} of node {self.node.node_id} in mesh "
+                f"{self.node.mesh_id} started"
             )
-            self._status = ClaudeCodeSessionStatus.STARTED
+        except Exception as e:
+            import traceback
+            logger.error(
+                f"Error starting session {self.session_id}: "
+                f"{traceback.format_exc()}")
+            raise e
         
     
     async def close(self):
+        logger.info(
+            f"Closing session {self.session_id} of node {self.node.node_id} "
+            f"in mesh {self.node.mesh_id}"
+        )
         if self._event_processor_task:
             self._event_processor_task.cancel()
             self._event_processor_task = None
@@ -206,6 +224,11 @@ class ClaudeCodeSession(Session):
             async for _ in self._cc_client.receive_response(): ...
             await self._cc_client.disconnect()
             self._cc_client = None
+        
+        logger.info(
+            f"Session {self.session_id} of node {self.node.node_id} in mesh "
+            f"{self.node.mesh_id} closed"
+        )
 
 
     async def process_event(self, event: MeshEvent):
@@ -214,12 +237,25 @@ class ClaudeCodeSession(Session):
 
 
     async def _event_processor_loop(self):
-        async def receive(): ...
+        async def receive():
+            async for message in self._cc_client.receive_response():
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            logger.info(
+                                f"Session {self.session_id} received message: "
+                                f"{block.text}"
+                            )
+        
         while True:
             event: MeshEvent = await self._event_queue.get()
             if event:
                 async with self._lock:
                     xml_content = event.to_xml()
+                    logger.info(
+                        f"Session {self.session_id} processing event: "
+                        f"{xml_content}"
+                    )
                     if self.node.mode == AgentNodeRunningMode.CHAT:
                         console.print(xml_content)
                     
