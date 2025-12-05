@@ -22,28 +22,31 @@ async def main(mesh_id: str, node_id: str):
             f"Hook server socket path {hook_server_sock} does not exist"
         )
     
-    async with asyncio.open_unix_connection(
-        str(hook_server_sock)
-    ) as (reader, writer):
-        try:
-            request = await _get_hook_input()
-            session_id = request.get("session_id")
-            request_content = json.dumps(request)
-            logger.info(
-                f"Session {session_id} of node {node_id} in mesh {mesh_id} "
-                f"triggered {request.get('hook_event_name')} hook with input: "
-                f"{request_content}"
-            )
-            writer.write(len(request_content.encode()).to_bytes(4, "big"))
-            writer.write(request_content)
-            await writer.drain()
-            length = int.from_bytes(await reader.read(4), "big")
-            response_content = await reader.read(length)
-            response = response_content.decode("utf-8")
-            print(response)
-        finally:
-            writer.close()
-            await writer.wait_closed()
+    reader, writer = await asyncio.open_unix_connection(str(hook_server_sock))
+    try:
+        request = await _get_hook_input()
+        session_id = request.get("session_id")
+        request_content = json.dumps(request, ensure_ascii=False)
+        logger.info(
+            f"Session {session_id} of node {node_id} in mesh {mesh_id} "
+            f"triggered {request.get('hook_event_name')} hook with input: "
+            f"{request_content}"
+        )
+        request_content_bytes = request_content.encode()
+        writer.write(len(request_content_bytes).to_bytes(4, "big"))
+        writer.write(request_content_bytes)
+        await writer.drain()
+        length = int.from_bytes(await reader.readexactly(4), "big")
+        response_content = await reader.readexactly(length)
+        response = response_content.decode("utf-8")
+        print(response)
+    except Exception as e:
+        import traceback
+        logger.error(f"Error handling hook: {e}\n{traceback.format_exc()}")
+        raise e
+    finally:
+        writer.close()
+        await writer.wait_closed()
 
 
 if __name__ == "__main__":

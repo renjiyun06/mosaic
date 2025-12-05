@@ -31,12 +31,30 @@ class Hook(ABC, BaseModel):
     def get_hook_type(cls, name: str) -> Type['Hook']:
         if name == "PreToolUse":
             return PreToolUse
+        elif name == "PermissionRequest":
+            return PermissionRequest
+        elif name == "PostToolUse":
+            return PostToolUse
+        elif name == "Notification":
+            return Notification
+        elif name == "UserPromptSubmit":
+            return UserPromptSubmit
+        elif name == "Stop":
+            return Stop
+        elif name == "SubagentStop":
+            return SubagentStop
+        elif name == "PreCompact":
+            return PreCompact
+        elif name == "SessionStart":
+            return SessionStart
+        elif name == "SessionEnd":
+            return SessionEnd
         else:
             raise ValueError(f"Unknown hook type: {name}")
 
 
 class PreToolUse(Hook):
-    mesh_event_type: str = "cc.tool.pre_tool_use"
+    mesh_event_type: str = "cc.pre_tool_use"
     tool_name: str
     tool_input: Dict[str, Any]
 
@@ -77,3 +95,213 @@ class PreToolUse(Hook):
             reply_to=None,
             created_at=datetime.now(),
         )
+
+
+class PermissionRequest(Hook):
+    mesh_event_type: str = "cc.permission_request"
+
+    def to_mesh_event(
+        self, 
+        mesh_id: str, 
+        node_id: str,
+        target_id: str
+    ) -> MeshEvent: ...
+
+    @classmethod
+    def from_hook_input(cls, hook_input: Dict[str, Any]) -> 'Hook':
+        return cls(
+            session_id=hook_input["session_id"]
+        )
+    
+    @classmethod
+    def default_hook_output(cls) -> Dict[str, Any]:
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": {
+                    "behavior": "allow"
+                }
+            }
+        }
+
+
+class PostToolUse(Hook):
+    mesh_event_type: str = "cc.post_tool_use"
+    tool_name: str
+    tool_input: Dict[str, Any]
+    tool_response: Dict[str, Any]
+
+    def to_mesh_event(
+        self, 
+        mesh_id: str, 
+        node_id: str,
+        target_id: str
+    ) -> MeshEvent: ...
+
+    @classmethod
+    def from_hook_input(cls, hook_input: Dict[str, Any]) -> 'Hook':
+        return cls(
+            session_id=hook_input["session_id"],
+            tool_name=hook_input["tool_name"],
+            tool_input=hook_input["tool_input"],
+            tool_response=hook_input["tool_response"],
+        )
+
+    @classmethod
+    def default_hook_output(cls) -> Dict[str, Any]: 
+        return {}
+
+
+class Notification(Hook):
+    mesh_event_type: str = "cc.notification"
+    message: str
+
+    def to_mesh_event(
+        self, 
+        mesh_id: str, 
+        node_id: str,
+        target_id: str
+    ) -> MeshEvent: ...
+
+    @classmethod
+    def from_hook_input(cls, hook_input: Dict[str, Any]) -> 'Hook':
+        return cls(
+            session_id=hook_input["session_id"],
+            message=hook_input["message"],
+        )
+
+    @classmethod
+    def default_hook_output(cls) -> Dict[str, Any]:
+        return {}        
+
+
+class UserPromptSubmit(Hook):
+    mesh_event_type: str = "cc.user.user_prompt_submit"
+    prompt: str
+
+    def to_mesh_event(
+        self, 
+        mesh_id: str, 
+        node_id: str,
+        target_id: str
+    ) -> MeshEvent: ...
+
+    @classmethod
+    def from_hook_input(cls, hook_input: Dict[str, Any]) -> 'Hook':
+        return cls(
+            session_id=hook_input["session_id"],
+            prompt=hook_input["prompt"],
+        )
+
+    @classmethod
+    def default_hook_output(cls) -> Dict[str, Any]:
+        return {}
+
+
+class Stop(Hook):
+    mesh_event_type: str = "cc.agent.stop"
+
+    def to_mesh_event(
+        self, 
+        mesh_id: str, 
+        node_id: str,
+        target_id: str
+    ) -> MeshEvent: ...
+
+    @classmethod
+    def from_hook_input(cls, hook_input: Dict[str, Any]) -> 'Hook':
+        return cls(
+            session_id=hook_input["session_id"]
+        )
+    
+    @classmethod
+    def default_hook_output(cls) -> Dict[str, Any]:
+        return {}
+
+
+class SubagentStop(Hook):
+    mesh_event_type: str = "cc.agent.subagent_stop"
+
+    def to_mesh_event(
+        self, 
+        mesh_id: str, 
+        node_id: str,
+        target_id: str
+    ) -> MeshEvent: ...
+
+    @classmethod
+    def from_hook_input(cls, hook_input: Dict[str, Any]) -> 'Hook':
+        return cls(
+            session_id=hook_input["session_id"]
+        )
+    
+    @classmethod
+    def default_hook_output(cls) -> Dict[str, Any]:
+        return {}
+
+
+class PreCompact(Hook):
+    mesh_event_type: str = "cc.pre_compact"
+    trigger: str
+    custom_instructions: str
+
+    def to_mesh_event(
+        self, 
+        mesh_id: str, 
+        node_id: str,
+        target_id: str
+    ) -> MeshEvent: ...
+
+    @classmethod
+    def from_hook_input(cls, hook_input: Dict[str, Any]) -> 'Hook':
+        return cls(
+            session_id=hook_input["session_id"],
+            trigger=hook_input["trigger"],
+            custom_instructions=hook_input["custom_instructions"],
+        )
+
+    @classmethod
+    def default_hook_output(cls) -> Dict[str, Any]:
+        return {}
+
+
+class SessionStart(Hook):
+    mesh_event_type: str = "cc.session_start"
+
+    def to_mesh_event(
+        self, 
+        mesh_id: str, 
+        node_id: str,
+        target_id: str
+    ) -> MeshEvent: ...
+
+    @classmethod
+    def from_hook_input(cls, hook_input: Dict[str, Any]) -> 'Hook':
+        return cls(
+            session_id=hook_input["session_id"]
+        )
+    
+    @classmethod
+    def default_hook_output(cls) -> Dict[str, Any]:
+        return {}
+
+
+class SessionEnd(Hook):
+    mesh_event_type: str = "cc.session_end"
+
+    def to_mesh_event(
+        self, 
+        mesh_id: str, 
+        node_id: str,
+        target_id: str
+    ) -> MeshEvent: ...
+
+    @classmethod
+    def from_hook_input(cls, hook_input: Dict[str, Any]) -> 'Hook':
+        return cls(
+            session_id=hook_input["session_id"]
+        )
+    
+    @classmethod
+    def default_hook_output(cls) -> Dict[str, Any]:
+        return {}

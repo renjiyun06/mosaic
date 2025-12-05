@@ -397,6 +397,7 @@ class AdminClient:
         node_id: str,
         transport: TransportType
     ):
+        lock_path = None
         try:
             node = await core_repo.get_node(mesh_id, node_id)
             if not node:
@@ -441,7 +442,8 @@ class AdminClient:
                     f"Node {node_id} is not an agent node in mesh {mesh_id}"
                 )
         finally:
-            lock_path.unlink(missing_ok=True)
+            if lock_path:
+                lock_path.unlink(missing_ok=True)
         
         
     async def create_subscription(
