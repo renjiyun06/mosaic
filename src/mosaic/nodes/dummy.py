@@ -30,7 +30,7 @@ class DummyNode(BaseNode):
             f"Dummy node {self.node_id} in mesh {self.mesh_id} "
             f"received event: {event.model_dump_json()}"
         )
-        self.client.ack(event)
+        await self.client.ack(event)
 
     async def on_start(self):
         self._send_events_task = asyncio.create_task(self._send_events())
@@ -51,11 +51,16 @@ class DummyNode(BaseNode):
             )
             if subscriptions:
                 for subscription in subscriptions:
+                    logger.info(
+                        f"Dummy node {self.node_id} in mesh {self.mesh_id} "
+                        f"sending event to {subscription.source_id} "
+                        f"in mesh {self.mesh_id}"
+                    )
                     await self.client.send(MeshEvent(
                         event_id=str(uuid.uuid4()),
                         mesh_id=self.mesh_id,
                         source_id=self.node_id,
-                        target_id=subscription.target_id,
+                        target_id=subscription.source_id,
                         type="dummy.dummy_event",
                         payload={"message": "Hello, world!"},
                         session_trace=None,

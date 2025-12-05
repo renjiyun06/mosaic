@@ -66,6 +66,11 @@ class MeshClient:
         await self.disconnect()
 
     async def send(self, event: MeshEvent):
+        logger.info(
+            f"Sending event {event.model_dump_json()} to transport "
+            f"{self._transport.__class__.__name__} for node {self._node_id} "
+            f"in mesh {self._mesh_id}"
+        )
         await self._transport.send(event)
 
     async def send_blocking(
@@ -79,7 +84,17 @@ class MeshClient:
         return await self._transport.receive()
 
     async def ack(self, event: MeshEvent):
+        logger.info(
+            f"Acknowledging event {event.event_id} "
+            f"to transport {self._transport.__class__.__name__} "
+            f"for node {self._node_id} in mesh {self._mesh_id}"
+        )
         await self._transport.ack(event)
+        logger.info(
+            f"Event {event.event_id} acknowledged "
+            f"to transport {self._transport.__class__.__name__} "
+            f"for node {self._node_id} in mesh {self._mesh_id}"
+        )
 
     async def nack(self, event: MeshEvent, reason: Optional[str] = None):
         await self._transport.nack(event, reason)

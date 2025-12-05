@@ -199,7 +199,7 @@ class BaseNode(ABC):
     async def _event_processing_loop(self):
         while self._status == NodeStatus.RUNNING:
             event = await self.client.receive()
-            if not event:
+            if event:
                 await self.on_event(event)
 
 
