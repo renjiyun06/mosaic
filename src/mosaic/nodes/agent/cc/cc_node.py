@@ -11,8 +11,8 @@ from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
     AssistantMessage,
-    ResultMessage,
-    TextBlock
+    TextBlock,
+    HookMatcher
 )
 from prompt_toolkit.shortcuts import PromptSession
 
@@ -163,22 +163,31 @@ class ClaudeCodeSession(Session):
       
     async def start(self):
         os.chdir(str(self.node.workspace))
-        self._event_queue = asyncio.Queue()
-        cc_options = ClaudeAgentOptions(
-            system_prompt={
-                "type": "preset",
-                "preset": "claude_code",
-                "append": self.node.system_prompt
-            },
-            cwd=self.node.workspace,
-            permission_mode="bypassPermissions"
-        )
-        self._cc_client = ClaudeSDKClient(cc_options)
-        await self._cc_client.connect()
-        self._event_processor_task = asyncio.create_task(
-            self._event_processor_loop()
-        )
-        self._status = ClaudeCodeSessionStatus.STARTED
+        if self.node.mode != AgentNodeRunningMode.PROGRAM:
+            self._event_queue = asyncio.Queue()
+            cc_options = ClaudeAgentOptions(
+                system_prompt={
+                    "type": "preset",
+                    "preset": "claude_code",
+                    "append": self.node.system_prompt
+                },
+                cwd=self.node.workspace,
+                permission_mode="bypassPermissions",
+                hooks={
+                    'UserPromptSubmit': [
+                        HookMatcher(hooks=[
+                            self.node.handle_hook
+                        ])
+                    ]
+                },
+            )
+            
+            self._cc_client = ClaudeSDKClient(cc_options)
+            await self._cc_client.connect()
+            self._event_processor_task = asyncio.create_task(
+                self._event_processor_loop()
+            )
+            self._status = ClaudeCodeSessionStatus.STARTED
         
     
     async def close(self):
@@ -189,7 +198,7 @@ class ClaudeCodeSession(Session):
             self._event_queue.put_nowait(None)
             self._event_queue = None
         if self._cc_client:
-            await self._cc_client.query("exit")
+            await self._cc_client.query("/exit")
             async for _ in self._cc_client.receive_response(): ...
             await self._cc_client.disconnect()
             self._cc_client = None
@@ -226,15 +235,12 @@ class ClaudeCodeSession(Session):
                     for block in message.content:
                         if isinstance(block, TextBlock):
                             console.print(block.text)
-                elif isinstance(message, ResultMessage):
-                    console.print(message.result)
-               
         
         prompt_session = PromptSession()
         while True:
             user_input = await prompt_session.prompt_async("> ")
             async with self._lock:
-                if user_input.lower() == "exit":
+                if user_input.lower() in ["exit", "/exit"]:
                     break
                 
                 await self._cc_client.query(user_input)
@@ -415,3 +421,47 @@ class ClaudeCodeNode(AgentNode):
 
     async def _assemble_system_prompt(self) -> str:
         return ""
+
+    async def handle_hook(
+        self,
+        hook_input: Dict[str, Any],
+        tool_use_id: str | None,
+        context
+    ) -> Dict[str, Any]:
+        logger.info(
+            f"Handling hook for session {hook_input.get('session_id')} of node "
+            f"{self.node_id} in mesh {self.mesh_id} with input: {hook_input}"
+        )
+        hook_server_sock = core_util.cc_hook_server_sock_path(
+            self.mesh_id, self.node_id
+        )
+        if not hook_server_sock.exists():
+            logger.error(
+                f"Hook server socket path {hook_server_sock} does not exist"
+            )
+            raise RuntimeError(
+                f"Hook server socket path {hook_server_sock} does not exist"
+            )
+        
+        reader, writer = await asyncio.open_unix_connection(str(hook_server_sock))
+        try:
+            request = hook_input
+            request_content = json.dumps(request, ensure_ascii=False)
+            request_content_bytes = request_content.encode()
+            writer.write(len(request_content_bytes).to_bytes(4, "big"))
+            writer.write(request_content_bytes)
+            await writer.drain()
+            length = int.from_bytes(await reader.readexactly(4), "big")
+            response_content = await reader.readexactly(length)
+            response = response_content.decode("utf-8")
+            if self.mode == AgentNodeRunningMode.PROGRAM:
+                print(response)
+            else:
+                return json.loads(response)
+        except Exception as e:
+            import traceback
+            logger.error(f"Error handling hook: {e}\n{traceback.format_exc()}")
+            raise e
+        finally:
+            writer.close()
+            await writer.wait_closed()
