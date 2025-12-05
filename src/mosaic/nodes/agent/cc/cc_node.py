@@ -1,5 +1,6 @@
 import uuid
 import json
+import os
 import asyncio
 import subprocess
 from pathlib import Path
@@ -19,7 +20,10 @@ logger = get_logger(__name__)
 console = Console()
 
 class HookServer:
-    def __init__(self, node: 'ClaudeCodeNode'):
+    def __init__(
+        self, 
+        node: 'ClaudeCodeNode'
+    ):
         self._node = node
         self._sock_path = core_util.cc_hook_server_sock_path(
             node.mesh_id, node.node_id
@@ -128,12 +132,14 @@ class ClaudeCodeSession(Session):
     ):
         super().__init__(session_id, node)
       
-    async def start(self): ...
+    async def start(self):
+        os.chdir(str(self.node.workspace))
+        
     async def close(self): ...
     async def process_event(self, event: MeshEvent): ...
     async def chat(self): ...
 
-    
+
     async def program(self):
         subprocess.run(
             [
@@ -156,10 +162,10 @@ class ClaudeCodeNode(AgentNode):
         workspace = config.get("workspace", None)
         if not workspace:
             raise RuntimeError("Workspace is required")
-        self._workspace = Path(workspace)
-        if not self._workspace.is_absolute():
+        self.workspace = Path(workspace)
+        if not self.workspace.is_absolute():
             raise RuntimeError("Workspace must be an absolute path")
-        self._workspace.mkdir(parents=True, exist_ok=True)
+        self.workspace.mkdir(parents=True, exist_ok=True)
         
         self.system_prompt = None
         self._hook_server = None
@@ -197,8 +203,8 @@ class ClaudeCodeNode(AgentNode):
 
     async def start_program_mode(self, session_id: str):
         assert self.mode == AgentNodeRunningMode.PROGRAM
-        self.system_prompt = await self._assemble_system_prompt()
         await self.client.connect()
+        await self.on_start()
         self._program_session = ClaudeCodeSession(
             session_id,
             self
@@ -209,6 +215,7 @@ class ClaudeCodeNode(AgentNode):
     async def stop_program_mode(self):
         await self._program_session.close()
         self._program_session = None
+        await self.on_shutdown()
         await self.client.disconnect()
 
     
@@ -233,4 +240,5 @@ class ClaudeCodeNode(AgentNode):
         await self._hook_server.stop()
         self._hook_server = None
 
-    async def _assemble_system_prompt(self) -> str: ...
+    async def _assemble_system_prompt(self) -> str:
+        return ""

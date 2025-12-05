@@ -36,7 +36,7 @@ class Hook(ABC, BaseModel):
 
 
 class PreToolUse(Hook):
-    mesh_event_type = "cc.tool.pre_tool_use"
+    mesh_event_type: str = "cc.tool.pre_tool_use"
     tool_name: str
     tool_input: Dict[str, Any]
 

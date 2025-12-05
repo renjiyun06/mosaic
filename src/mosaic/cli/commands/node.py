@@ -58,7 +58,7 @@ def stop(node_id: str, mesh_id: str):
 
 
 @node.command(cls=CustomCommand)
-@option("--node_id", type=str, required=True)
+@option("--node-id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)
 def program(node_id: str, mesh_id: str):
     """program a mosaic mesh agent node"""

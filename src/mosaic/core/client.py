@@ -18,6 +18,7 @@ from mosaic.nodes.agent.types import (
     SessionRoutingStrategy,
     AgentNodeRunningMode,
 )
+from mosaic.transport.sqlite import SqliteTransportBackend
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -27,7 +28,8 @@ class MeshClient:
         self, 
         mesh_id: str,
         node_id: str,
-        transport: TransportBackend):
+        transport: TransportBackend
+    ):
         self._mesh_id = mesh_id
         self._node_id = node_id
         self._transport = transport
@@ -396,7 +398,7 @@ class AdminClient:
         transport: TransportType
     ):
         try:
-            node: Node = await core_repo.get_node(mesh_id, node_id)
+            node = await core_repo.get_node(mesh_id, node_id)
             if not node:
                 raise RuntimeError(
                     f"Node {node_id} not found in mesh {mesh_id}"
@@ -412,13 +414,19 @@ class AdminClient:
             lock_path.parent.mkdir(parents=True, exist_ok=True)
             lock_path.touch()
 
+            transport_backend = None
+            if transport == TransportType.SQLITE:
+                transport_backend = SqliteTransportBackend(mesh_id, node_id)
+            else:
+                raise RuntimeError(f"Unsupported transport type: {transport}")
+
             if node.type == NodeType.CLAUDE_CODE:
                 from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
                 cc_node = ClaudeCodeNode(
                     mesh_id, 
                     node_id, 
                     node.config, 
-                    MeshClient(transport), 
+                    MeshClient(mesh_id, node_id, transport_backend), 
                     AgentNodeRunningMode.PROGRAM
                 )
                 await cc_node.start_program_mode(str(uuid.uuid4()))

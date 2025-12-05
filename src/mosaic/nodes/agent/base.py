@@ -168,7 +168,21 @@ class TaskingStrategy(SessionRoutingStrategy):
         return False
 
 
-class StatefulStrategy(SessionRoutingStrategy): ...
+class StatefulStrategy(SessionRoutingStrategy):
+    def __init__(self, session_manager: SessionManager):
+        self._session_manager = session_manager
+
+    async def route(
+        self, 
+        event: MeshEvent, 
+        subscription: Subscription
+    ) -> Session: ...
+
+    def session_retained(
+        self, 
+        event: MeshEvent, 
+        subscription: Subscription
+    ) -> bool: ...
 
 
 class AgentNode(BaseNode):
