@@ -2,11 +2,19 @@ import uuid
 import json
 import os
 import asyncio
-import subprocess
 from pathlib import Path
 from typing import Dict, Any
+from enum import StrEnum
 from rich.console import Console
 from importlib.resources import files, as_file
+from claude_agent_sdk import (
+    ClaudeSDKClient,
+    ClaudeAgentOptions,
+    AssistantMessage,
+    ResultMessage,
+    TextBlock
+)
+from prompt_toolkit.shortcuts import PromptSession
 
 import mosaic.core.util as core_util
 from mosaic.core.client import MeshClient
@@ -135,6 +143,11 @@ class McpServer:
         pass
 
 
+class ClaudeCodeSessionStatus(StrEnum):
+    STARTED = "started"
+    CLOSING = "closing"
+    CLOSED = "closed"
+
 class ClaudeCodeSession(Session):
     def __init__(
         self, 
@@ -142,13 +155,90 @@ class ClaudeCodeSession(Session):
         node: 'ClaudeCodeNode', 
     ):
         super().__init__(session_id, node)
+        self._status = ClaudeCodeSessionStatus.CLOSED
+        self._lock = asyncio.Lock()
+        self._event_queue = None
+        self._cc_client: ClaudeSDKClient = None
+        self._event_processor_task = None
       
     async def start(self):
         os.chdir(str(self.node.workspace))
+        self._event_queue = asyncio.Queue()
+        cc_options = ClaudeAgentOptions(
+            system_prompt={
+                "type": "preset",
+                "preset": "claude_code",
+                "append": self.node.system_prompt
+            },
+            cwd=self.node.workspace,
+            permission_mode="bypassPermissions"
+        )
+        self._cc_client = ClaudeSDKClient(cc_options)
+        await self._cc_client.connect()
+        self._event_processor_task = asyncio.create_task(
+            self._event_processor_loop()
+        )
+        self._status = ClaudeCodeSessionStatus.STARTED
         
-    async def close(self): ...
-    async def process_event(self, event: MeshEvent): ...
-    async def chat(self): ...
+    
+    async def close(self):
+        if self._event_processor_task:
+            self._event_processor_task.cancel()
+            self._event_processor_task = None
+        if self._event_queue:
+            self._event_queue.put_nowait(None)
+            self._event_queue = None
+        if self._cc_client:
+            await self._cc_client.query("exit")
+            async for _ in self._cc_client.receive_response(): ...
+            await self._cc_client.disconnect()
+            self._cc_client = None
+
+
+    async def process_event(self, event: MeshEvent):
+        if self._status == ClaudeCodeSessionStatus.STARTED:
+            await self._event_queue.put(event)
+
+
+    async def _event_processor_loop(self):
+        async def receive(): ...
+        while True:
+            event: MeshEvent = await self._event_queue.get()
+            if event:
+                async with self._lock:
+                    xml_content = event.to_xml()
+                    if self.node.mode == AgentNodeRunningMode.CHAT:
+                        console.print(xml_content)
+                    
+                    await self._cc_client.query(xml_content)
+                    await receive()
+            else:
+                break
+    
+
+    async def chat(self):
+        async def receive():
+            async for message in self._cc_client.receive_response():
+                logger.info(
+                    f"Session {self.session_id} received message: {message}"
+                )
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            console.print(block.text)
+                elif isinstance(message, ResultMessage):
+                    console.print(message.result)
+               
+        
+        prompt_session = PromptSession()
+        while True:
+            user_input = await prompt_session.prompt_async("> ")
+            async with self._lock:
+                if user_input.lower() == "exit":
+                    break
+                
+                await self._cc_client.query(user_input)
+                await receive()
 
 
     async def program(self):

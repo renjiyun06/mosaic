@@ -71,7 +71,7 @@ def program(node_id: str, mesh_id: str):
 
 
 @node.command(cls=CustomCommand)
-@option("--node_id", type=str, required=True)
+@option("--node-id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)
 def chat(node_id: str, mesh_id: str):
     """chat with a mosaic mesh agent node"""

@@ -318,8 +318,9 @@ class AdminClient:
         node_id: str, 
         transport: TransportType
     ):
+        session_id = None
         try:
-            node: Node = await core_repo.get_node(mesh_id, node_id)
+            node = await core_repo.get_node(mesh_id, node_id)
             if not node:
                 raise RuntimeError(
                     f"Node {node_id} not found in mesh {mesh_id}"
@@ -364,13 +365,23 @@ class AdminClient:
                 }
             )
 
+            transport_backend = None
+            if transport == TransportType.SQLITE:
+                transport_backend = SqliteTransportBackend(mesh_id, node_id)
+            else:
+                raise RuntimeError(f"Unsupported transport type: {transport}")
+
             if node.type == NodeType.CLAUDE_CODE:
                 from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
                 cc_node = ClaudeCodeNode(
                     mesh_id, 
                     node_id, 
                     node.config, 
-                    MeshClient(transport), 
+                    MeshClient(
+                        mesh_id,
+                        node_id,
+                        transport_backend
+                    ), 
                     AgentNodeRunningMode.CHAT
                 )
                 await cc_node.start_chat_mode(session_id)
@@ -381,14 +392,15 @@ class AdminClient:
             elif node.type == NodeType.CURSOR: ...
             elif node.type == NodeType.OPENHANDS: ...
         finally:
-            await self._request_node_server(
-                mesh_id,
-                node_id,
-                {
-                    "command": "unregister_chat_session",
-                    "session_id": session_id
-                }
-            )
+            if session_id:
+                await self._request_node_server(
+                    mesh_id,
+                    node_id,
+                    {
+                        "command": "unregister_chat_session",
+                        "session_id": session_id
+                    }
+                )
 
         
     async def program_node(
