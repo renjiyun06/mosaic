@@ -2,7 +2,7 @@ from typing import Dict
 
 from mosaic.core.client import MeshClient
 from mosaic.nodes.agent.base import AgentNode, Session
-from mosaic.nodes.agent.types import AgentNodeRunningMode
+from mosaic.nodes.agent.enums import AgentNodeRunningMode
 
 class DummyAgent(AgentNode):
     def __init__(

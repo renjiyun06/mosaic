@@ -13,8 +13,8 @@ from mosaic.core.catalog import NODE_CATALOG
 from mosaic.core.events import get_event_names
 from mosaic.core.models import Mesh, MeshEvent, Subscription, Node
 from mosaic.core.transport import TransportBackend
-from mosaic.core.types import MeshStatus, NodeStatus, NodeType, TransportType
-from mosaic.nodes.agent.types import (
+from mosaic.core.enums import MeshStatus, NodeStatus, NodeType, TransportType
+from mosaic.nodes.agent.enums import (
     SessionRoutingStrategy,
     AgentNodeRunningMode,
 )

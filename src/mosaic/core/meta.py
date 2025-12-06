@@ -4,7 +4,7 @@ from pathlib import Path
 from contextlib import contextmanager
 from typing import Iterator, List, Optional
 
-from mosaic.core.types import MeshStatus, NodeType
+from mosaic.core.enums import MeshStatus, NodeType
 from mosaic.core.models import Mesh, Node, Subscription
 
 _DB_PATH = Path.home() / ".mosaic" / "mosaic.db"

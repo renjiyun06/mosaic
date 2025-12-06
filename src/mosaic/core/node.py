@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 import mosaic.core.util as core_util
 from mosaic.core.client import MeshClient
 from mosaic.core.models import MeshEvent
-from mosaic.core.types import NodeStatus
+from mosaic.core.enums import NodeStatus
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)

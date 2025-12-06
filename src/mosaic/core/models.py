@@ -5,12 +5,12 @@ from datetime import datetime
 from pydantic import BaseModel
 from jsonschema import validate
 
-from mosaic.core.types import (
+from mosaic.core.enums import (
     NodeType, 
     MeshStatus, 
     NodeStatus, 
 )
-from mosaic.nodes.agent.types import SessionRoutingStrategy
+from mosaic.nodes.agent.enums import SessionRoutingStrategy
 
 class SessionTrace(BaseModel):
     upstream_session_id: str

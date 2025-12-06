@@ -8,7 +8,7 @@ from datetime import datetime
 from mosaic.core.models import MeshEvent
 from mosaic.core.client import MeshClient
 from mosaic.core.node import BaseNode
-from mosaic.core.types import TransportType, NodeStatus
+from mosaic.core.enums import TransportType, NodeStatus
 from mosaic.transport.sqlite import SqliteTransportBackend
 from mosaic.utils.logger import get_logger
 

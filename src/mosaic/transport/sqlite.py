@@ -7,7 +7,7 @@ from typing import Optional
 import mosaic.core.util as core_util
 from mosaic.core.models import MeshEvent, SessionTrace
 from mosaic.core.transport import TransportBackend
-from mosaic.core.types import EventStatus
+from mosaic.core.enums import EventStatus
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)

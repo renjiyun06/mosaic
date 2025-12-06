@@ -1706,7 +1706,7 @@ class CCNodeRuntime:
 
 ```python
 # daemon 依赖 core, runtime, storage, utils
-from mosaic.core.types import RestartPolicy
+from mosaic.core.enums import RestartPolicy
 from mosaic.runtime.client import MeshClientImpl
 from mosaic.storage.repositories import NodeRepository
 from mosaic.utils.paths import get_mesh_dir

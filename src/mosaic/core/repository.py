@@ -6,8 +6,8 @@ from typing import List, Optional
 
 from mosaic.core.util import mosaic_db_path
 from mosaic.core.models import Mesh, Node, Subscription
-from mosaic.core.types import NodeType
-from mosaic.nodes.agent.types import SessionRoutingStrategy
+from mosaic.core.enums import NodeType
+from mosaic.nodes.agent.enums import SessionRoutingStrategy
 
 _DB_PATH = mosaic_db_path()
 _SCHEMA_SQL = """

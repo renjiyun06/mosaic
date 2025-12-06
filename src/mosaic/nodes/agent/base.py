@@ -4,7 +4,7 @@ from typing import Dict, Optional, Tuple
 from mosaic.core.node import BaseNode
 from mosaic.core.client import MeshClient
 from mosaic.core.models import MeshEvent, Subscription
-from mosaic.nodes.agent.types import (
+from mosaic.nodes.agent.enums import (
     AgentNodeRunningMode,
     SessionRoutingStrategy as Strategy,
 )

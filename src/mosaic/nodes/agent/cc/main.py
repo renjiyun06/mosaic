@@ -3,10 +3,10 @@ import json
 import argparse
 from typing import Dict
 
-from mosaic.core.types import TransportType
+from mosaic.core.enums import TransportType
 from mosaic.core.client import MeshClient
 from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
-from mosaic.nodes.agent.types import AgentNodeRunningMode
+from mosaic.nodes.agent.enums import AgentNodeRunningMode
 from mosaic.transport.sqlite import SqliteTransportBackend
 
 async def main(

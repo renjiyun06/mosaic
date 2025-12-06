@@ -21,7 +21,7 @@ from mosaic.core.client import MeshClient
 from mosaic.core.models import MeshEvent
 from mosaic.core.events import get_event_definition
 from mosaic.nodes.agent.base import AgentNode, Session
-from mosaic.nodes.agent.types import AgentNodeRunningMode
+from mosaic.nodes.agent.enums import AgentNodeRunningMode
 from mosaic.nodes.agent.cc.hooks import Hook
 from mosaic.utils.logger import get_logger
 
@@ -136,17 +136,6 @@ class HookServer:
             await writer.wait_closed()
 
 
-class McpServer:
-    def __init__(self, node: 'ClaudeCodeNode'):
-        self._node = node
-
-    async def start(self):
-        pass
-
-    async def stop(self):
-        pass
-
-
 class ClaudeCodeSessionStatus(StrEnum):
     STARTED = "started"
     CLOSING = "closing"
@@ -232,6 +221,7 @@ class ClaudeCodeSession(Session):
 
 
     async def process_event(self, event: MeshEvent):
+        # TODO: 当前会话必须把该事件处理完成才行
         if self._status == ClaudeCodeSessionStatus.STARTED:
             await self._event_queue.put(event)
 
@@ -331,7 +321,6 @@ class ClaudeCodeNode(AgentNode):
         
         self.system_prompt = None
         self._hook_server = None
-        self._mcp_server = None
         
 
     async def create_session(self, mesh_id: str, node_id: str) -> Session:
@@ -416,12 +405,30 @@ class ClaudeCodeNode(AgentNode):
         install_hook("PreToolUse", settings["hooks"])
         install_hook("UserPromptSubmit", settings["hooks"])
 
-        
+        if not settings.get('enabledMcpjsonServers'):
+            settings['enabledMcpjsonServers'] = []
+
+        settings['enabledMcpjsonServers'].append('mosaic-mcp-server')
         with open(self._settings_path, "w") as f:
             f.write(json.dumps(settings, ensure_ascii=False, indent=2))
-        
+
+        mcp_config = {}
+        if self._old_mcp_json:
+            mcp_config = json.loads(self._old_mcp_json)
+
+        if not mcp_config.get("mcpServers"):
+            mcp_config["mcpServers"] = {}
+
+        mcp_config["mcpServers"]["mosaic-mcp-server"] = {
+            "type": "http",
+            "url": "http://localhost:8000/mcp"
+        }
+
+        with open(self._mcp_json_path, "w") as f:
+            f.write(json.dumps(mcp_config, ensure_ascii=False, indent=2))
+
         logger.info(
-            f"Installed hooks for node {self.node_id} in mesh {self.mesh_id}"
+            f"Installed settings for node {self.node_id} in mesh {self.mesh_id}"
         )
 
     async def _uninstall_settings(self):
@@ -444,25 +451,24 @@ class ClaudeCodeNode(AgentNode):
         try:
             self._hook_server = HookServer(self)
             await self._hook_server.start()
-            self._mcp_server = McpServer(self)
-            await self._mcp_server.start()
             await self._install_settings()
 
             self.system_prompt = await self._assemble_system_prompt()
         except Exception as e:
             import traceback
-            logger.error(f"Error on start: {e}\n{traceback.format_exc()}")
+            logger.error(f"Error on start: {traceback.format_exc()}")
             raise e
 
     
     async def on_shutdown(self):
         await self._uninstall_settings()
-        await self._mcp_server.stop()
-        self._mcp_server = None
         await self._hook_server.stop()
         self._hook_server = None
 
     async def _assemble_system_prompt(self) -> str:
+        """
+首先要告知智能体当前所处的系统概况: 节点网络, 节点之间通过订阅其他节点产生的事件
+        """
         return ""
 
     async def handle_hook(

@@ -5,7 +5,7 @@ from typing import Dict
 from rich.console import Console
 
 from mosaic.core.client import AdminClient
-from mosaic.core.types import TransportType
+from mosaic.core.enums import TransportType
 from mosaic.cli.base import CustomGroup, CustomCommand, parse_config
 
 console = Console()

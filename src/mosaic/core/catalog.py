@@ -1,4 +1,4 @@
-from mosaic.core.types import NodeType
+from mosaic.core.enums import NodeType
 
 NODE_CATALOG = {
     NodeType.CLAUDE_CODE: {
