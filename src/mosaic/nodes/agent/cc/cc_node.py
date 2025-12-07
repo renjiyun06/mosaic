@@ -23,6 +23,7 @@ from mosaic.core.events import get_event_definition
 from mosaic.nodes.agent.base import AgentNode, Session
 from mosaic.nodes.agent.enums import AgentNodeRunningMode
 from mosaic.nodes.agent.cc.hooks import Hook
+from mosaic.nodes.agent.mcp_server import McpRequestServer
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -175,6 +176,13 @@ class ClaudeCodeSession(Session):
                             ])
                         ]
                     },
+                    mcp_servers={
+                        "mosaic-mcp-server": {
+                            "type": "http",
+                            "url": "http://localhost:8000/mcp"
+                        }
+                    },
+                    allowed_tools=["*"]
                 )
                 self._cc_client = ClaudeSDKClient(cc_options)
                 await self._cc_client.connect()
@@ -299,6 +307,7 @@ class ClaudeCodeNode(AgentNode):
         
         self.system_prompt = None
         self._hook_server = None
+        self._mcp_request_server = None
         
 
     async def create_session(self, mesh_id: str, node_id: str) -> Session:
@@ -429,6 +438,9 @@ class ClaudeCodeNode(AgentNode):
         try:
             self._hook_server = HookServer(self)
             await self._hook_server.start()
+            self._mcp_request_server = McpRequestServer(self)
+            await self._mcp_request_server.start()
+            
             await self._install_settings()
 
             self.system_prompt = await self._assemble_system_prompt()
@@ -440,16 +452,14 @@ class ClaudeCodeNode(AgentNode):
     
     async def on_shutdown(self):
         await self._uninstall_settings()
-        await self._hook_server.stop()
-        self._hook_server = None
+        if self._mcp_request_server:
+            await self._mcp_request_server.stop()
+            self._mcp_request_server = None
+        if self._hook_server:
+            await self._hook_server.stop()
+            self._hook_server = None
 
     async def _assemble_system_prompt(self) -> str:
-        """
-首先要告知智能体当前所处的系统概况: 节点网络, 节点之间通过事件订阅和收发消息进行沟通
-给出当前的节点相关的节点网络, 这其中包括订阅的事件
-给出各个节点的职责
-给出各个事件的含义
-        """
         return ""
 
     async def handle_hook(
