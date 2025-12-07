@@ -153,7 +153,7 @@ class BaseNode(ABC):
                     "message": f"Invalid command: {command}"
                 }
             
-            response_content = json.dumps(response).encode()
+            response_content = json.dumps(response, ensure_ascii=False).encode()
             writer.write(len(response_content).to_bytes(4, "big"))
             writer.write(response_content)
             await writer.drain()
@@ -162,7 +162,7 @@ class BaseNode(ABC):
                 "is_error": True,
                 "message": str(e)
             }
-            response_content = json.dumps(response).encode()
+            response_content = json.dumps(response, ensure_ascii=False).encode()
             writer.write(len(response_content).to_bytes(4, "big"))
             writer.write(response_content)
             await writer.drain()

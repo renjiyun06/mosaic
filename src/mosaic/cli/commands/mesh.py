@@ -78,7 +78,9 @@ def list_nodes(mesh_id: str):
         nodes = asyncio.run(admin_client.list_nodes(mesh_id))
         for node in nodes:
             console.print(
-                f"{node.node_id} - {node.type} - {json.dumps(node.config)}"
+                f"{node.node_id} - "
+                f"{node.type} - "
+                f"{json.dumps(node.config, ensure_ascii=False)}"
             )
     except Exception as e:
         console.print(e, style="red")

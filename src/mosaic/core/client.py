@@ -137,7 +137,7 @@ class AdminClient:
 
         reader, writer = await asyncio.open_unix_connection(str(sock_path))
         try:
-            request_content = json.dumps(req)
+            request_content = json.dumps(req, ensure_ascii=False)
             logger.info(
                 f"Sending request to node {node_id} in mesh {mesh_id}: "
                 f"{request_content}"
@@ -245,7 +245,7 @@ class AdminClient:
                 "--mesh-id", mesh_id,
                 "--node-id", node_id,
                 "--transport", transport,
-                "--config", json.dumps(node.config)
+                "--config", json.dumps(node.config, ensure_ascii=False)
             ],
             start_new_session=True,
             stdout=subprocess.DEVNULL,

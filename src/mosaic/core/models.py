@@ -30,7 +30,7 @@ class MeshEvent(BaseModel):
     def to_xml(self) -> str:
         return f"""
 <event id="{self.event_id}" type="{self.type}" from="{self.source_id}">
-    <payload>{json.dumps(self.payload)}</payload>
+    <payload>{json.dumps(self.payload, ensure_ascii=False)}</payload>
 </event>
 """.strip()
 

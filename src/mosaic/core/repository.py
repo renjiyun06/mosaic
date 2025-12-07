@@ -97,7 +97,12 @@ async def create_node(node: Node):
             "INSERT INTO nodes \
             (node_id, mesh_id, type, config) VALUES \
             (?, ?, ?, ?)",
-            (node.node_id, node.mesh_id, str(node.type), json.dumps(node.config))
+            (
+                node.node_id, 
+                node.mesh_id, 
+                str(node.type), 
+                json.dumps(node.config, ensure_ascii=False)
+            )
         )
         await conn.commit()
 
@@ -151,8 +156,10 @@ async def create_subscription(subscription: Subscription):
                 subscription.event_pattern, 
                 subscription.is_blocking, 
                 subscription.session_routing_strategy, 
-                json.dumps(subscription.session_routing_strategy_config) \
-                    if subscription.session_routing_strategy_config else None
+                json.dumps(
+                    subscription.session_routing_strategy_config,
+                    ensure_ascii=False
+                ) if subscription.session_routing_strategy_config else None
             )
         )
         await conn.commit()

@@ -10,7 +10,9 @@ from mosaic.utils.logger import get_logger
 logger = get_logger(__name__)
 
 async def _get_hook_input() -> Dict[str, Any]:
-    return json.loads(sys.stdin.read().strip())
+    input_content = sys.stdin.read().strip()
+    logger.info(f"Hook input: {input_content}")
+    return json.loads(input_content)
 
 async def main(mesh_id: str, node_id: str):
     hook_server_sock = core_util.cc_hook_server_sock_path(mesh_id, node_id)

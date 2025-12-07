@@ -61,6 +61,7 @@ class SqliteTransportBackend(TransportBackend):
 
     async def send(self, event: MeshEvent):
         try:
+            payload = json.dumps(event.payload, ensure_ascii=False)
             await self._conn.execute(
                 "INSERT INTO events \
                 (event_id, mesh_id, source_id, target_id, \
@@ -73,7 +74,7 @@ class SqliteTransportBackend(TransportBackend):
                     event.source_id,
                     event.target_id,
                     event.type,
-                    json.dumps(event.payload),
+                    payload,
                     event.session_trace.upstream_session_id \
                         if event.session_trace else None,
                     event.session_trace.downstream_session_id \

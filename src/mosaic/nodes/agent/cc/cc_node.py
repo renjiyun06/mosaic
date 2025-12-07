@@ -150,9 +150,7 @@ class ClaudeCodeSession(Session):
         super().__init__(session_id, node)
         self._status = ClaudeCodeSessionStatus.CLOSED
         self._lock = asyncio.Lock()
-        self._event_queue = None
         self._cc_client: ClaudeSDKClient = None
-        self._event_processor_task = None
       
     async def start(self):
         try:
@@ -162,7 +160,6 @@ class ClaudeCodeSession(Session):
             )
             os.chdir(str(self.node.workspace))
             if self.node.mode != AgentNodeRunningMode.PROGRAM:
-                self._event_queue = asyncio.Queue()
                 cc_options = ClaudeAgentOptions(
                     system_prompt={
                         "type": "preset",
@@ -181,9 +178,6 @@ class ClaudeCodeSession(Session):
                 )
                 self._cc_client = ClaudeSDKClient(cc_options)
                 await self._cc_client.connect()
-                self._event_processor_task = asyncio.create_task(
-                    self._event_processor_loop()
-                )
                 self._status = ClaudeCodeSessionStatus.STARTED
             logger.info(
                 f"Session {self.session_id} of node {self.node.node_id} in mesh "
@@ -202,12 +196,6 @@ class ClaudeCodeSession(Session):
             f"Closing session {self.session_id} of node {self.node.node_id} "
             f"in mesh {self.node.mesh_id}"
         )
-        if self._event_processor_task:
-            self._event_processor_task.cancel()
-            self._event_processor_task = None
-        if self._event_queue:
-            self._event_queue.put_nowait(None)
-            self._event_queue = None
         if self._cc_client:
             await self._cc_client.query("/exit")
             async for _ in self._cc_client.receive_response(): ...
@@ -221,12 +209,6 @@ class ClaudeCodeSession(Session):
 
 
     async def process_event(self, event: MeshEvent):
-        # TODO: 当前会话必须把该事件处理完成才行
-        if self._status == ClaudeCodeSessionStatus.STARTED:
-            await self._event_queue.put(event)
-
-
-    async def _event_processor_loop(self):
         async def receive():
             async for message in self._cc_client.receive_response():
                 if isinstance(message, AssistantMessage):
@@ -237,23 +219,19 @@ class ClaudeCodeSession(Session):
                                 f"{block.text}"
                             )
         
-        while True:
-            event: MeshEvent = await self._event_queue.get()
-            if event:
-                async with self._lock:
-                    xml_content = event.to_xml()
-                    logger.info(
-                        f"Session {self.session_id} processing event: "
-                        f"{xml_content}"
-                    )
-                    if self.node.mode == AgentNodeRunningMode.CHAT:
-                        console.print(xml_content)
-                    
-                    await self._cc_client.query(xml_content)
-                    await receive()
-            else:
-                break
-    
+        async with self._lock:
+            xml_content = event.to_xml()
+            logger.info(
+                f"Session {self.session_id} processing event: "
+                f"{xml_content}"
+            )
+            if self.node.mode == AgentNodeRunningMode.CHAT:
+                console.print(xml_content)
+            
+            await self._cc_client.query(xml_content)
+            await receive()
+            await self.node.client.ack(event)
+
 
     async def chat(self):
         async def receive():
@@ -264,7 +242,7 @@ class ClaudeCodeSession(Session):
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         if isinstance(block, TextBlock):
-                            console.print(block.text)
+                            console.print(f"• {block.text}")
         
         prompt_session = PromptSession()
         while True:
@@ -467,7 +445,10 @@ class ClaudeCodeNode(AgentNode):
 
     async def _assemble_system_prompt(self) -> str:
         """
-首先要告知智能体当前所处的系统概况: 节点网络, 节点之间通过订阅其他节点产生的事件
+首先要告知智能体当前所处的系统概况: 节点网络, 节点之间通过事件订阅和收发消息进行沟通
+给出当前的节点相关的节点网络, 这其中包括订阅的事件
+给出各个节点的职责
+给出各个事件的含义
         """
         return ""
 
