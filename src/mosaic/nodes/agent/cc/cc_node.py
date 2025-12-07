@@ -113,13 +113,13 @@ class HookServer:
                         reply_events = []
                         for blocking_event in blocking_events:
                             reply_events.append(
+                                # TODO send_blocking and send conflict
                                 await self._node.client.send_blocking(
                                     blocking_event,
-                                    timeout=30
+                                    timeout=60
                                 )
                             )
-
-                        # TODO merge the decisions from the reply events
+                        response = hook_type.merge_decisions(reply_events)
                     else:
                         response = hook_type.default_hook_output()
             
@@ -233,11 +233,21 @@ class ClaudeCodeSession(Session):
                             )
         
         async with self._lock:
-            xml_content = event.to_xml()
-            logger.info(
-                f"Session {self.session_id} processing event: "
-                f"{xml_content}"
-            )
+            event_type = event.type
+            xml_content = None
+            if event_type == "mosaic.node_message":
+                xml_content = event.to_node_message_xml()
+                logger.info(
+                    f"Session {self.session_id} received node message: "
+                    f"{xml_content}"
+                )
+            else:
+                xml_content = event.to_xml()
+                logger.info(
+                    f"Session {self.session_id} processing event: "
+                    f"{xml_content}"
+                )
+            
             if self.node.mode == AgentNodeRunningMode.CHAT:
                 console.print(xml_content)
             

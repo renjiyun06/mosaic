@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Any
 
 from mosaic.core.node import BaseNode
 from mosaic.core.client import MeshClient

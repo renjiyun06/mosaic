@@ -131,6 +131,10 @@ class MeshClient:
             mesh_id, source_id
         )
 
+    async def get_event(self, event_id: str) -> Optional[MeshEvent]:
+        return await self._transport.get_event(event_id)
+
+
 class AdminClient:
     async def _request_node_server(
         self,

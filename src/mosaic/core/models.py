@@ -34,6 +34,13 @@ class MeshEvent(BaseModel):
 </event>
 """.strip()
 
+    def to_node_message_xml(self) -> str:
+        return f"""
+<node_message id="{self.event_id}" from="{self.source_id}">
+{self.payload["message"]}
+</node_message>
+""".strip()
+
 class Mesh(BaseModel):
     mesh_id: str
 

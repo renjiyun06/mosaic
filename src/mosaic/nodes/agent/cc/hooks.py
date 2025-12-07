@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from abc import ABC, abstractmethod
 from pydantic import BaseModel
-from typing import Dict, Any, Type
+from typing import Dict, Any, Type, List
 
 from mosaic.core.models import MeshEvent, SessionTrace
 from mosaic.core.events import get_event_definition
@@ -26,6 +26,10 @@ class Hook(ABC, BaseModel):
     @classmethod
     @abstractmethod
     def default_hook_output(cls) -> Dict[str, Any]: ...
+
+    @classmethod
+    @abstractmethod
+    def merge_decisions(cls, decisions: List[MeshEvent]) -> Dict[str, Any]: ...
 
     @classmethod
     def get_hook_type(cls, name: str) -> Type['Hook']:

@@ -171,3 +171,26 @@ class SqliteTransportBackend(TransportBackend):
             (EventStatus.NACKED, reason, datetime.now(), event.event_id)
         )
         await self._conn.commit()
+
+
+    async def get_event(self, event_id: str) -> Optional[MeshEvent]:
+        result = await self._conn.execute(
+            "SELECT * FROM events WHERE event_id = ?",
+            (event_id,)
+        )
+        row = await result.fetchone()
+        if row:
+            return MeshEvent(
+                event_id=row["event_id"],
+                mesh_id=row["mesh_id"],
+                source_id=row["source_id"],
+                target_id=row["target_id"],
+                type=row["type"],
+                payload=json.loads(row["payload"]),
+                session_trace=SessionTrace(
+                    upstream_session_id=row["upstream_session_id"],
+                    downstream_session_id=row["downstream_session_id"],
+                ) if row["upstream_session_id"] else None,
+                reply_to=row["reply_to"],
+                created_at=row["created_at"],
+            )

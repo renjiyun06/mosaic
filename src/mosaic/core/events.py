@@ -26,6 +26,17 @@ _EVENTS: Dict[str, EventDefinition] = {
             "required": ["prompt"],
         }
     ),
+    "mosaic.node_message": EventDefinition(
+        name="mosaic.node_message",
+        description="A message from a node",
+        payload_schema={
+            "type": "object",
+            "properties": {
+                "message": {"type": "string"},
+            },
+            "required": ["message"],
+        }
+    ),
     "dummy.dummy_event": EventDefinition(
         name="dummy.dummy_event",
         description="A dummy event",
