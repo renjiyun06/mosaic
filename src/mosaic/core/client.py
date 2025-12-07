@@ -116,10 +116,19 @@ class MeshClient:
         self,
         mesh_id: str,
         target_id: str,
-        event_pattern: str
+        event_pattern: Optional[str] = None
     ) -> List[Subscription]:
         return await core_repo.list_subscribers(
             mesh_id, target_id, event_pattern
+        )
+
+    async def get_subscriptions(
+        self,
+        mesh_id: str,
+        source_id: str,
+    ) -> List[Subscription]:
+        return await core_repo.list_subscriptions(
+            mesh_id, source_id
         )
 
 class AdminClient:
@@ -433,7 +442,8 @@ class AdminClient:
                     MeshClient(mesh_id, node_id, transport_backend), 
                     AgentNodeRunningMode.PROGRAM
                 )
-                await cc_node.start_program_mode(str(uuid.uuid4()))
+                session_id = str(uuid.uuid4())
+                await cc_node.start_program_mode(session_id)
                 await cc_node.program()
                 await cc_node.stop_program_mode()
             elif node.type == NodeType.CODEX: ...

@@ -44,6 +44,9 @@ class McpRequestServer:
 
 mcp = FastMCP("mosaic-mcp-server")
 
+
+async def _send_mcp_request(request: Dict[str, Any]) -> Dict[str, Any]: ...
+
 @mcp.tool
 async def respond_to_cc_pre_tool_use(
     mesh_id: str,
@@ -51,7 +54,22 @@ async def respond_to_cc_pre_tool_use(
     session_id: str,
     permission_decision: Literal["allow", "deny", "ask"],
     permission_decision_reason: Optional[str] = None,
-) -> Dict[str, Any]: ...
+) -> Dict[str, Any]:
+    try:
+        request = {}
+        await _send_mcp_request(request)
+        return {
+            "is_error": False
+        }
+    except Exception as e:
+        import traceback
+        logger.error(
+            f"Error responding to cc.pre_tool_use: {e}\n{traceback.format_exc()}"
+        )
+        return {
+            "is_error": True,
+            "error_message": str(e)
+        }
 
 
 @mcp.tool
@@ -62,7 +80,20 @@ async def respond_to_cc_user_prompt_submit(
     decision: Literal["block", "continue"],
     reason: Optional[str] = None,
     additional_context: Optional[str] = None
-) -> Dict[str, Any]: ...
+) -> Dict[str, Any]:
+    try:
+        request = {}
+        await _send_mcp_request(request)
+        return {
+            "is_error": False
+        }
+    except Exception as e:
+        import traceback
+        logger.error(f"Error responding to cc.user_prompt_submit: {e}\n{traceback.format_exc()}")
+        return {
+            "is_error": True,
+            "error_message": str(e)
+        }
 
 
 @mcp.tool
@@ -72,7 +103,6 @@ async def send_message(
     session_id: str,
     message: str
 ) -> Dict[str, Any]: ...
-
 
 if __name__ == "__main__":
     mcp.run(transport="http", host="0.0.0.0", port=8000)

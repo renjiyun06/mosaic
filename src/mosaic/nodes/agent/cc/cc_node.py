@@ -152,6 +152,7 @@ class ClaudeCodeSession(Session):
         self._status = ClaudeCodeSessionStatus.CLOSED
         self._lock = asyncio.Lock()
         self._cc_client: ClaudeSDKClient = None
+        self._system_prompt = None
       
     async def start(self):
         try:
@@ -160,12 +161,15 @@ class ClaudeCodeSession(Session):
                 f"in mesh {self.node.mesh_id}"
             )
             os.chdir(str(self.node.workspace))
+            self._system_prompt = await self.node.assemble_system_prompt(
+                self.session_id
+            )
             if self.node.mode != AgentNodeRunningMode.PROGRAM:
                 cc_options = ClaudeAgentOptions(
                     system_prompt={
                         "type": "preset",
                         "preset": "claude_code",
-                        "append": self.node.system_prompt
+                        "append": self._system_prompt
                     },
                     cwd=self.node.workspace,
                     permission_mode="bypassPermissions",
@@ -210,6 +214,7 @@ class ClaudeCodeSession(Session):
             await self._cc_client.disconnect()
             self._cc_client = None
         
+        self._system_prompt = None
         logger.info(
             f"Session {self.session_id} of node {self.node.node_id} in mesh "
             f"{self.node.mesh_id} closed"
@@ -268,7 +273,7 @@ class ClaudeCodeSession(Session):
 
     async def program(self):
         process = await asyncio.create_subprocess_exec(
-            "claude", "--append-system-prompt", self.node.system_prompt
+            "claude", "--append-system-prompt", self._system_prompt
         )
         await process.wait()
 
@@ -305,7 +310,6 @@ class ClaudeCodeNode(AgentNode):
             with open(self._mcp_json_path, "r") as f:
                 self._old_mcp_json = f.read()
         
-        self.system_prompt = None
         self._hook_server = None
         self._mcp_request_server = None
         
@@ -322,7 +326,6 @@ class ClaudeCodeNode(AgentNode):
 
     async def start_chat_mode(self, session_id: str):
         assert self.mode == AgentNodeRunningMode.CHAT
-        self.system_prompt = await self._assemble_system_prompt()
         await self.client.connect()
         await self._start_event_processing_task()
         self._chat_session = ClaudeCodeSession(
@@ -442,8 +445,6 @@ class ClaudeCodeNode(AgentNode):
             await self._mcp_request_server.start()
             
             await self._install_settings()
-
-            self.system_prompt = await self._assemble_system_prompt()
         except Exception as e:
             import traceback
             logger.error(f"Error on start: {traceback.format_exc()}")
@@ -459,8 +460,59 @@ class ClaudeCodeNode(AgentNode):
             await self._hook_server.stop()
             self._hook_server = None
 
-    async def _assemble_system_prompt(self) -> str:
-        return ""
+    async def assemble_system_prompt(self, session_id: str) -> str:
+        event_types = set[str]()
+        subscriptions = await self.client.get_subscriptions(
+            self.mesh_id,
+            self.node_id
+        )
+        subscriber_subscriptions = await self.client.get_subscribers(
+            self.mesh_id,
+            self.node_id
+        )
+
+        network_topology = ""
+        network_topology += "graph LR\n"
+        for sub in subscriptions + subscriber_subscriptions:
+            event_types.add(sub.event_pattern)
+            network_topology += f"  {sub.target_id} --> |{sub.event_pattern}| {sub.source_id}\n"
+            
+        if network_topology:
+            network_topology = f"[Network Topology]\n{network_topology}"
+        
+        event_definitions = ""
+        for event_type in event_types:
+            event_definition = get_event_definition(event_type)
+            event_definitions += f"{event_definition.name}: {event_definition.model_dump_json(exclude={'name'})}\n\n"
+
+        if event_definitions:
+            event_definitions = f"[Event Definitions]\n{event_definitions}"
+
+        template = """
+<mosaic_runtime_context>
+You are now a node operating within the Mosaic Event Mesh system.
+
+[Identity]
+Mesh ID: {mesh_id}
+Node ID: {node_id}
+Current Session: {session_id}
+
+{network_topology}
+{event_definitions}
+</mosaic_runtime_context>
+""".strip()
+        system_prompt = template.format(
+            mesh_id=self.mesh_id,
+            node_id=self.node_id,
+            session_id=session_id,
+            network_topology=network_topology,
+            event_definitions=event_definitions,
+        )
+        logger.info(
+            f"System prompt for session {session_id} of "
+            f"node {self.node_id} in mesh {self.mesh_id}: {system_prompt}"
+        )
+        return system_prompt
 
     async def handle_hook(
         self,

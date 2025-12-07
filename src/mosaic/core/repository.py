@@ -235,14 +235,23 @@ async def list_subscriptions(
 async def list_subscribers(
     mesh_id: str,
     target_id: str,
-    event_pattern: str
+    event_pattern: Optional[str] = None
 ) -> List[Subscription]:
     async with _get_conn() as conn:
-        result = await conn.execute(
-            "SELECT * FROM subscriptions WHERE \
-             mesh_id = ? AND target_id = ? AND event_pattern = ?",
-            (mesh_id, target_id, event_pattern)
-        )
+        result = None
+        if event_pattern:
+            result = await conn.execute(
+                "SELECT * FROM subscriptions WHERE \
+                mesh_id = ? AND target_id = ? AND event_pattern = ?",
+                (mesh_id, target_id, event_pattern)
+            )
+        else:
+            result = await conn.execute(
+                "SELECT * FROM subscriptions WHERE \
+                mesh_id = ? AND target_id = ?",
+                (mesh_id, target_id)
+            )
+        
         rows = await result.fetchall()
         return [
             Subscription(
