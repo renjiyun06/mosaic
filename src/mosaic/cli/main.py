@@ -1,6 +1,8 @@
 import subprocess
+import shutil
 import click
 import asyncio
+from pathlib import Path
 from rich.console import Console
 from importlib.resources import files, as_file
 
@@ -33,7 +35,14 @@ def reset():
     if not confirmed:
         return
 
-    asyncio.run(repository.reset())
+    # Remove all the dirs and files in ~/.mosaic
+    for path in (Path.home() / ".mosaic").glob("*"):
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+    
+    asyncio.run(repository.initialize())
     console.print("Mosaic reset successfully", style="green")
 
 @mosaic.command(cls=CustomCommand, name="start-mcp")
