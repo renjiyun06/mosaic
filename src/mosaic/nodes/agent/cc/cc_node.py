@@ -110,15 +110,15 @@ class HookServer:
                             await self._node.client.send(mesh_event)
                     
                     if blocking_events:
-                        reply_events = []
+                        reply_futures = []
                         for blocking_event in blocking_events:
-                            reply_events.append(
-                                # TODO send_blocking and send conflict
-                                await self._node.client.send_blocking(
-                                    blocking_event,
-                                    timeout=60
+                            reply_futures.append(
+                                self._node.client.wait_reply(
+                                    blocking_event.event_id
                                 )
                             )
+                            await self._node.client.send(blocking_event)
+                        reply_events = await asyncio.gather(*reply_futures)
                         response = hook_type.merge_decisions(reply_events)
                     else:
                         response = hook_type.default_hook_output()

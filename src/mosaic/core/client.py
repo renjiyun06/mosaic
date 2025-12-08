@@ -34,6 +34,8 @@ class MeshClient:
         self._node_id = node_id
         self._transport = transport
         self._connected = False
+        self._pending_replies: Dict[str, asyncio.Future[MeshEvent]] = {}
+        
     
     async def connect(self):
         logger.info(
@@ -82,8 +84,24 @@ class MeshClient:
     ) -> MeshEvent: ...
 
 
-    async def receive(self) -> MeshEvent:
-        return await self._transport.receive()
+    def wait_reply(self, event_id: str) -> asyncio.Future[MeshEvent]:
+        if event_id in self._pending_replies:
+            return self._pending_replies[event_id]
+        
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        self._pending_replies[event_id] = future
+        return future
+
+
+    async def receive(self) -> Optional[MeshEvent]:
+        event = await self._transport.receive()
+        if event.reply_to and event.reply_to in self._pending_replies:
+            self._pending_replies[event.reply_to].set_result(event)
+            del self._pending_replies[event.reply_to]
+            return None
+        else:
+            return event
 
     async def ack(self, event: MeshEvent):
         logger.info(
