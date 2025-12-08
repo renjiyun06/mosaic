@@ -17,6 +17,7 @@ from claude_agent_sdk import (
 from prompt_toolkit.shortcuts import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.patch_stdout import StdoutProxy
+from prompt_toolkit.key_binding import KeyBindings
 
 import mosaic.core.util as core_util
 from mosaic.core.client import MeshClient
@@ -260,7 +261,7 @@ class ClaudeCodeSession(Session):
                 )
 
             if self.node.mode == AgentNodeRunningMode.CHAT:
-                console.print(xml_content)
+                console.print(xml_content, style="dim")
             
             self._session_logger.log("System", xml_content)
             await self._cc_client.query(xml_content)
@@ -280,7 +281,16 @@ class ClaudeCodeSession(Session):
                             self._session_logger.log("Assistant", block.text)
                             console.print(f"• {block.text}")
         
-        prompt_session = PromptSession()
+        bindings = KeyBindings()
+
+        @bindings.add('c-d')
+        def submit_handler(event):
+            event.current_buffer.validate_and_handle()
+
+        prompt_session = PromptSession(
+            multiline=True,
+            key_bindings=bindings
+        )
         with patch_stdout():
             while True:
                 try:
@@ -289,7 +299,7 @@ class ClaudeCodeSession(Session):
                 except KeyboardInterrupt:
                     break
                 async with self._lock:
-                    if user_input.lower() in ["exit", "/exit"]:
+                    if user_input.strip().lower() in ["exit", "/exit"]:
                         break
                     
                     await self._cc_client.query(user_input)
