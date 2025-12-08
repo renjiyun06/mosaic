@@ -152,7 +152,7 @@ class SqliteTransportBackend(TransportBackend):
         try:
             await self._conn.execute(
                 "UPDATE events SET status = ?, updated_at = ? WHERE event_id = ?",
-                (EventStatus.ACKED, datetime.now(), event.event_id)
+                (EventStatus.ACKED, datetime.now().isoformat(), event.event_id)
             )
             await self._conn.commit()
         except Exception as e:
@@ -168,7 +168,7 @@ class SqliteTransportBackend(TransportBackend):
         await self._conn.execute(
             "UPDATE events SET status = ?, error = ?, updated_at = ? \
              WHERE event_id = ?",
-            (EventStatus.NACKED, reason, datetime.now(), event.event_id)
+            (EventStatus.NACKED, reason, datetime.now().isoformat(), event.event_id)
         )
         await self._conn.commit()
 
