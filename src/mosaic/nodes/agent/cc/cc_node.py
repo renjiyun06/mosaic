@@ -15,6 +15,8 @@ from claude_agent_sdk import (
     HookMatcher
 )
 from prompt_toolkit.shortcuts import PromptSession
+from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.patch_stdout import StdoutProxy
 
 import mosaic.core.util as core_util
 from mosaic.core.client import MeshClient
@@ -29,7 +31,7 @@ from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-console = Console()
+console = Console(file=StdoutProxy(raw=True), force_terminal=True)
 
 class HookServer:
     def __init__(
@@ -234,6 +236,7 @@ class ClaudeCodeSession(Session):
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         if isinstance(block, TextBlock):
+                            console.print(f"• {block.text}")
                             self._session_logger.log("Assistant", block.text)
                             logger.info(
                                 f"Session {self.session_id} received message: "
@@ -255,6 +258,9 @@ class ClaudeCodeSession(Session):
                     f"Session {self.session_id} processing event: "
                     f"{xml_content}"
                 )
+
+            if self.node.mode == AgentNodeRunningMode.CHAT:
+                console.print(xml_content)
             
             self._session_logger.log("System", xml_content)
             await self._cc_client.query(xml_content)
@@ -275,18 +281,19 @@ class ClaudeCodeSession(Session):
                             console.print(f"• {block.text}")
         
         prompt_session = PromptSession()
-        while True:
-            try:
-                user_input = await prompt_session.prompt_async("> ")
-                self._session_logger.log("User", user_input)
-            except KeyboardInterrupt:
-                break
-            async with self._lock:
-                if user_input.lower() in ["exit", "/exit"]:
+        with patch_stdout():
+            while True:
+                try:
+                    user_input = await prompt_session.prompt_async("> ")
+                    self._session_logger.log("User", user_input)
+                except KeyboardInterrupt:
                     break
-                
-                await self._cc_client.query(user_input)
-                await receive()
+                async with self._lock:
+                    if user_input.lower() in ["exit", "/exit"]:
+                        break
+                    
+                    await self._cc_client.query(user_input)
+                    await receive()
 
 
     async def program(self):
