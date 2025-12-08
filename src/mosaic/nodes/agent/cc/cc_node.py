@@ -14,7 +14,6 @@ from claude_agent_sdk import (
     TextBlock,
     HookMatcher
 )
-from datetime import datetime
 from prompt_toolkit.shortcuts import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.patch_stdout import StdoutProxy
