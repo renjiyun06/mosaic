@@ -5,6 +5,7 @@ from click import option
 from rich.console import Console
 
 from mosaic.core.client import AdminClient
+from mosaic.core.enums import TransportType
 from mosaic.cli.base import CustomGroup, CustomCommand
 
 console = Console()
@@ -28,10 +29,11 @@ def create(mesh_id: str):
 
 @mesh.command(cls=CustomCommand)
 @option("--mesh-id", type=str, required=True)
-def start(mesh_id: str):
+@option("--transport", type=str, default="sqlite")
+def start(mesh_id: str, transport: str):
     """start the mosaic daemon"""
     try:
-        asyncio.run(admin_client.start_mesh(mesh_id))
+        asyncio.run(admin_client.start_mesh(mesh_id, TransportType(transport)))
         console.print(f"Mesh {mesh_id} started", style="green")
     except Exception as e:
         console.print(e, style="red")

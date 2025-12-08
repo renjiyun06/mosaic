@@ -146,7 +146,11 @@ class MirroringStrategy(SessionRoutingStrategy):
         event: MeshEvent, 
         subscription: Subscription
     ) -> bool:
-        return True
+        event_type = event.type
+        if event_type == "cc.session_end":
+            return False
+        else:
+            return True
 
 
 class TaskingStrategy(SessionRoutingStrategy):
@@ -213,6 +217,10 @@ class AgentNode(BaseNode):
 
     
     async def on_event(self, event: MeshEvent):
+        logger.info(
+            f"Node {self.node_id} in mesh {self.mesh_id} received event: "
+            f"{event.model_dump_json()}"
+        )
         if event.target_id != self.node_id:
             logger.warning(
                 f"Event {event.type} from {event.source_id} to {event.target_id} "
@@ -223,12 +231,20 @@ class AgentNode(BaseNode):
         if event.reply_to:
             session = None
             if self.mode == AgentNodeRunningMode.CHAT:
+                logger.info(
+                    f"Event {event.event_id} is a reply to a chat session "
+                    f"of node {self.node_id} in mesh {self.mesh_id}"
+                )
                 session = self._chat_session
             elif self.mode == AgentNodeRunningMode.BACKGROUND:
                 session = self._session_manager.get_session(
                     event.session_trace.downstream_session_id
                 )
             else:
+                logger.warning(
+                    f"Current running mode {self.mode} is not supported for "
+                    f"reply events"
+                )
                 return
             
             if session:

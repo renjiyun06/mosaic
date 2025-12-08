@@ -102,6 +102,10 @@ class McpRequestServer:
                 raise RuntimeError(f"Unknown MCP request type: {type}")
 
             await self._node.client.send(mesh_event)
+            return {
+                "is_error": False
+            }
+
 
         try:
             length = int.from_bytes(await reader.readexactly(4), "big")
@@ -112,7 +116,17 @@ class McpRequestServer:
                 f"{request_content}"
             )
             request = json.loads(request_content)
-            response = await handle_request(request)
+            try:
+                response = await handle_request(request)
+            except Exception as e:
+                import traceback
+                logger.error(
+                    f"Error handling MCP request: {e}\n{traceback.format_exc()}"
+                )
+                response = {
+                    "is_error": True,
+                    "error_message": str(e)
+                }
             response_content = json.dumps(response, ensure_ascii=False).encode()
             writer.write(len(response_content).to_bytes(4, "big"))
             writer.write(response_content)
@@ -149,6 +163,10 @@ async def _send_mcp_request(
         length = int.from_bytes(await reader.readexactly(4), "big")
         response_content = await reader.readexactly(length)
         response = response_content.decode("utf-8")
+        logger.info(
+            f"Received MCP response for session {session_id} of "
+            f"node {node_id} in mesh {mesh_id}: {response}"
+        )
         return json.loads(response)
     except Exception as e:
         import traceback
@@ -240,6 +258,11 @@ async def send_message(
         "The event/message ID to reply to"
     ] = None
 ) -> Dict[str, Any]:
+    logger.info(
+        f"Sending message from node {node_id} in mesh {mesh_id} for session "
+        f"{session_id} to node {target_node_id} with message type: {message_type} "
+        f"and message: {message}"
+    )
     request = {
         "type": "send_message",
         "mesh_id": mesh_id,

@@ -26,9 +26,9 @@ def subscription():
 @option("--target-id", type=str, required=True)
 @option("--event-pattern", type=str, required=True)
 @option("--mesh-id", type=str, required=True)
-@option("--session-routing-strategy", type=str, required=False)
+@option("--session-routing-strategy", "--srs", type=str, required=False)
 @option(
-    "--session-routing-strategy-config", 
+    "--session-routing-strategy-config", "--srs-config", 
     "-c", 
     multiple=True, 
     callback=parse_config,

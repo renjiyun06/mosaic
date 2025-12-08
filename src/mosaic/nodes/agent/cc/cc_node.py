@@ -186,7 +186,8 @@ class ClaudeCodeSession(Session):
                             "url": "http://localhost:8000/mcp"
                         }
                     },
-                    allowed_tools=["*"]
+                    allowed_tools=["*"],
+                    setting_sources=["project"]
                 )
                 self._cc_client = ClaudeSDKClient(cc_options)
                 await self._cc_client.connect()
@@ -238,7 +239,7 @@ class ClaudeCodeSession(Session):
             if event_type == "mosaic.node_message":
                 xml_content = event.to_node_message_xml()
                 logger.info(
-                    f"Session {self.session_id} received node message: "
+                    f"Session {self.session_id} received node message: \n"
                     f"{xml_content}"
                 )
             else:
@@ -247,9 +248,6 @@ class ClaudeCodeSession(Session):
                     f"Session {self.session_id} processing event: "
                     f"{xml_content}"
                 )
-            
-            if self.node.mode == AgentNodeRunningMode.CHAT:
-                console.print(xml_content)
             
             await self._cc_client.query(xml_content)
             await receive()
@@ -490,7 +488,7 @@ class ClaudeCodeNode(AgentNode):
                 event_types.add(event_pattern)
                 network_topology += f"  {sub.target_id} --> |{event_pattern}| {sub.source_id}\n"
             
-        for sub in subscriptions:
+        for sub in subscriber_subscriptions:
             if sub.event_pattern == "mosaic.node_message":
                 network_topology += f"  {sub.target_id} --- {sub.source_id}\n"
         

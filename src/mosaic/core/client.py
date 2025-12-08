@@ -202,11 +202,28 @@ class AdminClient:
     async def list_meshes(self) -> List[Mesh]:
         return await core_repo.list_meshes()
 
-    async def start_mesh(self, mesh_id: str):
-        raise RuntimeError("Starting a mesh is not supported yet")
+    async def start_mesh(
+        self, 
+        mesh_id: str,
+        transport: TransportType
+    ):
+        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+        
+        nodes: List[Node] = await core_repo.list_nodes(mesh_id)
+        for node in nodes:
+            await self.start_node(mesh_id, node.node_id, transport)
 
     async def stop_mesh(self, mesh_id: str):
-        raise RuntimeError("Stopping a mesh is not supported yet")
+        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+        
+        nodes: List[Node] = await core_repo.list_nodes(mesh_id)
+        for node in nodes:
+            await self.stop_node(mesh_id, node.node_id)
+    
     
     async def get_mesh_status(self, mesh_id: str) -> MeshStatus:
         raise RuntimeError("Getting the status of a mesh is not supported yet")

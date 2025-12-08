@@ -26,6 +26,15 @@ _EVENTS: Dict[str, EventDefinition] = {
             "required": ["prompt"],
         }
     ),
+    "cc.session_end": EventDefinition(
+        name="cc.session_end",
+        description="A session has ended",
+        payload_schema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+    ),
     "mosaic.node_message": EventDefinition(
         name="mosaic.node_message",
         description="A message from a node",
