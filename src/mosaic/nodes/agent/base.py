@@ -125,7 +125,7 @@ class MirroringStrategy(SessionRoutingStrategy):
     ) -> Session:
         config = subscription.session_routing_strategy_config or {}
         topic = config.get("topic", "default")
-        session = await self._session_manager \
+        session = self._session_manager \
             .get_session_for_upstream_session(
                 Strategy.MIRRORING,
                 topic,

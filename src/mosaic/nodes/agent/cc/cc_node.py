@@ -24,6 +24,7 @@ from mosaic.nodes.agent.base import AgentNode, Session
 from mosaic.nodes.agent.enums import AgentNodeRunningMode
 from mosaic.nodes.agent.cc.hooks import Hook
 from mosaic.nodes.agent.mcp_server import McpRequestServer
+from mosaic.utils.session_logger import SessionLogger
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -153,7 +154,12 @@ class ClaudeCodeSession(Session):
         self._lock = asyncio.Lock()
         self._cc_client: ClaudeSDKClient = None
         self._system_prompt = None
-      
+        self._session_logger = SessionLogger(
+            self.node.mesh_id, 
+            self.node.node_id, 
+            self.session_id
+        )
+    
     async def start(self):
         try:
             logger.info(
@@ -228,6 +234,7 @@ class ClaudeCodeSession(Session):
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         if isinstance(block, TextBlock):
+                            self._session_logger.log("Assistant", block.text)
                             logger.info(
                                 f"Session {self.session_id} received message: "
                                 f"{block.text}"
@@ -249,6 +256,7 @@ class ClaudeCodeSession(Session):
                     f"{xml_content}"
                 )
             
+            self._session_logger.log("System", xml_content)
             await self._cc_client.query(xml_content)
             await receive()
             await self.node.client.ack(event)
@@ -263,12 +271,14 @@ class ClaudeCodeSession(Session):
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         if isinstance(block, TextBlock):
+                            self._session_logger.log("Assistant", block.text)
                             console.print(f"• {block.text}")
         
         prompt_session = PromptSession()
         while True:
             try:
                 user_input = await prompt_session.prompt_async("> ")
+                self._session_logger.log("User", user_input)
             except KeyboardInterrupt:
                 break
             async with self._lock:
