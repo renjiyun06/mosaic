@@ -111,11 +111,6 @@ class SqliteTransportBackend(TransportBackend):
                 )
                 row = await result.fetchone()
                 if row:
-                    await self._conn.execute(
-                        "UPDATE events SET status = ? WHERE event_id = ?",
-                        (EventStatus.PROCESSING, row["event_id"])
-                    )
-                    await self._conn.commit()
                     logger.info(
                         f"Received event {row['event_id']} "
                         f"from SQLite transport database at {self._db_path} "
@@ -194,3 +189,11 @@ class SqliteTransportBackend(TransportBackend):
                 reply_to=row["reply_to"],
                 created_at=row["created_at"],
             )
+
+
+    async def mark_processing(self, event: MeshEvent):
+        await self._conn.execute(
+            "UPDATE events SET status = ?, updated_at = ? WHERE event_id = ?",
+            (EventStatus.PROCESSING, datetime.now().isoformat(), event.event_id)
+        )
+        await self._conn.commit()

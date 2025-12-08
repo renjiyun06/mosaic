@@ -120,6 +120,9 @@ class MeshClient:
     async def nack(self, event: MeshEvent, reason: Optional[str] = None):
         await self._transport.nack(event, reason)
 
+    async def mark_processing(self, event: MeshEvent):
+        await self._transport.mark_processing(event)
+
     async def get_subscription(
         self,
         mesh_id: str,
@@ -224,7 +227,7 @@ class AdminClient:
         for node in nodes:
             await self.stop_node(mesh_id, node.node_id)
     
-    
+
     async def get_mesh_status(self, mesh_id: str) -> MeshStatus:
         raise RuntimeError("Getting the status of a mesh is not supported yet")
 

@@ -14,6 +14,7 @@ from claude_agent_sdk import (
     TextBlock,
     HookMatcher
 )
+from datetime import datetime
 from prompt_toolkit.shortcuts import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.patch_stdout import StdoutProxy
@@ -183,7 +184,19 @@ class ClaudeCodeSession(Session):
                     cwd=self.node.workspace,
                     permission_mode="bypassPermissions",
                     hooks={
+                        "PreToolUse": [
+                            HookMatcher(hooks=[
+                                self.node.handle_hook
+                            ])
+                        ],
                         'UserPromptSubmit': [
+                            HookMatcher(hooks=[
+                                self.node.handle_hook
+                            ])
+                        ],
+                        # Actually, Python SDK does not support SessionStart, 
+                        # SessionEnd, and Notification hooks, just keep it here
+                        "SessionEnd": [
                             HookMatcher(hooks=[
                                 self.node.handle_hook
                             ])
@@ -223,6 +236,18 @@ class ClaudeCodeSession(Session):
             async for _ in self._cc_client.receive_response(): ...
             await self._cc_client.disconnect()
             self._cc_client = None
+
+            if self.node.mode != AgentNodeRunningMode.PROGRAM:
+                # Python SDK does not support 
+                # SessionStart, SessionEnd, and Notification hooks
+                await self.node.handle_hook(
+                    {
+                        "session_id": self.session_id,
+                        "hook_event_name": "SessionEnd"
+                    },
+                    None,
+                    None
+                )
         
         self._system_prompt = None
         logger.info(
@@ -233,11 +258,16 @@ class ClaudeCodeSession(Session):
 
     async def process_event(self, event: MeshEvent):
         async def receive():
+            first_message = True
             async for message in self._cc_client.receive_response():
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         if isinstance(block, TextBlock):
-                            console.print(f"• {block.text}")
+                            if first_message:
+                                console.print(f"• {block.text}")
+                                first_message = False
+                            else:
+                                console.print(block.text)
                             self._session_logger.log("Assistant", block.text)
                             logger.info(
                                 f"Session {self.session_id} received message: "
@@ -271,6 +301,7 @@ class ClaudeCodeSession(Session):
 
     async def chat(self):
         async def receive():
+            first_message = True
             async for message in self._cc_client.receive_response():
                 logger.info(
                     f"Session {self.session_id} received message: {message}"
@@ -279,7 +310,11 @@ class ClaudeCodeSession(Session):
                     for block in message.content:
                         if isinstance(block, TextBlock):
                             self._session_logger.log("Assistant", block.text)
-                            console.print(f"• {block.text}")
+                            if first_message:
+                                console.print(f"• {block.text}")
+                                first_message = False
+                            else:
+                                console.print(block.text)
         
         bindings = KeyBindings()
 
@@ -299,9 +334,6 @@ class ClaudeCodeSession(Session):
                 except KeyboardInterrupt:
                     break
                 async with self._lock:
-                    if user_input.strip().lower() in ["exit", "/exit"]:
-                        break
-                    
                     await self._cc_client.query(user_input)
                     await receive()
 
@@ -381,6 +413,7 @@ class ClaudeCodeNode(AgentNode):
         assert self.mode == AgentNodeRunningMode.PROGRAM
         await self.client.connect()
         await self.on_start()
+        await self._install_settings()
         self._program_session = ClaudeCodeSession(
             session_id,
             self
@@ -391,6 +424,7 @@ class ClaudeCodeNode(AgentNode):
     async def stop_program_mode(self):
         await self._program_session.close()
         self._program_session = None
+        await self._uninstall_settings()
         await self.on_shutdown()
         await self.client.disconnect()
 
@@ -429,6 +463,7 @@ class ClaudeCodeNode(AgentNode):
         
         install_hook("PreToolUse", settings["hooks"])
         install_hook("UserPromptSubmit", settings["hooks"])
+        install_hook("SessionEnd", settings["hooks"])
 
         if not settings.get('enabledMcpjsonServers'):
             settings['enabledMcpjsonServers'] = []
@@ -479,7 +514,6 @@ class ClaudeCodeNode(AgentNode):
             self._mcp_request_server = McpRequestServer(self)
             await self._mcp_request_server.start()
             
-            await self._install_settings()
         except Exception as e:
             import traceback
             logger.error(f"Error on start: {traceback.format_exc()}")
@@ -487,7 +521,6 @@ class ClaudeCodeNode(AgentNode):
 
     
     async def on_shutdown(self):
-        await self._uninstall_settings()
         if self._mcp_request_server:
             await self._mcp_request_server.stop()
             self._mcp_request_server = None

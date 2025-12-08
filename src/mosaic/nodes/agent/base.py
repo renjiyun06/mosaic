@@ -237,6 +237,10 @@ class AgentNode(BaseNode):
                 )
                 session = self._chat_session
             elif self.mode == AgentNodeRunningMode.BACKGROUND:
+                logger.info(
+                    f"Event {event.event_id} is a reply to a background session "
+                    f"of node {self.node_id} in mesh {self.mesh_id}"
+                )
                 session = self._session_manager.get_session(
                     event.session_trace.downstream_session_id
                 )
@@ -248,7 +252,14 @@ class AgentNode(BaseNode):
                 return
             
             if session:
+                await self.client.mark_processing(event)
                 await session.process_event(event)
+            else:
+                logger.warning(
+                    f"Cannot find session for event: "
+                    f"{event.model_dump_json()}"
+                )
+                return
         else:
             subscription = await self.client.get_subscription(
                 self.mesh_id,
