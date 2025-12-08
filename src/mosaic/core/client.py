@@ -5,6 +5,7 @@ import json
 import os
 import signal
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import mosaic.core.util as core_util
@@ -227,6 +228,24 @@ class AdminClient:
             raise RuntimeError(
                 f"Node {node_id} already exists in mesh {mesh_id}"
             )
+
+        if node_type == NodeType.CLAUDE_CODE:
+            workspace = config.get("workspace")
+            if not workspace:
+                raise RuntimeError("Workspace is required for cc node")
+            workspace = Path(workspace)
+            if not workspace.is_absolute():
+                raise RuntimeError("Workspace must be an absolute path")
+
+            nodes = await core_repo.list_nodes_by_type(NodeType.CLAUDE_CODE)
+            for node in nodes:
+                if Path(node.config.get("workspace")).resolve() \
+                                                == workspace.resolve():
+                    raise RuntimeError(
+                        f"Workspace {workspace} is already used by "
+                        f"node {node.node_id} in mesh {node.mesh_id}"
+                    )
+
 
         node = Node(
             node_id=node_id, 

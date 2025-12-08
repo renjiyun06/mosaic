@@ -100,6 +100,11 @@ class PreToolUse(Hook):
             created_at=datetime.now(),
         )
 
+    @classmethod
+    def merge_decisions(cls, decisions: List[MeshEvent]) -> Dict[str, Any]:
+        # TODO
+        return cls.default_hook_output()
+
 
 class PermissionRequest(Hook):
     mesh_event_type: str = "cc.permission_request"
@@ -127,6 +132,10 @@ class PermissionRequest(Hook):
                 }
             }
         }
+
+    @classmethod
+    def merge_decisions(cls, decisions: List[MeshEvent]) -> Dict[str, Any]:
+        return cls.default_hook_output()
 
 
 class PostToolUse(Hook):
@@ -156,6 +165,11 @@ class PostToolUse(Hook):
         return {}
 
 
+    @classmethod
+    def merge_decisions(cls, decisions: List[MeshEvent]) -> Dict[str, Any]:
+        return cls.default_hook_output()
+
+
 class Notification(Hook):
     mesh_event_type: str = "cc.notification"
     message: str
@@ -176,7 +190,12 @@ class Notification(Hook):
 
     @classmethod
     def default_hook_output(cls) -> Dict[str, Any]:
-        return {}        
+        return {}     
+
+
+    @classmethod
+    def merge_decisions(cls, decisions: List[MeshEvent]) -> Dict[str, Any]:
+        return cls.default_hook_output()
 
 
 class UserPromptSubmit(Hook):
@@ -214,6 +233,11 @@ class UserPromptSubmit(Hook):
     def default_hook_output(cls) -> Dict[str, Any]:
         return {}
 
+    @classmethod
+    def merge_decisions(cls, decisions: List[MeshEvent]) -> Dict[str, Any]:
+        # TODO
+        return cls.default_hook_output()
+
 
 class Stop(Hook):
     mesh_event_type: str = "cc.stop"
@@ -236,6 +260,11 @@ class Stop(Hook):
         return {}
 
 
+    @classmethod
+    def merge_decisions(cls, decisions: List[MeshEvent]) -> Dict[str, Any]:
+        return cls.default_hook_output()
+
+
 class SubagentStop(Hook):
     mesh_event_type: str = "cc.subagent_stop"
 
@@ -255,6 +284,11 @@ class SubagentStop(Hook):
     @classmethod
     def default_hook_output(cls) -> Dict[str, Any]:
         return {}
+
+
+    @classmethod
+    def merge_decisions(cls, decisions: List[MeshEvent]) -> Dict[str, Any]:
+        return cls.default_hook_output()
 
 
 class PreCompact(Hook):
@@ -281,6 +315,11 @@ class PreCompact(Hook):
     def default_hook_output(cls) -> Dict[str, Any]:
         return {}
 
+    
+    @classmethod
+    def merge_decisions(cls, decisions: List[MeshEvent]) -> Dict[str, Any]:
+        return cls.default_hook_output()
+
 
 class SessionStart(Hook):
     mesh_event_type: str = "cc.session_start"
@@ -303,6 +342,11 @@ class SessionStart(Hook):
         return {}
 
 
+    @classmethod
+    def merge_decisions(cls, decisions: List[MeshEvent]) -> Dict[str, Any]:
+        return cls.default_hook_output()
+
+
 class SessionEnd(Hook):
     mesh_event_type: str = "cc.session_end"
 
@@ -322,3 +366,8 @@ class SessionEnd(Hook):
     @classmethod
     def default_hook_output(cls) -> Dict[str, Any]:
         return {}
+
+
+    @classmethod
+    def merge_decisions(cls, decisions: List[MeshEvent]) -> Dict[str, Any]:
+        return cls.default_hook_output()

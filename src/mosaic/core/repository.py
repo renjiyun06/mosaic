@@ -124,6 +124,23 @@ async def get_node(mesh_id: str, node_id: str) -> Optional[Node]:
         return None
 
 
+async def list_nodes_by_type(type: NodeType) -> List[Node]:
+    async with _get_conn() as conn:
+        result = await conn.execute(
+            "SELECT * FROM nodes WHERE type = ?",
+            (str(type),)
+        )
+        rows = await result.fetchall()
+        return [
+            Node(
+                node_id=row["node_id"], 
+                mesh_id=row["mesh_id"], 
+                type=NodeType(row["type"]), 
+                config=json.loads(row["config"])
+            ) for row in rows
+        ]
+    
+
 async def list_nodes(mesh_id: str) -> List[Node]:
     async with _get_conn() as conn:
         result = await conn.execute(

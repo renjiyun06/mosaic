@@ -482,13 +482,20 @@ class ClaudeCodeNode(AgentNode):
         )
 
         network_topology = ""
-        network_topology += "graph LR\n"
         for sub in subscriptions + subscriber_subscriptions:
-            event_types.add(sub.event_pattern)
-            network_topology += f"  {sub.target_id} --> |{sub.event_pattern}| {sub.source_id}\n"
+            event_pattern = sub.event_pattern
+            if event_pattern == "mosaic.node_message":
+                continue
+            else:
+                event_types.add(event_pattern)
+                network_topology += f"  {sub.target_id} --> |{event_pattern}| {sub.source_id}\n"
             
+        for sub in subscriptions:
+            if sub.event_pattern == "mosaic.node_message":
+                network_topology += f"  {sub.target_id} --- {sub.source_id}\n"
+        
         if network_topology:
-            network_topology = f"[Network Topology]\n{network_topology}"
+            network_topology = f"[Network Topology]\ngraph LR\n{network_topology}"
         
         event_definitions = ""
         for event_type in event_types:
@@ -499,30 +506,40 @@ class ClaudeCodeNode(AgentNode):
             event_definitions = f"[Event Definitions]\n{event_definitions}"
 
         template = """
-<mosaic_runtime_context>
 You are now a node operating within the Mosaic Event Mesh system.
 
 [Identity]
 Mesh ID: {mesh_id}
 Node ID: {node_id}
-Current Session: {session_id}
+
+[Current Session]
+Session ID: {session_id}
 
 {network_topology}
 {event_definitions}
-</mosaic_runtime_context>
-""".strip()
+"""
         system_prompt = template.format(
             mesh_id=self.mesh_id,
             node_id=self.node_id,
             session_id=session_id,
             network_topology=network_topology,
             event_definitions=event_definitions,
-        )
+        ).strip()
+        
+        system_prompt = f"""
+<mosaic_runtime_context>
+
+{system_prompt}
+
+</mosaic_runtime_context>
+""".strip()
+        
         logger.info(
             f"System prompt for session {session_id} of "
-            f"node {self.node_id} in mesh {self.mesh_id}: {system_prompt}"
+            f"node {self.node_id} in mesh {self.mesh_id}: \n{system_prompt}"
         )
         return system_prompt
+
 
     async def handle_hook(
         self,

@@ -77,6 +77,13 @@ class McpRequestServer:
             elif type == "respond_to_cc_user_prompt_submit": ...
             elif type == "send_message":
                 event_definition = get_event_definition("mosaic.node_message")
+                message_type = request.get("message_type")
+                if message_type == "reply" and not reply_to:
+                    return {
+                        "is_error": True,
+                        "error_message": "The message type is reply but "
+                                         "the reply_to is not provided"
+                    }
                 mesh_event = event_definition.to_mesh_event(
                     event_id=str(uuid.uuid4()),
                     mesh_id=mesh_id,
@@ -223,8 +230,15 @@ async def send_message(
     node_id: Annotated[str, "The node ID of the sender"],
     session_id: Annotated[str, "The session ID of the sender"],
     target_node_id: Annotated[str, "The node ID of the receiver"],
-    reply_to: Annotated[str, "The event/message ID to reply to"],
-    message: str
+    message_type: Annotated[
+        Literal["reply", "send"], 
+        "The type of the message: reply or send"
+    ],
+    message: str,
+    reply_to: Annotated[
+        Optional[str], 
+        "The event/message ID to reply to"
+    ] = None
 ) -> Dict[str, Any]:
     request = {
         "type": "send_message",
@@ -232,8 +246,9 @@ async def send_message(
         "node_id": node_id,
         "session_id": session_id,
         "target_node_id": target_node_id,
-        "reply_to": reply_to,
+        "message_type": message_type,
         "message": message,
+        "reply_to": reply_to
     }
     return await _send_mcp_request(mesh_id, node_id, session_id, request)
 
