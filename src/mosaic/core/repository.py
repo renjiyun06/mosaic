@@ -213,6 +213,24 @@ async def get_subscription(
         return None
 
 
+async def delete_subscription(
+    mesh_id: str,
+    source_id: str,
+    target_id: str,
+    event_pattern: str
+):
+    async with _get_conn() as conn:
+        await conn.execute(
+            "DELETE FROM subscriptions WHERE \
+                mesh_id = ? AND \
+                source_id = ? AND \
+                target_id = ? AND \
+                event_pattern = ?",
+            (mesh_id, source_id, target_id, event_pattern)
+        )
+        await conn.commit()
+
+
 async def list_subscriptions(
     mesh_id: str, 
     source_id: Optional[str] = None, 

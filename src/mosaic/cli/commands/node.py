@@ -34,7 +34,19 @@ def create(node_id: str, mesh_id: str, type: str, config: Dict[str, str]):
 
 
 # TODO Add config command to update node config
-# TODO 增加一个命令用于实时查看一个后台会话的内容
+
+@node.command(cls=CustomCommand, name="tail-session")
+@option("--node-id", type=str, required=True)
+@option("--mesh-id", type=str, required=True)
+@option("--session-id", type=str, required=True)
+def tail_session(node_id: str, mesh_id: str, session_id: str):
+    """tail the content of a background session"""
+    try:
+        asyncio.run(admin_client.tail_session(mesh_id, node_id, session_id))
+    except Exception as e:
+        console.print(e, style="red")
+
+
 @node.command(cls=CustomCommand, name="list-sessions")
 @option("--node-id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)

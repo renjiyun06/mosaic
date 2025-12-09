@@ -91,11 +91,22 @@ def list_subs(source_id: str, target_id: Optional[str], mesh_id: str):
 @option("--source-id", type=str, required=True)
 @option("--target-id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)
-def delete(source_id: str, target_id: str, mesh_id: str):
+@option("--event-pattern", type=str, required=False)
+def delete(
+    source_id: str, 
+    target_id: str, 
+    mesh_id: str, 
+    event_pattern: Optional[str],
+):
     """Delete subscription(s)"""
     try:
         asyncio.run(
-            admin_client.delete_subscriptions(mesh_id, source_id, target_id)
+            admin_client.delete_subscriptions(
+                mesh_id, 
+                source_id, 
+                target_id, 
+                event_pattern
+            )
         )
         console.print(f"Subscription deleted", style="green")
     except Exception as e:

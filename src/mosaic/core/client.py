@@ -7,6 +7,7 @@ import signal
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from rich.console import Console
 
 import mosaic.core.util as core_util
 import mosaic.core.repository as core_repo
@@ -23,6 +24,8 @@ from mosaic.transport.sqlite import SqliteTransportBackend
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+console = Console()
 
 class MeshClient:
     def __init__(
@@ -586,9 +589,35 @@ class AdminClient:
         self, 
         mesh_id: str, 
         source_id: str, 
-        target_id: str
+        target_id: str,
+        event_pattern: Optional[str] = None
     ): 
-        raise RuntimeError("Deleting a subscription is not supported yet")
+        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+
+        if source_id:
+            source_node = await core_repo.get_node(mesh_id, source_id)
+            if not source_node:
+                raise RuntimeError(f"Node {source_id} not found in mesh {mesh_id}")
+        
+        if target_id:
+            target_node = await core_repo.get_node(mesh_id, target_id)
+            if not target_node:
+                raise RuntimeError(f"Node {target_id} not found in mesh {mesh_id}")
+        
+        event_patterns = event_pattern.split(",")
+        for event_pattern in event_patterns:
+            event_pattern = event_pattern.strip()
+            if event_pattern.startswith("@"):
+                event_pattern = event_pattern[1:].strip()
+            
+            event_names = get_event_names(event_pattern)
+            for event_name in event_names:
+                await core_repo.delete_subscription(
+                    mesh_id, source_id, target_id, event_name
+                )
+            
     
     async def list_subscriptions(
         self, 
@@ -643,3 +672,21 @@ class AdminClient:
                 f"Failed to list sessions for "
                 f"node {node_id} in mesh {mesh_id}: {e}"
             )
+
+    
+    async def tail_session(
+        self,
+        mesh_id: str,
+        node_id: str,
+        session_id: str
+    ):
+        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+
+        node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
+        if not node:
+            raise RuntimeError(f"Node {node_id} not found in mesh {mesh_id}")
+
+        # TODO
+        ...
