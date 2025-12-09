@@ -28,3 +28,6 @@ def mcp_request_server_sock_path(mesh_id: str, node_id: str) -> Path:
 
 def session_log_path(mesh_id: str, node_id: str, session_id: str) -> Path:
     return mesh_path(mesh_id) / "nodes" / f"{node_id}" / "sessions" / f"{session_id}.log"
+
+def session_socket_path(mesh_id: str, node_id: str, session_id: str) -> Path:
+    return mesh_path(mesh_id) / "nodes" / f"{node_id}" / "sessions" / f"{session_id}.sock"

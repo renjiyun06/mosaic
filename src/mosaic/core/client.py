@@ -8,6 +8,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from rich.console import Console
+from prompt_toolkit.patch_stdout import StdoutProxy
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.shortcuts import PromptSession
+from prompt_toolkit.patch_stdout import patch_stdout
 
 import mosaic.core.util as core_util
 import mosaic.core.repository as core_repo
@@ -25,7 +29,7 @@ from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-console = Console()
+
 
 class MeshClient:
     def __init__(
@@ -673,6 +677,61 @@ class AdminClient:
                 f"node {node_id} in mesh {mesh_id}: {e}"
             )
 
+    async def chat_background_session(
+        self,
+        mesh_id: str,
+        node_id: str,
+        session_id: str
+    ):
+        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+
+        node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
+        if not node:
+            raise RuntimeError(f"Node {node_id} not found in mesh {mesh_id}")
+
+        session_socket_path = core_util.session_socket_path(
+            mesh_id, node_id, session_id
+        )
+        if not session_socket_path.exists():
+            raise RuntimeError(
+                f"Session {session_id} not found for "
+                f"node {node_id} in mesh {mesh_id}"
+            )
+        reader, writer = await asyncio.open_unix_connection(
+            str(session_socket_path)
+        )
+
+        console = Console(file=StdoutProxy(raw=True), force_terminal=True)
+
+        bindings = KeyBindings()
+
+        @bindings.add('c-d')
+        def submit_handler(event):
+            event.current_buffer.validate_and_handle()
+
+        prompt_session = PromptSession(
+            multiline=True,
+            key_bindings=bindings
+        )
+        with patch_stdout():
+            try:
+                while True:
+                    user_input = await prompt_session.prompt_async("> ")
+            except Exception as e:
+                logger.error(
+                    f"Error chatting background session {session_id} for "
+                    f"node {node_id} in mesh {mesh_id}: {e}"
+                )
+                raise RuntimeError(
+                    f"Error chatting background session {session_id} for "
+                    f"node {node_id} in mesh {mesh_id}: {e}"
+                )
+            finally:
+                writer.close()
+                await writer.wait_closed()
+    
     
     async def tail_session(
         self,
@@ -703,6 +762,7 @@ class AdminClient:
             stderr=asyncio.subprocess.PIPE
         )
     
+        console = Console()
         try:
             assistant_message_started = False
             async for line in process.stdout:

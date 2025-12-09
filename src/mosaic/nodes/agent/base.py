@@ -1,4 +1,5 @@
 import json
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Tuple, Any, List, Literal
 from datetime import datetime
@@ -25,6 +26,13 @@ class Session(ABC):
         )
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
         self._log_path.touch(exist_ok=True)
+        self._socket_path = core_util.session_socket_path(
+            node.mesh_id, node.node_id, session_id
+        )
+        self._socket_path.parent.mkdir(parents=True, exist_ok=True)
+        self._socket_server = None
+        self._connection_tasks: List[asyncio.Task] = []
+    
     
     @abstractmethod
     async def start(self): ...
@@ -36,6 +44,72 @@ class Session(ABC):
     async def chat(self): ...
     @abstractmethod
     async def program(self): ...
+
+    async def start_socket_server(self):
+        self._socket_server = await asyncio.start_unix_server(
+            self._handle_connection,
+            path=str(self._socket_path)
+        )
+
+    async def _handle_connection(self, reader, writer):
+        task = asyncio.create_task(
+            self._handle_connection_task(reader, writer)
+        )
+        self._connection_tasks.append(task)
+
+        def cleanup_task(t):
+            if t in self._connection_tasks:
+                self._connection_tasks.remove(t)
+        
+        task.add_done_callback(cleanup_task)
+
+    async def _handle_connection_task(self, reader, writer):
+        try:
+            while True:
+                ...
+        except asyncio.CancelledError:
+            ...
+
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception as e:
+            logger.error(
+                f"Error closing writer for connection to session {self.session_id} "
+                f"of node {self.node.node_id} in mesh {self.node.mesh_id}: {e}"
+            )
+            raise e
+
+    async def stop_socket_server(self):
+        logger.info(
+            f"Stopping socket server for session {self.session_id} of "
+            f"node {self.node.node_id} in mesh {self.node.mesh_id}"
+        )
+        if self._socket_server:
+            self._socket_server.close()
+            await self._socket_server.wait_closed()
+        
+        self._socket_server = None
+       
+        for task in self._connection_tasks:
+            task.cancel()
+        
+        try:
+            await asyncio.gather(*self._connection_tasks)
+        except Exception as e:
+            logger.error(
+                f"Error stopping socket server for session {self.session_id} of "
+                f"node {self.node.node_id} in mesh {self.node.mesh_id}: {e}"
+            )
+            raise e
+        finally:
+            self._connection_tasks = []
+        
+        logger.info(
+            f"Socket server for session {self.session_id} of "
+            f"node {self.node.node_id} in mesh {self.node.mesh_id} stopped"
+        )
+
 
     async def record(
         self, 

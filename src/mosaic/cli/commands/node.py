@@ -113,3 +113,21 @@ def chat(node_id: str, mesh_id: str):
         )
     except Exception as e:
         console.print(e, style="red")
+
+
+@node.command(cls=CustomCommand, name="chat-background-session")
+@option("--node-id", type=str, required=True)
+@option("--mesh-id", type=str, required=True)
+@option("--session-id", type=str, required=True)
+def chat_background_session(
+    node_id: str,
+    mesh_id: str,
+    session_id: str
+):
+    """chat with a background session of a mosaic mesh agent node"""
+    try:
+        asyncio.run(
+            admin_client.chat_background_session(mesh_id, node_id, session_id)
+        )
+    except Exception as e:
+        console.print(e, style="red")
