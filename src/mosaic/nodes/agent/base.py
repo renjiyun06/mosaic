@@ -32,6 +32,7 @@ class Session(ABC):
         self._socket_path.parent.mkdir(parents=True, exist_ok=True)
         self._socket_server = None
         self._connection_tasks: List[asyncio.Task] = []
+        
     
     
     @abstractmethod
@@ -44,6 +45,8 @@ class Session(ABC):
     async def chat(self): ...
     @abstractmethod
     async def program(self): ...
+    @abstractmethod
+    async def send_message(self, message: str): ...
 
     async def start_socket_server(self):
         self._socket_server = await asyncio.start_unix_server(
@@ -66,10 +69,19 @@ class Session(ABC):
     async def _handle_connection_task(self, reader, writer):
         try:
             while True:
-                ...
+                length = int.from_bytes(await reader.readexactly(4), 'big')
+                user_message = (await reader.readexactly(length)).decode()
+                logger.info(
+                    f"Received user message for session {self.session_id} of "
+                    f"node {self.node.node_id} in mesh {self.node.mesh_id}: {user_message}"
+                )
+                await self.send_message(user_message)
         except asyncio.CancelledError:
-            ...
-
+            logger.info(
+                f"Connection to session {self.session_id} of "
+                f"node {self.node.node_id} in mesh {self.node.mesh_id} cancelled"
+            )
+        
         try:
             writer.close()
             await writer.wait_closed()

@@ -297,6 +297,24 @@ class ClaudeCodeSession(Session):
             await self.node.client.ack(event)
 
 
+    async def send_message(self, message: str):
+        async def receive():
+            async for message in self._cc_client.receive_response():
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            await self.record("Assistant", block.text)
+
+        
+        if self.node.mode != AgentNodeRunningMode.BACKGROUND:
+            return
+        
+        if self._cc_client is None:
+            return 
+
+        await self._cc_client.query(message)
+        await receive()
+
     async def chat(self):
         async def receive():
             first_message = True

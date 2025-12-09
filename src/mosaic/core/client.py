@@ -705,6 +705,53 @@ class AdminClient:
 
         console = Console(file=StdoutProxy(raw=True), force_terminal=True)
 
+        async def receive():
+            try:
+                assistant_message_started = False
+                while True:
+                    length = int.from_bytes(await reader.readexactly(4), 'big')
+                    event_content = (await reader.readexactly(length)).decode()
+                    logger.info(
+                        f"Received event from background session {session_id} for "
+                        f"node {node_id} in mesh {mesh_id}: {event_content}"
+                    )
+                    event = json.loads(event_content)
+                    type = event.get("type")
+                    if type == "assistant_message_start":
+                        assistant_message_started = True
+                    elif type == "assistant_message_end":
+                        assistant_message_started = False
+                    elif type == "message":
+                        role = event.get("role")
+                        message = event.get("message")
+                        if role == "User":
+                            continue
+                        elif role == "Assistant":
+                            if not assistant_message_started:
+                                console.print(f"• {message}")
+                                assistant_message_started = True
+                            else:
+                                console.print(message)
+                        elif role == "System":
+                            console.print(message, style="dim")
+                    else:
+                        logger.warning(
+                            f"Unknown event type: {type} from "
+                            f"background session {session_id} for "
+                            f"node {node_id} in mesh {mesh_id}: {event_content}"
+                        )
+                        continue
+
+            except Exception as e:
+                logger.error(
+                    f"Error receiving events from background session {session_id} for "
+                    f"node {node_id} in mesh {mesh_id}: {e}"
+                )
+                raise e
+
+
+        receive_task = asyncio.create_task(receive())
+
         bindings = KeyBindings()
 
         @bindings.add('c-d')
@@ -719,6 +766,12 @@ class AdminClient:
             try:
                 while True:
                     user_input = await prompt_session.prompt_async("> ")
+                    if user_input.lower() in ["exit", "/exit"]:
+                        break
+                    user_input_bytes = user_input.encode('utf-8')
+                    writer.write(len(user_input_bytes).to_bytes(4, 'big'))
+                    writer.write(user_input_bytes)
+                    await writer.drain()
             except Exception as e:
                 logger.error(
                     f"Error chatting background session {session_id} for "
@@ -731,6 +784,8 @@ class AdminClient:
             finally:
                 writer.close()
                 await writer.wait_closed()
+
+        receive_task.cancel()
     
     
     async def tail_session(
