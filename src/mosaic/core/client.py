@@ -688,5 +688,43 @@ class AdminClient:
         if not node:
             raise RuntimeError(f"Node {node_id} not found in mesh {mesh_id}")
 
-        # TODO
-        ...
+        session_log_path = core_util.session_log_path(
+            mesh_id, node_id, session_id
+        )
+        if not session_log_path.exists():
+            raise RuntimeError(
+                f"Session {session_id} not found for "
+                f"node {node_id} in mesh {mesh_id}"
+            )
+
+        process = await asyncio.create_subprocess_exec(
+            'tail', '-f', str(session_log_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+    
+        try:
+            assistant_message_started = False
+            async for line in process.stdout:
+                line_content = line.decode('utf-8')
+                if not line_content.strip():
+                    continue
+                json_line = json.loads(line_content)
+                role = json_line.get("role")
+                message = json_line.get("message")
+                if role == "User":
+                    assistant_message_started = False
+                    console.print(f"> {message}")
+                elif role == "Assistant":
+                    if not assistant_message_started:
+                        console.print(f"• {message}")
+                        assistant_message_started = True
+                    else:
+                        console.print(message)
+                elif role == "System":
+                    assistant_message_started = False
+                    console.print(message, style="dim")
+        except KeyboardInterrupt:
+            process.terminate()
+            await process.wait()
+        

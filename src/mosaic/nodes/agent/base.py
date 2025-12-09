@@ -1,7 +1,9 @@
+import json
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Tuple, Any, List
+from typing import Dict, Optional, Tuple, Any, List, Literal
 from datetime import datetime
 
+import mosaic.core.util as core_util
 from mosaic.core.node import BaseNode
 from mosaic.core.client import MeshClient
 from mosaic.core.models import MeshEvent, Subscription
@@ -17,6 +19,12 @@ class Session(ABC):
     def __init__(self, session_id: str, node: 'AgentNode'):
         self.session_id = session_id
         self.node = node
+        self._messages: List[Dict[str, Any]] = []
+        self._log_path = core_util.session_log_path(
+            node.mesh_id, node.node_id, session_id
+        )
+        self._log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._log_path.touch(exist_ok=True)
     
     @abstractmethod
     async def start(self): ...
@@ -29,6 +37,22 @@ class Session(ABC):
     @abstractmethod
     async def program(self): ...
 
+    async def record(
+        self, 
+        role: Literal["User", "Assistant", "System"], 
+        message: str
+    ): 
+        self._messages.append({
+            "role": role,
+            "message": message,
+            "created_at": datetime.now().isoformat()
+        })
+        with open(self._log_path, "a") as f:
+            f.write(json.dumps({
+                "role": role,
+                "message": message,
+                "created_at": datetime.now().isoformat()
+            }, ensure_ascii=False) + "\n")
 
 class SessionManager:
     def __init__(self, node: 'AgentNode'):
