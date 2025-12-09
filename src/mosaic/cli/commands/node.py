@@ -32,6 +32,10 @@ def create(node_id: str, mesh_id: str, type: str, config: Dict[str, str]):
         console.print(e, style="red")
 
 
+# TODO Add config command to update node config
+# TODO 增加一个命令用于实时查看一个后台会话的内容
+
+
 @node.command(cls=CustomCommand)
 @option("--node-id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)

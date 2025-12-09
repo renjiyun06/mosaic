@@ -174,7 +174,17 @@ class ClaudeCodeSession(Session):
                 self.session_id
             )
             if self.node.mode != AgentNodeRunningMode.PROGRAM:
+                mcp_servers = {
+                    "mosaic-mcp-server": {
+                        "type": "http",
+                        "url": "http://localhost:8000/mcp"
+                    }
+                }
+                mcp_servers.update(json.loads(
+                    self.node.config.get("mcpServers", "{}"))
+                )
                 cc_options = ClaudeAgentOptions(
+                    model="sonnet",
                     system_prompt={
                         "type": "preset",
                         "preset": "claude_code",
@@ -201,12 +211,7 @@ class ClaudeCodeSession(Session):
                             ])
                         ]
                     },
-                    mcp_servers={
-                        "mosaic-mcp-server": {
-                            "type": "http",
-                            "url": "http://localhost:8000/mcp"
-                        }
-                    },
+                    mcp_servers=mcp_servers,
                     allowed_tools=["*"],
                     setting_sources=["project"]
                 )
@@ -339,7 +344,9 @@ class ClaudeCodeSession(Session):
 
     async def program(self):
         process = await asyncio.create_subprocess_exec(
-            "claude", "--append-system-prompt", self._system_prompt
+            "claude", 
+            "--model", "sonnet",
+            "--append-system-prompt", self._system_prompt
         )
         await process.wait()
 
@@ -467,10 +474,6 @@ class ClaudeCodeNode(AgentNode):
         if not settings.get('enabledMcpjsonServers'):
             settings['enabledMcpjsonServers'] = []
 
-        settings['enabledMcpjsonServers'].append('mosaic-mcp-server')
-        with open(self._settings_path, "w") as f:
-            f.write(json.dumps(settings, ensure_ascii=False, indent=2))
-
         mcp_config = {}
         if self._old_mcp_json:
             mcp_config = json.loads(self._old_mcp_json)
@@ -483,8 +486,18 @@ class ClaudeCodeNode(AgentNode):
             "url": "http://localhost:8000/mcp"
         }
 
+        settings['enabledMcpjsonServers'].append('mosaic-mcp-server')
+
+        mcp_servers: Dict[str, Any] = json.loads(self.config.get("mcpServers", "{}"))
+        for name, config in mcp_servers.items():
+            mcp_config["mcpServers"][name] = config
+            settings['enabledMcpjsonServers'].append(name)
+
         with open(self._mcp_json_path, "w") as f:
             f.write(json.dumps(mcp_config, ensure_ascii=False, indent=2))
+
+        with open(self._settings_path, "w") as f:
+            f.write(json.dumps(settings, ensure_ascii=False, indent=2))
 
         logger.info(
             f"Installed settings for node {self.node_id} in mesh {self.mesh_id}"

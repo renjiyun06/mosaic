@@ -215,22 +215,19 @@ async def get_subscription(
 
 async def list_subscriptions(
     mesh_id: str, 
-    source_id: str, 
+    source_id: Optional[str] = None, 
     target_id: Optional[str] = None
 ) -> List[Subscription]:
     async with _get_conn() as conn:
+        sql = "SELECT * FROM subscriptions WHERE mesh_id = ?"
+        params = [mesh_id]
+        if source_id:
+            sql += " AND source_id = ?"
+            params.append(source_id)
         if target_id:
-            result = await conn.execute(
-                "SELECT * FROM subscriptions WHERE \
-                 mesh_id = ? AND source_id = ? AND target_id = ?",
-                (mesh_id, source_id, target_id)
-            )
-        else:
-            result = await conn.execute(
-                "SELECT * FROM subscriptions WHERE \
-                 mesh_id = ? AND source_id = ?",
-                (mesh_id, source_id)
-            )
+            sql += " AND target_id = ?"
+            params.append(target_id)
+        result = await conn.execute(sql, params)
         rows = await result.fetchall()
         return [
             Subscription(

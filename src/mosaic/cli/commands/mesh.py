@@ -86,3 +86,20 @@ def list_nodes(mesh_id: str):
             )
     except Exception as e:
         console.print(e, style="red")
+
+    
+@mesh.command(cls=CustomCommand, name="topology")
+@option("--mesh-id", type=str, required=True)
+def topology(mesh_id: str):
+    """show the topology of a mosaic mesh"""
+    try:
+        subscriptions = asyncio.run(admin_client.list_subscriptions(mesh_id))
+        if not subscriptions:
+            return
+        else:
+            graph = "graph LR\n"
+            for sub in subscriptions:
+                graph += f"  {sub.target_id} --> |{sub.event_pattern}| {sub.source_id}\n"
+            console.print(graph)
+    except Exception as e:
+        console.print(e, style="red")

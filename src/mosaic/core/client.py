@@ -593,18 +593,19 @@ class AdminClient:
     async def list_subscriptions(
         self, 
         mesh_id: str, 
-        source_id: str, 
+        source_id: Optional[str] = None, 
         target_id: Optional[str] = None
     ) -> List[Subscription]:
         mesh = await core_repo.get_mesh(mesh_id)
         if not mesh:
             raise RuntimeError(f"Mesh {mesh_id} not found")
 
-        source_node = await core_repo.get_node(mesh_id, source_id)
-        if not source_node:
-            raise RuntimeError(
-                f"Node {source_id} not found in mesh {mesh_id}"
-            )
+        if source_id:
+            source_node = await core_repo.get_node(mesh_id, source_id)
+            if not source_node:
+                raise RuntimeError(
+                    f"Node {source_id} not found in mesh {mesh_id}"
+                )
         
         if target_id:
             target_node = await core_repo.get_node(mesh_id, target_id)
@@ -613,9 +614,4 @@ class AdminClient:
                     f"Node {target_id} not found in mesh {mesh_id}"
                 )
         
-        subscriptions = []
-        if target_id:
-            subscriptions = await core_repo.list_subscriptions(mesh_id, source_id, target_id)
-        else:
-            subscriptions = await core_repo.list_subscriptions(mesh_id, source_id)
-        return subscriptions
+        return await core_repo.list_subscriptions(mesh_id, source_id, target_id)
