@@ -2,7 +2,7 @@ import asyncio
 import os
 import json
 import signal
-from typing import Dict, List
+from typing import Dict, List, Any
 from abc import ABC, abstractmethod
 
 import mosaic.core.util as core_util
@@ -38,9 +38,12 @@ class BaseNode(ABC):
     async def on_start(self): ...
     @abstractmethod
     async def on_shutdown(self): ...
+
     async def register_chat_session(self, session_id: str): ...
     async def unregister_chat_session(self, session_id: str): ...
     async def list_chat_sessions(self) -> List[str]:
+        return []
+    async def list_background_sessions(self) -> List[Dict[str, Any]]:
         return []
 
 
@@ -143,6 +146,12 @@ class BaseNode(ABC):
                 }
             elif command == "list_chat_sessions":
                 sessions = await self.list_chat_sessions()
+                response = {
+                    "is_error": False,
+                    "sessions": sessions
+                }
+            elif command == "list_background_sessions":
+                sessions = await self.list_background_sessions()
                 response = {
                     "is_error": False,
                     "sessions": sessions

@@ -615,3 +615,31 @@ class AdminClient:
                 )
         
         return await core_repo.list_subscriptions(mesh_id, source_id, target_id)
+
+    
+    async def list_sessions(
+        self,
+        mesh_id: str,
+        node_id: str
+    ) -> List[Dict[str, Any]]:
+        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+
+        node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
+        if not node:
+            raise RuntimeError(f"Node {node_id} not found in mesh {mesh_id}")
+
+        try:
+            return (await self._request_node_server(
+                mesh_id, node_id, { "command": "list_background_sessions" }
+            )).get("sessions", [])
+        except Exception as e:
+            logger.error(
+                f"Failed to list sessions for node {node_id} in mesh {mesh_id}: "
+                f"{e}"
+            )
+            raise RuntimeError(
+                f"Failed to list sessions for "
+                f"node {node_id} in mesh {mesh_id}: {e}"
+            )

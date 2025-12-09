@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Tuple, Any
+from typing import Dict, Optional, Tuple, Any, List
+from datetime import datetime
 
 from mosaic.core.node import BaseNode
 from mosaic.core.client import MeshClient
@@ -80,6 +81,7 @@ class SessionManager:
             self._node.mesh_id,
             self._node.node_id
         )
+        await self._node.register_background_session(session.session_id)
         await session.start()
         self._sessions[strategy][topic][upstream_session_id] = session
         self._session_id_to_session[session.session_id] = (
@@ -95,6 +97,7 @@ class SessionManager:
         del self._sessions[strategy][topic][upstream_session_id]
         del self._session_id_to_session[session.session_id]
         await session.close()
+        await self._node.unregister_background_session(session.session_id)
 
 
 class SessionRoutingStrategy(ABC):
@@ -214,6 +217,9 @@ class AgentNode(BaseNode):
             Strategy.TASKING: TaskingStrategy(self._session_manager),
             Strategy.STATEFUL: StatefulStrategy(self._session_manager),
         }
+        
+        self._chat_sessions: Dict[str, Any] = {}
+        self._background_sessions: Dict[str, Any] = {}
 
     
     async def on_event(self, event: MeshEvent):
@@ -297,6 +303,31 @@ class AgentNode(BaseNode):
             await session.process_event(event)
             if not routing_strategy.session_retained(event, subscription):
                 await self._session_manager.close_session(session)
+
+
+    async def register_chat_session(self, session_id: str):
+        self._chat_sessions[session_id] = {
+            "session_id": session_id,
+            "created_at": datetime.now().isoformat()
+        }
+    
+    async def unregister_chat_session(self, session_id: str):
+        del self._chat_sessions[session_id]
+
+    async def list_chat_sessions(self) -> List[str]:
+        return list(self._chat_sessions.keys())
+
+    async def register_background_session(self, session_id: str):
+        self._background_sessions[session_id] = {
+            "session_id": session_id,
+            "created_at": datetime.now().isoformat()
+        }
+    
+    async def unregister_background_session(self, session_id: str):
+        del self._background_sessions[session_id]
+
+    async def list_background_sessions(self) -> List[Dict[str, Any]]:
+        return list(self._background_sessions.values())
 
 
     @abstractmethod

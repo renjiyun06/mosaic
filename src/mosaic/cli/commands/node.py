@@ -1,7 +1,8 @@
 import asyncio
+from email.policy import default
 import click
 from click import option
-from typing import Dict
+from typing import Dict, List, Any
 from rich.console import Console
 
 from mosaic.core.client import AdminClient
@@ -34,6 +35,20 @@ def create(node_id: str, mesh_id: str, type: str, config: Dict[str, str]):
 
 # TODO Add config command to update node config
 # TODO 增加一个命令用于实时查看一个后台会话的内容
+@node.command(cls=CustomCommand, name="list-sessions")
+@option("--node-id", type=str, required=True)
+@option("--mesh-id", type=str, required=True)
+@option("--type", type=str, default="background")   # TODO support it
+def list_sessions(node_id: str, mesh_id: str, type: str):
+    """list the background sessions of a mosaic mesh agent node"""
+    try:
+        sessions: List[Dict[str, Any]] = asyncio.run(
+            admin_client.list_sessions(mesh_id, node_id)
+        )
+        for session in sessions:
+            console.print(session["session_id"])
+    except Exception as e:
+        console.print(e, style="red")
 
 
 @node.command(cls=CustomCommand)
