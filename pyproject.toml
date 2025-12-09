@@ -10,6 +10,7 @@ dependencies = [
     "click>=8.3.1",
     "fastmcp>=2.13.3",
     "prompt-toolkit>=3.0.52",
+    "pyzmq>=27.1.0",
     "rich>=14.2.0",
 ]
 
