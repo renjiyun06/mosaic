@@ -5,6 +5,8 @@ import json
 import os
 import signal
 import uuid
+import zmq
+import zmq.asyncio
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from rich.console import Console
@@ -28,8 +30,6 @@ from mosaic.transport.sqlite import SqliteTransportBackend
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
 
 class MeshClient:
     def __init__(
@@ -165,6 +165,30 @@ class MeshClient:
 
 
 class AdminClient:
+    async def _request_node_command_server(
+        self,
+        mesh_id: str,
+        node_id: str,
+        command: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        zmq_sock_path = core_util.node_zmq_sock_path(mesh_id, node_id)
+        if not zmq_sock_path.exists():
+            raise RuntimeError(
+                f"Node {node_id} is not running in mesh {mesh_id}"
+            )
+        try:
+            context = zmq.asyncio.Context()
+            socket = context.socket(zmq.REQ)
+            socket.connect("ipc://" + str(zmq_sock_path))
+            await socket.send_json(command)
+            response = await socket.recv_json()
+            if response.get("is_error"):
+                raise RuntimeError(response.get("message"))
+            return response.get("result")
+        finally:
+            socket.close()
+            context.term()
+
     async def _request_node_server(
         self,
         mesh_id: str,
