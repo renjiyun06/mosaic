@@ -621,7 +621,7 @@ class AdminClient:
             source_node = await core_repo.get_node(mesh_id, source_id)
             if not source_node:
                 raise RuntimeError(
-                    f"Node {source_id} not found in mesh {mesh_id}"
+                    f"Node {source_id} not found in mesh {mesh}"
                 )
         
         if target_id:
@@ -638,7 +638,7 @@ class AdminClient:
         self,
         mesh_id: str,
         node_id: str,
-        mode: SessionMode
+        mode: Optional[SessionMode]=None
     ) -> List[Dict[str, Any]]:
         mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
         if not mesh:
@@ -646,15 +646,24 @@ class AdminClient:
 
         node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
         if not node:
-            raise RuntimeError(f"Node {node_id} not found in {mesh}")
+            raise RuntimeError(f"Node {node} not found in mesh {mesh}")
 
         zmq_sock_path = core_util.node_zmq_sock_path(mesh_id, node_id)
         if not zmq_sock_path.exists():
             raise RuntimeError(
-                f"{node} is not running"
+                f"Node {node} is not running"
             )
 
-        response = await self._request_node_zmq_server(
-            mesh_id, node_id, {"type": "list_sessions", "args": {"mode": mode}}
+        request = {
+            "type": "list_sessions"
+        }
+        if mode:
+            request["args"] = {
+                "mode": mode.value
+            }
+        sessions = await self._request_node_zmq_server(
+            mesh_id, 
+            node_id,
+            request
         )
-        return response.get("response", [])
+        return sessions

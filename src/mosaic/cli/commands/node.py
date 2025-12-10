@@ -38,12 +38,16 @@ def create(node_id: str, mesh_id: str, type: str, config: Dict[str, str]):
 @node.command(cls=CustomCommand, name="list-sessions")
 @option("--node-id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)
-@option("--mode", type=str, default="background")
-def list_sessions(node_id: str, mesh_id: str, mode: str):
+@option("--mode", type=str, required=False)
+def list_sessions(node_id: str, mesh_id: str, mode: Optional[str]=None):
     """list the sessions of a mosaic mesh agent node"""
     try:
         sessions: List[Dict[str, Any]] = asyncio.run(
-            admin_client.list_sessions(mesh_id, node_id, SessionMode(mode))
+            admin_client.list_sessions(
+                mesh_id, 
+                node_id,
+                SessionMode(mode) if mode else None
+            )
         )
         for session in sessions:
             console.print(f"{session['session_id']} - {session['mode']}")
