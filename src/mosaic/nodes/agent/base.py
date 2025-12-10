@@ -1,7 +1,7 @@
 import json
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Tuple, Any, List, Literal
+from typing import Dict, Optional, Any, List, Literal
 from datetime import datetime
 
 import mosaic.core.util as core_util
@@ -9,6 +9,7 @@ from mosaic.core.node import BaseNode
 from mosaic.core.client import MeshClient
 from mosaic.core.models import MeshEvent, Subscription
 from mosaic.nodes.agent.enums import (
+    SessionMode,
     AgentNodeRunningMode,
     SessionRoutingStrategy as Strategy,
 )
@@ -140,74 +141,24 @@ class Session(ABC):
                 "created_at": datetime.now().isoformat()
             }, ensure_ascii=False) + "\n")
 
+
 class SessionManager:
     def __init__(self, node: 'AgentNode'):
         self._node = node
-        # strategy -> topic -> upstream_session_id -> session
-        self._sessions: Dict[Strategy, Dict[str, Dict[str, Session]]] = {} 
-        # session_id -> (strategy, topic, upstream_session_id, session)
-        self._session_id_to_session: Dict[
-            str, Tuple[Strategy, str, str, Session]
-        ] = {}
-
+        self._sessions: Dict[str, Session] = {}
     
     def get_session(self, session_id: str) -> Optional[Session]:
-        if session_id not in self._session_id_to_session:
-            return None
-        return self._session_id_to_session[session_id][3]
+        return self._sessions.get(session_id, None)
 
-    
-    def get_session_for_upstream_session(
-        self, 
-        strategy: 'SessionRoutingStrategy', 
-        topic: str,
-        upstream_session_id: str,
-    ) -> Optional[Session]:
-        if strategy not in self._sessions:
-            return None
-        
-        if topic not in self._sessions[strategy]:
-            return None
-        
-        if upstream_session_id not in self._sessions[strategy][topic]:
-            return None
-        
-        return self._sessions[strategy][topic][upstream_session_id]
-
-
-    async def create_session_for_upstream_session(
-        self, 
-        strategy: Strategy, 
-        topic: str,
-        upstream_session_id: str
-    ) -> Session:
-        if strategy not in self._sessions:
-            self._sessions[strategy] = {}
-        
-        if topic not in self._sessions[strategy]:
-            self._sessions[strategy][topic] = {}
-        
-        session = await self._node.create_session(
-            self._node.mesh_id,
-            self._node.node_id
-        )
-        await self._node.register_background_session(session.session_id)
+    async def create_session(self, mode: SessionMode) -> Session:
+        session = await self._node.create_session(mode)
+        self._sessions[session.session_id] = session
         await session.start()
-        self._sessions[strategy][topic][upstream_session_id] = session
-        self._session_id_to_session[session.session_id] = (
-            strategy, topic, upstream_session_id, session
-        )
         return session
 
-
     async def close_session(self, session: Session):
-        strategy, topic, upstream_session_id, _ = self._session_id_to_session[
-            session.session_id
-        ]
-        del self._sessions[strategy][topic][upstream_session_id]
-        del self._session_id_to_session[session.session_id]
+        del self._sessions[session.session_id]
         await session.close()
-        await self._node.unregister_background_session(session.session_id)
 
 
 class SessionRoutingStrategy(ABC):
@@ -230,6 +181,9 @@ class SessionRoutingStrategy(ABC):
 class MirroringStrategy(SessionRoutingStrategy):
     def __init__(self, session_manager: SessionManager):
         self._session_manager = session_manager
+        # topic -> upstream_session_id -> session
+        self._sessions: Dict[str, Dict[str, Session]] = {} 
+
 
     async def route(
         self, 
@@ -238,29 +192,31 @@ class MirroringStrategy(SessionRoutingStrategy):
     ) -> Session:
         config = subscription.session_routing_strategy_config or {}
         topic = config.get("topic", "default")
-        session = self._session_manager \
-            .get_session_for_upstream_session(
-                Strategy.MIRRORING,
-                topic,
-                event.session_trace.upstream_session_id
-            )
+        upstream_session_id = event.session_trace.upstream_session_id
+        session = self._sessions.get(topic, {}).get(upstream_session_id, None)
         if session:
             return session
         else:
-            return await self._session_manager \
-                .create_session_for_upstream_session(
-                    Strategy.MIRRORING,
-                    topic,
-                    event.session_trace.upstream_session_id
-                )
+            session = await self._session_manager.create_session(
+                SessionMode.BACKGROUND
+            )
+            if topic not in self._sessions:
+                self._sessions[topic] = {}
+            self._sessions[topic][upstream_session_id] = session
+            return session
+    
 
     def session_retained(
         self, 
         event: MeshEvent, 
         subscription: Subscription
     ) -> bool:
+        config = subscription.session_routing_strategy_config or {}
+        topic = config.get("topic", "default")
+        upstream_session_id = event.session_trace.upstream_session_id
         event_type = event.type
         if event_type == "cc.session_end":
+            del self._sessions[topic][upstream_session_id]
             return False
         else:
             return True
@@ -270,17 +226,17 @@ class TaskingStrategy(SessionRoutingStrategy):
     def __init__(self, session_manager: SessionManager):
         self._session_manager = session_manager
 
+
     async def route(
         self, 
         event: MeshEvent, 
         subscription: Subscription
     ) -> Session:
-        return await self._session_manager.create_session_for_upstream_session(
-            Strategy.TASKING,
-            "default",
-            event.session_trace.upstream_session_id
+        return await self._session_manager.create_session(
+            SessionMode.BACKGROUND
         )
     
+
     def session_retained(
         self, 
         event: MeshEvent, 
@@ -397,11 +353,10 @@ class AgentNode(BaseNode):
             try:
                 session = await routing_strategy.route(event, subscription)
             except Exception as e:
-                import traceback
                 logger.error(
                     f"Error routing event {event.event_id} "
                     f"from {event.source_id}: "
-                    f"{traceback.format_exc()}"
+                    f"{e}"
                 )
                 raise e
             
@@ -441,7 +396,7 @@ class AgentNode(BaseNode):
 
 
     @abstractmethod
-    async def create_session(self, mesh_id: str, node_id: str) -> Session: ...
+    async def create_session(self, mode: SessionMode) -> Session: ...
     @abstractmethod
     async def chat(self): ...
     @abstractmethod
