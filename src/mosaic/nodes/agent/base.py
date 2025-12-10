@@ -287,7 +287,9 @@ class AgentNode(BaseNode):
     async def stop_chat(self, session_id: str):
         session = self._session_manager.get_session(session_id)
         if not session:
-            raise RuntimeError(f"Session {session_id} not found")
+            # TODO fix it
+            logger.warning(f"Session {session_id} not found")
+            return
         if session.mode == SessionMode.CHAT:
             await self._session_manager.close_session(session)
 
