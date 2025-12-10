@@ -21,10 +21,11 @@ from mosaic.core.catalog import NODE_CATALOG
 from mosaic.core.events import get_event_names
 from mosaic.core.models import Mesh, MeshEvent, Subscription, Node
 from mosaic.core.transport import TransportBackend
-from mosaic.core.enums import MeshStatus, NodeStatus, NodeType, TransportType
+from mosaic.core.enums import MeshStatus, NodeType, TransportType
 from mosaic.nodes.agent.enums import (
     SessionRoutingStrategy,
     AgentNodeRunningMode,
+    SessionMode,
 )
 from mosaic.transport.sqlite import SqliteTransportBackend
 from mosaic.utils.logger import get_logger
@@ -165,11 +166,11 @@ class MeshClient:
 
 
 class AdminClient:
-    async def _request_node_command_server(
+    async def _request_node_zmq_server(
         self,
         mesh_id: str,
         node_id: str,
-        command: Dict[str, Any]
+        request: Dict[str, Any]
     ) -> Dict[str, Any]:
         zmq_sock_path = core_util.node_zmq_sock_path(mesh_id, node_id)
         if not zmq_sock_path.exists():
@@ -180,47 +181,14 @@ class AdminClient:
             context = zmq.asyncio.Context()
             socket = context.socket(zmq.REQ)
             socket.connect("ipc://" + str(zmq_sock_path))
-            await socket.send_json(command)
+            await socket.send_json(request)
             response = await socket.recv_json()
             if response.get("is_error"):
                 raise RuntimeError(response.get("message"))
-            return response.get("result")
+            return response.get("response")
         finally:
             socket.close()
             context.term()
-
-    async def _request_node_server(
-        self,
-        mesh_id: str,
-        node_id: str,
-        req: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        sock_path = core_util.node_sock_path(mesh_id, node_id)
-        if not sock_path.exists():
-            raise RuntimeError(
-                f"Node {node_id} is not running in mesh {mesh_id}"
-            )
-
-        reader, writer = await asyncio.open_unix_connection(str(sock_path))
-        try:
-            request_content = json.dumps(req, ensure_ascii=False)
-            logger.info(
-                f"Sending request to node {node_id} in mesh {mesh_id}: "
-                f"{request_content}"
-            )
-            request_content_bytes = request_content.encode()
-            writer.write(len(request_content_bytes).to_bytes(4, "big"))
-            writer.write(request_content_bytes)
-            await writer.drain()
-            length = int.from_bytes(await reader.readexactly(4), "big")
-            response_content = (await reader.readexactly(length)).decode("utf-8")
-            response = json.loads(response_content)
-            if response.get("is_error"):
-                raise RuntimeError(response.get("message"))
-            return response
-        finally:
-            writer.close()
-            await writer.wait_closed()
 
 
     async def create_mesh(self, mesh_id: str):
@@ -258,10 +226,6 @@ class AdminClient:
         for node in nodes:
             await self.stop_node(mesh_id, node.node_id)
     
-
-    async def get_mesh_status(self, mesh_id: str) -> MeshStatus:
-        raise RuntimeError("Getting the status of a mesh is not supported yet")
-
     
     async def create_node(
         self,
@@ -360,19 +324,21 @@ class AdminClient:
         if not node:
             raise RuntimeError(f"Node {node_id} not found in mesh {mesh_id}")
 
-        sock_path = core_util.node_sock_path(mesh_id, node_id)
-        if not sock_path.exists():
+        node_zmq_sock_path = core_util.node_zmq_sock_path(mesh_id, node_id)
+        if not node_zmq_sock_path.exists():
             raise RuntimeError(
                 f"Node {node_id} is not running in mesh {mesh_id}"
             )
 
-        chat_sessions = (await self._request_node_server(
-            mesh_id, node_id, { "command": "list_chat_sessions" }
-        )).get("sessions", [])
-        
-        if chat_sessions:
+        response = await self._request_node_zmq_server(
+            mesh_id,
+            node_id,
+            {"type": "list_sessions"}
+        )
+        sessions = response.get("response", [])
+        if sessions:
             raise RuntimeError(
-                f"Node {node_id} has active chat sessions in mesh {mesh_id}"
+                f"Node {node_id} has active sessions in mesh {mesh_id}"
             )
 
         pid_path = core_util.node_pid_path(mesh_id, node_id)
@@ -383,116 +349,107 @@ class AdminClient:
 
         pid = pid_path.read_text()
         os.kill(int(pid), signal.SIGTERM)
-        
-        
-    async def get_node_status(
-        self, 
-        mesh_id: str, 
-        node_id: str
-    ) -> NodeStatus:
-        node = await core_repo.get_node(mesh_id, node_id)
-        if not node:
-            raise RuntimeError(f"Node {node_id} not found in mesh {mesh_id}")
-
-        sock_path = core_util.node_sock_path(mesh_id, node_id)
-        if not sock_path.exists():
-            return NodeStatus.STOPPED
-
-        res = await self._request_node_server(
-            mesh_id, node_id, { "command": "status" }
-        )
-        return NodeStatus(res.get("status"))
 
 
-    async def chat_node(
-        self, 
-        mesh_id: str, 
-        node_id: str, 
-        transport: TransportType
+    async def chat(
+        self,
+        mesh_id: str,
+        node_id: str,
+        session_id: Optional[str]=None
     ):
-        session_id = None
-        try:
-            node = await core_repo.get_node(mesh_id, node_id)
-            if not node:
-                raise RuntimeError(
-                    f"Node {node_id} not found in mesh {mesh_id}"
-                )
+        # TODO
+        ...
+        
 
-            if node.type not in [
-                NodeType.CLAUDE_CODE,
-                NodeType.CODEX,
-                NodeType.GEMINI,
-                NodeType.CURSOR,
-                NodeType.OPENHANDS
-            ]:
-                raise RuntimeError(
-                    f"Node {node_id} is not an agent node in mesh {mesh_id}"
-                )
+    # async def chat_node(
+    #     self, 
+    #     mesh_id: str, 
+    #     node_id: str, 
+    #     transport: TransportType
+    # ):
+    #     session_id = None
+    #     try:
+    #         node = await core_repo.get_node(mesh_id, node_id)
+    #         if not node:
+    #             raise RuntimeError(
+    #                 f"Node {node_id} not found in mesh {mesh_id}"
+    #             )
 
-            lock_path = core_util.node_lock_path(mesh_id, node_id)
-            if lock_path.exists():
-                raise RuntimeError(
-                    f"Node {node_id} is busy in mesh {mesh_id}"
-                )
+    #         if node.type not in [
+    #             NodeType.CLAUDE_CODE,
+    #             NodeType.CODEX,
+    #             NodeType.GEMINI,
+    #             NodeType.CURSOR,
+    #             NodeType.OPENHANDS
+    #         ]:
+    #             raise RuntimeError(
+    #                 f"Node {node_id} is not an agent node in mesh {mesh_id}"
+    #             )
 
-            pid_path = core_util.node_pid_path(mesh_id, node_id)
-            if not pid_path.exists():
-                raise RuntimeError(
-                    f"Node {node_id} is not running in mesh {mesh_id}"
-                )
+    #         lock_path = core_util.node_lock_path(mesh_id, node_id)
+    #         if lock_path.exists():
+    #             raise RuntimeError(
+    #                 f"Node {node_id} is busy in mesh {mesh_id}"
+    #             )
 
-            sock_path = core_util.node_sock_path(mesh_id, node_id)
-            if not sock_path.exists():
-                raise RuntimeError(
-                    f"Node {node_id} is not running in mesh {mesh_id}"
-                )
+    #         pid_path = core_util.node_pid_path(mesh_id, node_id)
+    #         if not pid_path.exists():
+    #             raise RuntimeError(
+    #                 f"Node {node_id} is not running in mesh {mesh_id}"
+    #             )
 
-            session_id = str(uuid.uuid4())
-            await self._request_node_server(
-                mesh_id,
-                node_id,
-                {
-                    "command": "register_chat_session",
-                    "session_id": session_id
-                }
-            )
+    #         sock_path = core_util.node_sock_path(mesh_id, node_id)
+    #         if not sock_path.exists():
+    #             raise RuntimeError(
+    #                 f"Node {node_id} is not running in mesh {mesh_id}"
+    #             )
 
-            transport_backend = None
-            if transport == TransportType.SQLITE:
-                transport_backend = SqliteTransportBackend(mesh_id, node_id)
-            else:
-                raise RuntimeError(f"Unsupported transport type: {transport}")
+    #         session_id = str(uuid.uuid4())
+    #         await self._request_node_server(
+    #             mesh_id,
+    #             node_id,
+    #             {
+    #                 "command": "register_chat_session",
+    #                 "session_id": session_id
+    #             }
+    #         )
 
-            if node.type == NodeType.CLAUDE_CODE:
-                from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
-                cc_node = ClaudeCodeNode(
-                    mesh_id, 
-                    node_id, 
-                    node.config, 
-                    MeshClient(
-                        mesh_id,
-                        node_id,
-                        transport_backend
-                    ), 
-                    AgentNodeRunningMode.CHAT
-                )
-                await cc_node.start_chat_mode(session_id)
-                await cc_node.chat()
-                await cc_node.stop_chat_mode()
-            elif node.type == NodeType.CODEX: ...
-            elif node.type == NodeType.GEMINI: ...
-            elif node.type == NodeType.CURSOR: ...
-            elif node.type == NodeType.OPENHANDS: ...
-        finally:
-            if session_id:
-                await self._request_node_server(
-                    mesh_id,
-                    node_id,
-                    {
-                        "command": "unregister_chat_session",
-                        "session_id": session_id
-                    }
-                )
+    #         transport_backend = None
+    #         if transport == TransportType.SQLITE:
+    #             transport_backend = SqliteTransportBackend(mesh_id, node_id)
+    #         else:
+    #             raise RuntimeError(f"Unsupported transport type: {transport}")
+
+    #         if node.type == NodeType.CLAUDE_CODE:
+    #             from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
+    #             cc_node = ClaudeCodeNode(
+    #                 mesh_id, 
+    #                 node_id, 
+    #                 node.config, 
+    #                 MeshClient(
+    #                     mesh_id,
+    #                     node_id,
+    #                     transport_backend
+    #                 ), 
+    #                 AgentNodeRunningMode.CHAT
+    #             )
+    #             await cc_node.start_chat_mode(session_id)
+    #             await cc_node.chat()
+    #             await cc_node.stop_chat_mode()
+    #         elif node.type == NodeType.CODEX: ...
+    #         elif node.type == NodeType.GEMINI: ...
+    #         elif node.type == NodeType.CURSOR: ...
+    #         elif node.type == NodeType.OPENHANDS: ...
+    #     finally:
+    #         if session_id:
+    #             await self._request_node_server(
+    #                 mesh_id,
+    #                 node_id,
+    #                 {
+    #                     "command": "unregister_chat_session",
+    #                     "session_id": session_id
+    #                 }
+    #             )
 
         
     async def program_node(
@@ -677,7 +634,8 @@ class AdminClient:
     async def list_sessions(
         self,
         mesh_id: str,
-        node_id: str
+        node_id: str,
+        mode: SessionMode
     ) -> List[Dict[str, Any]]:
         mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
         if not mesh:
@@ -687,19 +645,17 @@ class AdminClient:
         if not node:
             raise RuntimeError(f"Node {node_id} not found in mesh {mesh_id}")
 
-        try:
-            return (await self._request_node_server(
-                mesh_id, node_id, { "command": "list_background_sessions" }
-            )).get("sessions", [])
-        except Exception as e:
-            logger.error(
-                f"Failed to list sessions for node {node_id} in mesh {mesh_id}: "
-                f"{e}"
-            )
+        zmq_sock_path = core_util.node_zmq_sock_path(mesh_id, node_id)
+        if not zmq_sock_path.exists():
             raise RuntimeError(
-                f"Failed to list sessions for "
-                f"node {node_id} in mesh {mesh_id}: {e}"
+                f"Node {node_id} is not running in mesh {mesh_id}"
             )
+
+        response = await self._request_node_zmq_server(
+            mesh_id, node_id, {"type": "list_sessions", "args": {"mode": mode}}
+        )
+        return response.get("response", [])
+
 
     async def chat_background_session(
         self,

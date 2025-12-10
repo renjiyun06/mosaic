@@ -9,9 +9,6 @@ def mesh_path(mesh_id: str) -> Path:
 def node_pid_path(mesh_id: str, node_id: str) -> Path:
     return mesh_path(mesh_id) / "nodes" / f"{node_id}" / "pid"
 
-def node_sock_path(mesh_id: str, node_id: str) -> Path:
-    return mesh_path(mesh_id) / "nodes" / f"{node_id}" / "sock"
-
 def node_zmq_sock_path(mesh_id: str, node_id: str) -> Path:
     return mesh_path(mesh_id) / "nodes" / f"{node_id}" / "zmq.sock"
 

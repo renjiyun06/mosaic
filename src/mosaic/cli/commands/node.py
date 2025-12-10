@@ -1,12 +1,12 @@
 import asyncio
-from email.policy import default
 import click
 from click import option
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from rich.console import Console
 
 from mosaic.core.client import AdminClient
 from mosaic.core.enums import TransportType
+from mosaic.nodes.agent.enums import SessionMode
 from mosaic.cli.base import CustomGroup, CustomCommand, parse_config
 
 console = Console()
@@ -51,15 +51,15 @@ def tail_session(node_id: str, mesh_id: str, session_id: str, type: str):
 @node.command(cls=CustomCommand, name="list-sessions")
 @option("--node-id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)
-@option("--type", type=str, default="background")   # TODO support it
-def list_sessions(node_id: str, mesh_id: str, type: str):
-    """list the background sessions of a mosaic mesh agent node"""
+@option("--mode", type=str, default="background")
+def list_sessions(node_id: str, mesh_id: str, mode: str):
+    """list the sessions of a mosaic mesh agent node"""
     try:
         sessions: List[Dict[str, Any]] = asyncio.run(
-            admin_client.list_sessions(mesh_id, node_id)
+            admin_client.list_sessions(mesh_id, node_id, SessionMode(mode))
         )
         for session in sessions:
-            console.print(session["session_id"])
+            console.print(f"{session['session_id']} - {session['mode']}")
     except Exception as e:
         console.print(e, style="red")
 
@@ -105,11 +105,12 @@ def program(node_id: str, mesh_id: str):
 @node.command(cls=CustomCommand)
 @option("--node-id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)
-def chat(node_id: str, mesh_id: str):
+@option("--session-id", type=str, required=False)
+def chat(node_id: str, mesh_id: str, session_id: Optional[str]=None):
     """chat with a mosaic mesh agent node"""
     try:
         asyncio.run(
-            admin_client.chat_node(mesh_id, node_id, TransportType.SQLITE)
+            admin_client.chat(mesh_id, node_id, session_id)
         )
     except Exception as e:
         console.print(e, style="red")

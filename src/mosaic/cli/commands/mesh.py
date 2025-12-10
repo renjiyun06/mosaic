@@ -50,17 +50,6 @@ def stop(mesh_id: str):
         console.print(e, style="red")
 
 
-@mesh.command(cls=CustomCommand)
-@option("--mesh-id", type=str, required=True)
-def status(mesh_id: str):
-    """get the status of a mosaic mesh"""
-    try:
-        status = asyncio.run(admin_client.get_mesh_status(mesh_id))
-        console.print(f"Mesh {mesh_id} status: {status}", style="green")
-    except Exception as e:
-        console.print(e, style="red")
-
-
 @mesh.command(cls=CustomCommand, name="list")
 def list_mesh():
     """list all mosaic meshes"""

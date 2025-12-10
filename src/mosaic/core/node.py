@@ -15,7 +15,7 @@ from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-class CommandServer:
+class ZmqServer:
     def __init__(
         self,
         node: 'BaseNode'
@@ -26,13 +26,13 @@ class CommandServer:
         )
         self._zmq_context = None
         self._zmq_socket = None
-        self._command_processing_task = None
+        self._request_processing_task = None
 
 
     async def start(self):
         try:
             logger.info(
-                f"Starting ZMQ command server for "
+                f"Starting zmq server for "
                 f"node {self.node.node_id} in mesh {self.node.mesh_id}"
             )
             self._zmq_sock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -40,19 +40,19 @@ class CommandServer:
             self._zmq_socket = self._zmq_context.socket(zmq.REP)
             self._zmq_socket.bind("ipc://" + str(self._zmq_sock_path))
             logger.info(
-                f"ZMQ command server for "
+                f"Zmq server for "
                 f"node {self.node.node_id} in mesh {self.node.mesh_id} started"
             )
-            self._command_processing_task = asyncio.create_task(
-                self.process_command()
+            self._request_processing_task = asyncio.create_task(
+                self.process_request()
             )
             logger.info(
-                f"Command processing task for "
+                f"Request processing task for "
                 f"node {self.node.node_id} in mesh {self.node.mesh_id} started"
             )
         except Exception as e:
             logger.error(
-                f"Error starting ZMQ command server for "
+                f"Error starting zmq server for "
                 f"node {self.node.node_id} in mesh {self.node.mesh_id}: {e}"
             )
             raise e
@@ -61,12 +61,12 @@ class CommandServer:
     async def stop(self):
         try:
             logger.info(
-                f"Stopping ZMQ command server for "
+                f"Stopping zmq server for "
                 f"node {self.node.node_id} in mesh {self.node.mesh_id}"
             )
-            if self._command_processing_task:
-                self._command_processing_task.cancel()
-                self._command_processing_task = None
+            if self._request_processing_task:
+                self._request_processing_task.cancel()
+                self._request_processing_task = None
             if self._zmq_socket:
                 self._zmq_socket.close()
                 self._zmq_socket = None
@@ -74,42 +74,44 @@ class CommandServer:
                 self._zmq_context.term()
                 self._zmq_context = None
             logger.info(
-                f"ZMQ command server for "
+                f"Zmq server for "
                 f"node {self.node.node_id} in mesh {self.node.mesh_id} stopped"
             )
         except Exception as e:
             logger.error(
-                f"Error stopping ZMQ command server for "
+                f"Error stopping zmq server for "
                 f"node {self.node.node_id} in mesh {self.node.mesh_id}: {e}"
             )
             raise e
+        finally:
+            self._zmq_sock_path.unlink(missing_ok=True)
 
 
-    async def process_command(self):
+    async def process_request(self):
         while True:
             try:
-                command = await self._zmq_socket.recv_json()
-                command_name = command.get("name")
-                command_handler = getattr(self.node, command_name)
-                if not command_handler:
+                request = await self._zmq_socket.recv_json()
+                request_type = request.get("type")
+                request_handler = getattr(self.node, request_type)
+                if not request_handler:
                     raise RuntimeError(
-                        f"Command {command_name} not supported by "
+                        f"Request {request_type} not supported by "
                         f"node {self.node.node_id} in mesh {self.node.mesh_id}"
                     )
-                result = await command_handler(**command.get("args", {}))
+                response = await request_handler(**request.get("args", {}))
                 await self._zmq_socket.send_json({
                     "is_error": False,
-                    "result": result
+                    "response": response
                 })
             except asyncio.CancelledError:
                 logger.info(
-                    f"Command processing task for "
+                    f"Request processing task for "
                     f"node {self.node.node_id} in mesh {self.node.mesh_id} cancelled"
                 )
                 break
             except Exception as e:
                 logger.error(
-                    f"Error processing command for "
+                    f"Error processing request for "
                     f"node {self.node.node_id} in mesh {self.node.mesh_id}: {e}"
                 )
                 await self._zmq_socket.send_json({
@@ -130,12 +132,10 @@ class BaseNode(ABC):
         self.node_id = node_id
         self.config = config
         self.client = client
-        self._command_server = CommandServer(self)
-        self._sock_server = None
+        self._zmq_server = ZmqServer(self)
         self._event_processing_task = None
         self._status = NodeStatus.STOPPED
         self._pid_path = core_util.node_pid_path(mesh_id, node_id)
-        self._sock_path = core_util.node_sock_path(mesh_id, node_id)
         self._stop_event = asyncio.Event()
     
     @abstractmethod
@@ -160,8 +160,7 @@ class BaseNode(ABC):
                 f"Node {self.node_id} is already running in mesh {self.mesh_id}"
             )
         await self.client.connect()
-        await self._start_sock_server()
-        await self._command_server.start()
+        await self._zmq_server.start()
         await self._start_event_processing_task()
         await self.on_start()
         self._pid_path.parent.mkdir(parents=True, exist_ok=True)
@@ -183,8 +182,7 @@ class BaseNode(ABC):
         self._status = NodeStatus.STOPPING
         await self.on_shutdown()
         await self._stop_event_processing_task()
-        await self._stop_sock_server()
-        await self._command_server.stop()
+        await self._zmq_server.stop()
         await self.client.disconnect()
         
         self._pid_path.unlink(missing_ok=True)
@@ -192,38 +190,6 @@ class BaseNode(ABC):
 
         logger.info(f"Node {self.node_id} in mesh {self.mesh_id} stopped")
         self._stop_event.set()
-
-
-    async def _start_sock_server(self):
-        logger.info(
-            f"Starting Unix socket server for "
-            f"node {self.node_id} in mesh {self.mesh_id}"
-        )
-        if self._sock_path.exists():
-            logger.error(
-                f"Unix socket path {self._sock_path} already exists for "
-                f"node {self.node_id} in mesh {self.mesh_id}"
-            )
-            raise ValueError(
-                f"Unix socket path {self._sock_path} already exists for "
-                f"node {self.node_id} in mesh {self.mesh_id}"
-            )
-        self._sock_path.parent.mkdir(parents=True, exist_ok=True)
-        self._sock_server = await asyncio.start_unix_server(
-            self._handle_command,
-            path=str(self._sock_path)
-        )
-        logger.info(
-            f"Unix socket server for "
-            f"node {self.node_id} in mesh {self.mesh_id} started"
-        )
-
-    async def _stop_sock_server(self):
-        self._sock_path.unlink(missing_ok=True)
-        if self._sock_server:
-            self._sock_server.close()
-            await self._sock_server.wait_closed()
-        self._sock_server = None
 
 
     async def _handle_command(self, reader, writer):
