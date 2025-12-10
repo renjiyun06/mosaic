@@ -228,6 +228,7 @@ class ClaudeCodeSession(Session):
                 for block in message.content:
                     if isinstance(block, TextBlock):
                         await self.broadcast_client.send({
+                            "type": "message",
                             "session_id": self.session_id,
                             "role": "assistant",
                             "message": block.text
@@ -244,6 +245,7 @@ class ClaudeCodeSession(Session):
                 xml_content = event.to_xml()
 
             await self.broadcast_client.send({
+                "type": "message",
                 "session_id": self.session_id,
                 "role": "system",
                 "message": xml_content

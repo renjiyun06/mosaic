@@ -406,12 +406,21 @@ class AdminClient:
             if message.get("session_id") != session_id:
                 return
 
-            if message.get("role") == "assistant":
-                console.print(f"• {message.get("message")}")
-            elif message.get("role") == "user":
-                console.print(f"> {message.get("message")}")
-            else:
-                console.print(message.get("message"), style="dim")
+            type = message.get("type")
+            if type == "message":
+                if message.get("role") == "assistant":
+                    console.print(f"• {message.get("message")}")
+                elif message.get("role") == "user":
+                    console.print(f"> {message.get("message")}")
+                else:
+                    console.print(message.get("message"), style="dim")
+            elif type == "system":
+                sub_type = message.get("sub_type")
+                if sub_type == "session_end":
+                    logger.info(
+                        f"Session {session_id} ended"
+                    )
+                    chat_loop_task.cancel()
 
         broadcast_client = BroadcastClient(
             core_util.session_broadcast_server_pull_sock_path(
@@ -423,39 +432,47 @@ class AdminClient:
             process_message
         )
         await broadcast_client.connect()
+        async def chat_loop():
+            bindings = KeyBindings()
+            @bindings.add('c-d')
+            def submit_handler(event):
+                event.current_buffer.validate_and_handle()
 
+            prompt_session = PromptSession(
+                multiline=True,
+                key_bindings=bindings,
+                erase_when_done=True
+            )
+            with patch_stdout():
+                while True:
+                    try:
+                        user_input = await prompt_session.prompt_async("> ")
+                        await broadcast_client.send({
+                            "type": "message",
+                            "session_id": session_id,
+                            "role": "user",
+                            "message": user_input
+                        })
+                    except (asyncio.CancelledError, KeyboardInterrupt):
+                        break
+
+        async def stop_chat():
+            await broadcast_client.disconnect()
+            await self._request_node_zmq_server(
+                mesh_id,
+                node_id,
+                {
+                    "type": "stop_chat",
+                    "args": {"session_id": session_id}
+                }
+            )
         
-        bindings = KeyBindings()
-        @bindings.add('c-d')
-        def submit_handler(event):
-            event.current_buffer.validate_and_handle()
 
-        prompt_session = PromptSession(
-            multiline=True,
-            key_bindings=bindings
+        chat_loop_task = asyncio.create_task(chat_loop())
+        chat_loop_task.add_done_callback(
+            lambda _: asyncio.create_task(stop_chat())
         )
-        with patch_stdout():
-            while True:
-                try:
-                    user_input = await prompt_session.prompt_async("> ")
-                    await broadcast_client.send({
-                        "session_id": session_id,
-                        "role": "user",
-                        "message": user_input
-                    })
-                except KeyboardInterrupt:
-                    break
-            
-        await broadcast_client.disconnect()
-        await self._request_node_zmq_server(
-            mesh_id,
-            node_id,
-            {
-                "type": "stop_chat",
-                "args": {"session_id": session_id}
-            }
-        )
-    
+        await chat_loop_task
         
     async def program_node(
         self, 

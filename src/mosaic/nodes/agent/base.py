@@ -205,6 +205,7 @@ class AgentNode(BaseNode):
     
     async def on_event(self, event: MeshEvent):
         logger.info(f"{self} received event: {event.event_id}")
+        await self.client.mark_processing(event)
         if event.reply_to:
             session_id = None
             if event.session_trace:
@@ -216,7 +217,6 @@ class AgentNode(BaseNode):
                 return
             session = self._session_manager.get_session(session_id)
             if session:
-                await self.client.mark_processing(event)
                 await session.process_event(event)
             else:
                 logger.warning(
@@ -246,6 +246,11 @@ class AgentNode(BaseNode):
             )
             await session.process_event(event)
             if not routing_strategy.session_retained(event, subscription):
+                await session.broadcast_client.send({
+                    "type": "system",
+                    "sub_type": "session_end",
+                    "session_id": session.session_id
+                })
                 await self._session_manager.close_session(session)
 
 
