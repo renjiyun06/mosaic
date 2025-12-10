@@ -250,12 +250,12 @@ async def send_message(
     target_node_id: Annotated[str, "The node ID of the receiver"],
     message_type: Annotated[
         Literal["reply", "send"], 
-        "The type of the message: reply or send"
+        "The type of the message: use 'reply' when responding to a specific event/message (requires reply_to field), use 'send' for unsolicited messages (reply_to should be null)"
     ],
     message: str,
     reply_to: Annotated[
         Optional[str], 
-        "The event/message ID to reply to"
+        "The event/message ID to reply to. Required when message_type is 'reply', should be null when message_type is 'send'. Can be an event ID or a message ID"
     ] = None
 ) -> Dict[str, Any]:
     logger.info(

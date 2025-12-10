@@ -72,10 +72,11 @@ def start(node_id: str, mesh_id: str, transport: str):
 @node.command(cls=CustomCommand)
 @option("--node-id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)
-def stop(node_id: str, mesh_id: str):
+@option("--force", is_flag=True, default=False)
+def stop(node_id: str, mesh_id: str, force: bool):
     """stop a mosaic mesh node"""
     try:
-        asyncio.run(admin_client.stop_node(mesh_id, node_id))
+        asyncio.run(admin_client.stop_node(mesh_id, node_id, force))
     except Exception as e:
         console.print(e, style="red")
 

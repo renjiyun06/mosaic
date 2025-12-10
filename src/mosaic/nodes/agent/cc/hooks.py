@@ -329,7 +329,20 @@ class SessionStart(Hook):
         mesh_id: str, 
         node_id: str,
         target_id: str
-    ) -> MeshEvent: ...
+    ) -> MeshEvent:
+        return get_event_definition(self.mesh_event_type).to_mesh_event(
+            event_id=str(uuid.uuid4()),
+            mesh_id=mesh_id,
+            source_id=node_id,
+            target_id=target_id,
+            payload={},
+            session_trace=SessionTrace(
+                upstream_session_id=self.session_id,
+                downstream_session_id=None
+            ),
+            reply_to=None,
+            created_at=datetime.now(),
+        )
 
     @classmethod
     def from_hook_input(cls, hook_input: Dict[str, Any]) -> 'Hook':

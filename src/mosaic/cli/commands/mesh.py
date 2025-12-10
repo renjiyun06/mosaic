@@ -41,10 +41,11 @@ def start(mesh_id: str, transport: str):
 
 @mesh.command(cls=CustomCommand)
 @option("--mesh-id", type=str, required=True)
-def stop(mesh_id: str):
+@option("--force", is_flag=True, default=False)
+def stop(mesh_id: str, force: bool):
     """stop the mosaic daemon"""
     try:
-        asyncio.run(admin_client.stop_mesh(mesh_id))
+        asyncio.run(admin_client.stop_mesh(mesh_id, force))
         console.print(f"Mesh {mesh_id} stopped", style="green")
     except Exception as e:
         console.print(e, style="red")

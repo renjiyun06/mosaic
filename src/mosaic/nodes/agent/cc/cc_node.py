@@ -195,6 +195,14 @@ class ClaudeCodeSession(Session):
                 )
                 self._cc_client = ClaudeSDKClient(cc_options)
                 await self._cc_client.connect()
+                await self.node.handle_hook(
+                    hook_input={
+                        "session_id": self.session_id,
+                        "hook_event_name": "SessionStart"
+                    },
+                    tool_use_id=None,
+                    context=None
+                )
         except Exception as e:
             logger.error(f"Error on start cc session {self}: {e}")
             raise e
@@ -523,8 +531,8 @@ Session ID: {session_id}
         context
     ) -> Dict[str, Any]:
         logger.info(
-            f"Handling hook for session {hook_input.get('session_id')} of node "
-            f"{self.node_id} in mesh {self.mesh_id} with input: {hook_input}"
+            f"Handling hook for session {hook_input.get('session_id')} of "
+            f"node {self} with input: {hook_input}"
         )
         hook_server_sock = core_util.cc_hook_server_sock_path(
             self.mesh_id, self.node_id

@@ -26,6 +26,15 @@ _EVENTS: Dict[str, EventDefinition] = {
             "required": ["prompt"],
         }
     ),
+    "cc.session_start": EventDefinition(
+        name="cc.session_start",
+        description="A session has started",
+        payload_schema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+    ),
     "cc.session_end": EventDefinition(
         name="cc.session_end",
         description="A session has ended",

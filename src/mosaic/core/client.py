@@ -217,14 +217,14 @@ class AdminClient:
         for node in nodes:
             await self.start_node(mesh_id, node.node_id, transport)
 
-    async def stop_mesh(self, mesh_id: str):
+    async def stop_mesh(self, mesh_id: str, force: bool):
         mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
         if not mesh:
             raise RuntimeError(f"Mesh {mesh_id} not found")
         
         nodes: List[Node] = await core_repo.list_nodes(mesh_id)
         for node in nodes:
-            await self.stop_node(mesh_id, node.node_id)
+            await self.stop_node(mesh_id, node.node_id, force)
     
     
     async def create_node(
@@ -319,7 +319,7 @@ class AdminClient:
         )
     
 
-    async def stop_node(self, mesh_id: str, node_id: str):
+    async def stop_node(self, mesh_id: str, node_id: str, force: bool):
         mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
         if not mesh:
             raise RuntimeError(f"Mesh {mesh_id} not found")
@@ -339,7 +339,7 @@ class AdminClient:
             node_id,
             {"type": "list_sessions"}
         )
-        if sessions:
+        if sessions and not force:
             raise RuntimeError(
                 f"Node {node_id} has active sessions in mesh {mesh_id}"
             )
