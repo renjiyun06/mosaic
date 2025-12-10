@@ -320,14 +320,18 @@ class AdminClient:
     
 
     async def stop_node(self, mesh_id: str, node_id: str):
-        node = await core_repo.get_node(mesh_id, node_id)
+        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+
+        node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
         if not node:
-            raise RuntimeError(f"Node {node_id} not found in mesh {mesh_id}")
+            raise RuntimeError(f"Node {node_id} not found in mesh {mesh}")
 
         node_zmq_sock_path = core_util.node_zmq_sock_path(mesh_id, node_id)
         if not node_zmq_sock_path.exists():
             raise RuntimeError(
-                f"Node {node_id} is not running in mesh {mesh_id}"
+                f"Node {node} is not running"
             )
 
         sessions = await self._request_node_zmq_server(
@@ -371,7 +375,7 @@ class AdminClient:
         
         zmq_sock_path = core_util.node_zmq_sock_path(mesh_id, node_id)
         if not zmq_sock_path.exists():
-            raise RuntimeError(f"{node} is not running")
+            raise RuntimeError(f"Node {node} is not running")
 
         if session_id:
             sessions = await self._request_node_zmq_server(
@@ -492,6 +496,7 @@ class AdminClient:
                     node_id, 
                     node.config, 
                     MeshClient(mesh_id, node_id, transport_backend), 
+                    "program"
                 )
                 session_id = str(uuid.uuid4())
                 await cc_node.start_program_mode(session_id)

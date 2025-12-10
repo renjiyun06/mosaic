@@ -3,7 +3,7 @@ import json
 import os
 import asyncio
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Literal
 from importlib.resources import files, as_file
 from claude_agent_sdk import (
     ClaudeSDKClient,
@@ -18,7 +18,7 @@ from mosaic.core.client import MeshClient
 from mosaic.core.models import MeshEvent
 from mosaic.core.events import get_event_definition
 from mosaic.nodes.agent.base import AgentNode, Session
-from mosaic.nodes.agent.enums import AgentNodeRunningMode, SessionMode
+from mosaic.nodes.agent.enums import SessionMode
 from mosaic.nodes.agent.cc.hooks import Hook
 from mosaic.nodes.agent.mcp_server import McpRequestServer
 from mosaic.utils.logger import get_logger
@@ -76,7 +76,7 @@ class HookServer:
                 f"{request_content}"
             )
 
-            if self._node.mode == AgentNodeRunningMode.PROGRAM:
+            if self._node.mode == "program":
                 response = hook_type.default_hook_output()
             else:
                 subsriptions = await self._node.client.get_subscribers(
@@ -279,8 +279,9 @@ class ClaudeCodeNode(AgentNode):
         node_id: str, 
         config: Dict[str, str],
         client: MeshClient,
+        mode: Literal["default", "program"] = "default"
     ):
-        super().__init__(mesh_id, node_id, config, client)
+        super().__init__(mesh_id, node_id, config, client, mode)
 
         workspace = config.get("workspace", None)
         if not workspace:
@@ -316,7 +317,6 @@ class ClaudeCodeNode(AgentNode):
     
 
     async def start_program_mode(self, session_id: str):
-        assert self.mode == AgentNodeRunningMode.PROGRAM
         await self.client.connect()
         await self.on_start()
         await self._install_settings()
@@ -542,13 +542,12 @@ Session ID: {session_id}
             length = int.from_bytes(await reader.readexactly(4), "big")
             response_content = await reader.readexactly(length)
             response = response_content.decode("utf-8")
-            if self.mode == AgentNodeRunningMode.PROGRAM:
+            if self.mode == "program":
                 print(response)
             else:
                 return json.loads(response)
         except Exception as e:
-            import traceback
-            logger.error(f"Error handling hook: {e}\n{traceback.format_exc()}")
+            logger.error(f"Error handling hook: {e}")
             raise e
         finally:
             writer.close()

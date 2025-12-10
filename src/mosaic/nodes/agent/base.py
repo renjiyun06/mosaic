@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, Literal
 
 import mosaic.core.util as core_util
 from mosaic.core.node import BaseNode
@@ -189,9 +189,10 @@ class AgentNode(BaseNode):
         node_id: str, 
         config: Dict[str, str],
         client: MeshClient,
+        mode: Literal["default", "program"] = "default"
     ):
         super().__init__(mesh_id, node_id, config, client)
-        self._program_session = None
+        self.mode = mode
         self._session_manager = SessionManager(self)
         self._session_routing_strategies: Dict[
             Strategy, SessionRoutingStrategy
@@ -265,7 +266,7 @@ class AgentNode(BaseNode):
         return sessions
 
     
-    async def start_chat(self, session_id: Optional[str]) -> str:
+    async def start_chat(self, session_id: Optional[str]=None) -> str:
         if session_id:
             session = self._session_manager.get_session(session_id)
             if not session:

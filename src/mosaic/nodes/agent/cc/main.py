@@ -7,6 +7,9 @@ from mosaic.core.enums import TransportType
 from mosaic.core.client import MeshClient
 from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
 from mosaic.transport.sqlite import SqliteTransportBackend
+from mosaic.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 async def main(
     mesh_id: str, 
@@ -24,7 +27,8 @@ async def main(
         mesh_id, 
         node_id, 
         config, 
-        MeshClient(mesh_id, node_id,transport_backend),
+        MeshClient(mesh_id, node_id, transport_backend),
+        "default"
     )
     await cc_node.start()
 

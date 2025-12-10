@@ -23,6 +23,8 @@ class BroadcastServer:
         logger.info(
             f"Starting broadcast server at {self._pull_sock_path} and {self._pub_sock_path}"
         )
+        self._pull_sock_path.parent.mkdir(parents=True, exist_ok=True)
+        self._pub_sock_path.parent.mkdir(parents=True, exist_ok=True)
         self._context = zmq.asyncio.Context()
         self._pull_sock = self._context.socket(zmq.PULL)
         self._pull_sock.bind("ipc://" + str(self._pull_sock_path))
@@ -87,6 +89,8 @@ class BroadcastClient:
         logger.info(
             f"Connecting to broadcast server at {self._pull_sock_path} and {self._pub_sock_path}"
         )
+        self._pull_sock_path.parent.mkdir(parents=True, exist_ok=True)
+        self._pub_sock_path.parent.mkdir(parents=True, exist_ok=True)
         self._context = zmq.asyncio.Context()
         self._push_socket = self._context.socket(zmq.PUSH)
         self._push_socket.connect("ipc://" + str(self._pull_sock_path))

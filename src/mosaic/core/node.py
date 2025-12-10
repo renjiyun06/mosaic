@@ -141,7 +141,7 @@ class BaseNode(ABC):
 
 
     async def start(self):
-        logger.info(f"Starting node {self.node_id} in mesh {self.mesh_id}")
+        logger.info(f"Starting node {self}")
         if self._status != NodeStatus.STOPPED:
             raise RuntimeError(
                 f"Node {self.node_id} is already running in mesh {self.mesh_id}"
@@ -155,7 +155,7 @@ class BaseNode(ABC):
         await self._add_sigterm_handler()
         self._status = NodeStatus.RUNNING
 
-        logger.info(f"Node {self.node_id} in mesh {self.mesh_id} started")
+        logger.info(f"Node {self} started")
 
         await self._stop_event.wait()
 
