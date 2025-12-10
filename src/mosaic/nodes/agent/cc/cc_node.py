@@ -227,7 +227,7 @@ class ClaudeCodeSession(Session):
             if isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
-                        self.broadcast_client.send({
+                        await self.broadcast_client.send({
                             "session_id": self.session_id,
                             "role": "assistant",
                             "message": block.text
@@ -254,6 +254,10 @@ class ClaudeCodeSession(Session):
 
     
     async def process_message(self, message: Dict[str, Any]):
+        logger.info(
+            f"Processing message for session {self}: "
+            f"{json.dumps(message, ensure_ascii=False)}"
+        )
         if message.get("session_id") != self.session_id:
             return
 
