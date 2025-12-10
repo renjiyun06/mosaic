@@ -4,8 +4,6 @@ import os
 import asyncio
 from pathlib import Path
 from typing import Dict, Any
-from enum import StrEnum
-from rich.console import Console
 from importlib.resources import files, as_file
 from claude_agent_sdk import (
     ClaudeSDKClient,
@@ -14,24 +12,18 @@ from claude_agent_sdk import (
     TextBlock,
     HookMatcher
 )
-from prompt_toolkit.shortcuts import PromptSession
-from prompt_toolkit.patch_stdout import patch_stdout
-from prompt_toolkit.patch_stdout import StdoutProxy
-from prompt_toolkit.key_binding import KeyBindings
 
 import mosaic.core.util as core_util
 from mosaic.core.client import MeshClient
 from mosaic.core.models import MeshEvent
 from mosaic.core.events import get_event_definition
 from mosaic.nodes.agent.base import AgentNode, Session
-from mosaic.nodes.agent.enums import AgentNodeRunningMode
+from mosaic.nodes.agent.enums import AgentNodeRunningMode, SessionMode
 from mosaic.nodes.agent.cc.hooks import Hook
 from mosaic.nodes.agent.mcp_server import McpRequestServer
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-console = Console(file=StdoutProxy(raw=True), force_terminal=True)
 
 class HookServer:
     def __init__(
@@ -140,34 +132,26 @@ class HookServer:
             await writer.wait_closed()
 
 
-class ClaudeCodeSessionStatus(StrEnum):
-    STARTED = "started"
-    CLOSING = "closing"
-    CLOSED = "closed"
-
 class ClaudeCodeSession(Session):
     def __init__(
         self, 
         session_id: str, 
         node: 'ClaudeCodeNode', 
+        mode: SessionMode
     ):
-        super().__init__(session_id, node)
-        self._status = ClaudeCodeSessionStatus.CLOSED
+        super().__init__(session_id, node, mode)
         self._lock = asyncio.Lock()
         self._cc_client: ClaudeSDKClient = None
         self._system_prompt = None
     
-    async def start(self):
+
+    async def on_start(self):
         try:
-            logger.info(
-                f"Starting session {self.session_id} of node {self.node.node_id} "
-                f"in mesh {self.node.mesh_id}"
-            )
             os.chdir(str(self.node.workspace))
             self._system_prompt = await self.node.assemble_system_prompt(
                 self.session_id
             )
-            if self.node.mode != AgentNodeRunningMode.PROGRAM:
+            if self.mode != SessionMode.PROGRAM:
                 mcp_servers = {
                     "mosaic-mcp-server": {
                         "type": "http",
@@ -211,31 +195,19 @@ class ClaudeCodeSession(Session):
                 )
                 self._cc_client = ClaudeSDKClient(cc_options)
                 await self._cc_client.connect()
-                self._status = ClaudeCodeSessionStatus.STARTED
-            logger.info(
-                f"Session {self.session_id} of node {self.node.node_id} in mesh "
-                f"{self.node.mesh_id} started"
-            )
         except Exception as e:
-            import traceback
-            logger.error(
-                f"Error starting session {self.session_id}: "
-                f"{traceback.format_exc()}")
+            logger.error(f"Error on start cc session {self}: {e}")
             raise e
         
     
-    async def close(self):
-        logger.info(
-            f"Closing session {self.session_id} of node {self.node.node_id} "
-            f"in mesh {self.node.mesh_id}"
-        )
+    async def on_close(self):
         if self._cc_client:
             await self._cc_client.query("/exit")
             async for _ in self._cc_client.receive_response(): ...
             await self._cc_client.disconnect()
             self._cc_client = None
 
-            if self.node.mode != AgentNodeRunningMode.PROGRAM:
+            if self.mode != SessionMode.PROGRAM:
                 # Python SDK does not support 
                 # SessionStart, SessionEnd, and Notification hooks
                 await self.node.handle_hook(
@@ -248,108 +220,47 @@ class ClaudeCodeSession(Session):
                 )
         
         self._system_prompt = None
-        logger.info(
-            f"Session {self.session_id} of node {self.node.node_id} in mesh "
-            f"{self.node.mesh_id} closed"
-        )
+
+    
+    async def _receive_assistant_message(self):
+        async for message in self._cc_client.receive_response():
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        self.broadcast_client.send({
+                            "session_id": self.session_id,
+                            "role": "assistant",
+                            "message": block.text
+                        })
 
 
     async def process_event(self, event: MeshEvent):
-        async def receive():
-            first_message = True
-            async for message in self._cc_client.receive_response():
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, TextBlock):
-                            await self.record("Assistant", block.text)
-                            if first_message:
-                                console.print(f"• {block.text}")
-                                first_message = False
-                            else:
-                                console.print(block.text)
-                            logger.info(
-                                f"Session {self.session_id} received message: "
-                                f"{block.text}"
-                            )
-        
         async with self._lock:
             event_type = event.type
             xml_content = None
             if event_type == "mosaic.node_message":
                 xml_content = event.to_node_message_xml()
-                logger.info(
-                    f"Session {self.session_id} received node message: \n"
-                    f"{xml_content}"
-                )
             else:
                 xml_content = event.to_xml()
-                logger.info(
-                    f"Session {self.session_id} processing event: "
-                    f"{xml_content}"
-                )
 
-            if self.node.mode == AgentNodeRunningMode.CHAT:
-                console.print(xml_content, style="dim")
-            
-            await self.record("System", xml_content)
+            await self.broadcast_client.send({
+                "session_id": self.session_id,
+                "role": "system",
+                "message": xml_content
+            })
             await self._cc_client.query(xml_content)
-            await receive()
+            await self._receive_assistant_message()
             await self.node.client.ack(event)
 
-
-    async def send_message(self, message: str):
-        async def receive():
-            async for message in self._cc_client.receive_response():
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, TextBlock):
-                            await self.record("Assistant", block.text)
-
-        
-        if self.node.mode != AgentNodeRunningMode.BACKGROUND:
+    
+    async def process_message(self, message: Dict[str, Any]):
+        if message.get("session_id") != self.session_id:
             return
-        
-        if self._cc_client is None:
-            return 
 
-        await self._cc_client.query(message)
-        await receive()
-
-    async def chat(self):
-        async def receive():
-            first_message = True
-            async for message in self._cc_client.receive_response():
-                logger.info(
-                    f"Session {self.session_id} received message: {message}"
-                )
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, TextBlock):
-                            if first_message:
-                                console.print(f"• {block.text}")
-                                first_message = False
-                            else:
-                                console.print(block.text)
-        
-        bindings = KeyBindings()
-
-        @bindings.add('c-d')
-        def submit_handler(event):
-            event.current_buffer.validate_and_handle()
-
-        prompt_session = PromptSession(
-            multiline=True,
-            key_bindings=bindings
-        )
-        with patch_stdout():
-            while True:
-                try:
-                    user_input = await prompt_session.prompt_async("> ")
-                except KeyboardInterrupt:
-                    break
-                async with self._lock:
-                    await self._cc_client.query(user_input)
-                    await receive()
+        if message.get("role") == "user":
+            async with self._lock:
+                await self._cc_client.query(message.get("message"))
+                await self._receive_assistant_message()
 
 
     async def program(self):
@@ -368,9 +279,8 @@ class ClaudeCodeNode(AgentNode):
         node_id: str, 
         config: Dict[str, str],
         client: MeshClient,
-        mode: AgentNodeRunningMode
     ):
-        super().__init__(mesh_id, node_id, config, client, mode)
+        super().__init__(mesh_id, node_id, config, client)
 
         workspace = config.get("workspace", None)
         if not workspace:
@@ -397,33 +307,13 @@ class ClaudeCodeNode(AgentNode):
         self._mcp_request_server = None
         
 
-    async def create_session(self, mesh_id: str, node_id: str) -> Session:
-        return ClaudeCodeSession(str(uuid.uuid4()), self)
+    async def create_session(self, mode: SessionMode) -> ClaudeCodeSession:
+        return ClaudeCodeSession(str(uuid.uuid4()), self, mode)
     
-    async def chat(self):
-        await self._chat_session.chat()
         
     async def program(self):
         await self._program_session.program()
     
-
-    async def start_chat_mode(self, session_id: str):
-        assert self.mode == AgentNodeRunningMode.CHAT
-        await self.client.connect()
-        await self._start_event_processing_task()
-        self._chat_session = ClaudeCodeSession(
-            session_id,
-            self
-        )
-        await self._chat_session.start()
-        
-    
-    async def stop_chat_mode(self):
-        await self._stop_event_processing_task()
-        await self._chat_session.close()
-        self._chat_session = None
-        await self.client.disconnect()
-
 
     async def start_program_mode(self, session_id: str):
         assert self.mode == AgentNodeRunningMode.PROGRAM
@@ -432,13 +322,14 @@ class ClaudeCodeNode(AgentNode):
         await self._install_settings()
         self._program_session = ClaudeCodeSession(
             session_id,
-            self
+            self,
+            SessionMode.PROGRAM
         )
-        await self._program_session.start()
+        await self._program_session.on_start()
 
 
     async def stop_program_mode(self):
-        await self._program_session.close()
+        await self._program_session.on_close()
         self._program_session = None
         await self._uninstall_settings()
         await self.on_shutdown()
@@ -535,10 +426,8 @@ class ClaudeCodeNode(AgentNode):
             await self._hook_server.start()
             self._mcp_request_server = McpRequestServer(self)
             await self._mcp_request_server.start()
-            
         except Exception as e:
-            import traceback
-            logger.error(f"Error on start: {traceback.format_exc()}")
+            logger.error(f"Error on start node {self}: {e}")
             raise e
 
     

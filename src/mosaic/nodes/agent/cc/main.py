@@ -6,7 +6,6 @@ from typing import Dict
 from mosaic.core.enums import TransportType
 from mosaic.core.client import MeshClient
 from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
-from mosaic.nodes.agent.enums import AgentNodeRunningMode
 from mosaic.transport.sqlite import SqliteTransportBackend
 
 async def main(
@@ -26,7 +25,6 @@ async def main(
         node_id, 
         config, 
         MeshClient(mesh_id, node_id,transport_backend),
-        AgentNodeRunningMode.BACKGROUND
     )
     await cc_node.start()
 

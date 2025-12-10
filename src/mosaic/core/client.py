@@ -21,13 +21,13 @@ from mosaic.core.catalog import NODE_CATALOG
 from mosaic.core.events import get_event_names
 from mosaic.core.models import Mesh, MeshEvent, Subscription, Node
 from mosaic.core.transport import TransportBackend
-from mosaic.core.enums import MeshStatus, NodeType, TransportType
+from mosaic.core.enums import NodeType, TransportType
 from mosaic.nodes.agent.enums import (
     SessionRoutingStrategy,
-    AgentNodeRunningMode,
     SessionMode,
 )
 from mosaic.transport.sqlite import SqliteTransportBackend
+from mosaic.utils.zmq import BroadcastClient
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -330,12 +330,11 @@ class AdminClient:
                 f"Node {node_id} is not running in mesh {mesh_id}"
             )
 
-        response = await self._request_node_zmq_server(
+        sessions = await self._request_node_zmq_server(
             mesh_id,
             node_id,
             {"type": "list_sessions"}
         )
-        sessions = response.get("response", [])
         if sessions:
             raise RuntimeError(
                 f"Node {node_id} has active sessions in mesh {mesh_id}"
@@ -351,106 +350,108 @@ class AdminClient:
         os.kill(int(pid), signal.SIGTERM)
 
 
-    async def chat(
+    async def chat_node(
         self,
         mesh_id: str,
         node_id: str,
         session_id: Optional[str]=None
     ):
-        # TODO
-        ...
+        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+
+        node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
+        if not node:
+            raise RuntimeError(f"Node {node_id} not found in mesh {mesh}")
+
+        if node.type not in [
+            NodeType.CLAUDE_CODE,
+        ]:
+            raise RuntimeError(f"Chat is not supported for node {node}")
         
+        zmq_sock_path = core_util.node_zmq_sock_path(mesh_id, node_id)
+        if not zmq_sock_path.exists():
+            raise RuntimeError(f"{node} is not running")
 
-    # async def chat_node(
-    #     self, 
-    #     mesh_id: str, 
-    #     node_id: str, 
-    #     transport: TransportType
-    # ):
-    #     session_id = None
-    #     try:
-    #         node = await core_repo.get_node(mesh_id, node_id)
-    #         if not node:
-    #             raise RuntimeError(
-    #                 f"Node {node_id} not found in mesh {mesh_id}"
-    #             )
+        if session_id:
+            sessions = await self._request_node_zmq_server(
+                mesh_id,
+                node_id,
+                {"type": "list_sessions"}
+            )
+            if not sessions or session_id \
+                not in [session.get("session_id") for session in sessions]:
+                raise RuntimeError(f"Session {session_id} not found for node {node}")
 
-    #         if node.type not in [
-    #             NodeType.CLAUDE_CODE,
-    #             NodeType.CODEX,
-    #             NodeType.GEMINI,
-    #             NodeType.CURSOR,
-    #             NodeType.OPENHANDS
-    #         ]:
-    #             raise RuntimeError(
-    #                 f"Node {node_id} is not an agent node in mesh {mesh_id}"
-    #             )
 
-    #         lock_path = core_util.node_lock_path(mesh_id, node_id)
-    #         if lock_path.exists():
-    #             raise RuntimeError(
-    #                 f"Node {node_id} is busy in mesh {mesh_id}"
-    #             )
+        request = {
+            "type": "start_chat"
+        }
+        if session_id:
+            request["args"] = {
+                "session_id": session_id
+            }
+        session_id = await self._request_node_zmq_server(
+            mesh_id,
+            node_id,
+            request
+        )
 
-    #         pid_path = core_util.node_pid_path(mesh_id, node_id)
-    #         if not pid_path.exists():
-    #             raise RuntimeError(
-    #                 f"Node {node_id} is not running in mesh {mesh_id}"
-    #             )
+        console = Console(file=StdoutProxy(raw=True), force_terminal=True)
+        async def process_message(message: Dict[str, Any]):
+            if message.get("session_id") != session_id:
+                return
 
-    #         sock_path = core_util.node_sock_path(mesh_id, node_id)
-    #         if not sock_path.exists():
-    #             raise RuntimeError(
-    #                 f"Node {node_id} is not running in mesh {mesh_id}"
-    #             )
+            if message.get("role") == "assistant":
+                console.print(f"• {message.get("message")}")
+            elif message.get("role") == "user":
+                console.print(f"> {message.get("message")}")
+            else:
+                console.print(message.get("message"), style="dim")
 
-    #         session_id = str(uuid.uuid4())
-    #         await self._request_node_server(
-    #             mesh_id,
-    #             node_id,
-    #             {
-    #                 "command": "register_chat_session",
-    #                 "session_id": session_id
-    #             }
-    #         )
+        broadcast_client = BroadcastClient(
+            core_util.session_broadcast_server_pull_sock_path(
+                mesh_id, node_id, session_id
+            ),
+            core_util.session_broadcast_server_pub_sock_path(
+                mesh_id, node_id, session_id
+            ),
+            process_message
+        )
+        await broadcast_client.connect()
 
-    #         transport_backend = None
-    #         if transport == TransportType.SQLITE:
-    #             transport_backend = SqliteTransportBackend(mesh_id, node_id)
-    #         else:
-    #             raise RuntimeError(f"Unsupported transport type: {transport}")
+        
+        bindings = KeyBindings()
+        @bindings.add('c-d')
+        def submit_handler(event):
+            event.current_buffer.validate_and_handle()
 
-    #         if node.type == NodeType.CLAUDE_CODE:
-    #             from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
-    #             cc_node = ClaudeCodeNode(
-    #                 mesh_id, 
-    #                 node_id, 
-    #                 node.config, 
-    #                 MeshClient(
-    #                     mesh_id,
-    #                     node_id,
-    #                     transport_backend
-    #                 ), 
-    #                 AgentNodeRunningMode.CHAT
-    #             )
-    #             await cc_node.start_chat_mode(session_id)
-    #             await cc_node.chat()
-    #             await cc_node.stop_chat_mode()
-    #         elif node.type == NodeType.CODEX: ...
-    #         elif node.type == NodeType.GEMINI: ...
-    #         elif node.type == NodeType.CURSOR: ...
-    #         elif node.type == NodeType.OPENHANDS: ...
-    #     finally:
-    #         if session_id:
-    #             await self._request_node_server(
-    #                 mesh_id,
-    #                 node_id,
-    #                 {
-    #                     "command": "unregister_chat_session",
-    #                     "session_id": session_id
-    #                 }
-    #             )
-
+        prompt_session = PromptSession(
+            multiline=True,
+            key_bindings=bindings
+        )
+        with patch_stdout():
+            while True:
+                try:
+                    user_input = await prompt_session.prompt_async("> ")
+                    await broadcast_client.send({
+                        "session_id": session_id,
+                        "role": "user",
+                        "message": user_input
+                    })
+                except KeyboardInterrupt:
+                    break
+            
+        await broadcast_client.disconnect()
+        await self._request_node_zmq_server(
+            mesh_id,
+            node_id,
+            {
+                "type": "stop_chat",
+                "args": {"session_id": session_id}
+            }
+        )
+    
         
     async def program_node(
         self, 
@@ -460,16 +461,18 @@ class AdminClient:
     ):
         lock_path = None
         try:
-            node = await core_repo.get_node(mesh_id, node_id)
+            mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
+            if not mesh:
+                raise RuntimeError(f"Mesh {mesh_id} not found")
+
+            node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
             if not node:
-                raise RuntimeError(
-                    f"Node {node_id} not found in mesh {mesh_id}"
-                )
+                raise RuntimeError(f"Node {node_id} not found in mesh {mesh}")
 
             pid_path = core_util.node_pid_path(mesh_id, node_id)
             if pid_path.exists():
                 raise RuntimeError(
-                    f"Node {node_id} is currently running in mesh {mesh_id}"
+                    f"Node {node} is currently running"
                 )
 
             lock_path = core_util.node_lock_path(mesh_id, node_id)
@@ -489,19 +492,14 @@ class AdminClient:
                     node_id, 
                     node.config, 
                     MeshClient(mesh_id, node_id, transport_backend), 
-                    AgentNodeRunningMode.PROGRAM
                 )
                 session_id = str(uuid.uuid4())
                 await cc_node.start_program_mode(session_id)
                 await cc_node.program()
                 await cc_node.stop_program_mode()
-            elif node.type == NodeType.CODEX: ...
-            elif node.type == NodeType.GEMINI: ...
-            elif node.type == NodeType.CURSOR: ...
-            elif node.type == NodeType.OPENHANDS: ...
             else:
                 raise RuntimeError(
-                    f"Node {node_id} is not an agent node in mesh {mesh_id}"
+                    f"Program is not supported for node {node}"
                 )
         finally:
             if lock_path:
@@ -643,183 +641,15 @@ class AdminClient:
 
         node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
         if not node:
-            raise RuntimeError(f"Node {node_id} not found in mesh {mesh_id}")
+            raise RuntimeError(f"Node {node_id} not found in {mesh}")
 
         zmq_sock_path = core_util.node_zmq_sock_path(mesh_id, node_id)
         if not zmq_sock_path.exists():
             raise RuntimeError(
-                f"Node {node_id} is not running in mesh {mesh_id}"
+                f"{node} is not running"
             )
 
         response = await self._request_node_zmq_server(
             mesh_id, node_id, {"type": "list_sessions", "args": {"mode": mode}}
         )
         return response.get("response", [])
-
-
-    async def chat_background_session(
-        self,
-        mesh_id: str,
-        node_id: str,
-        session_id: str
-    ):
-        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
-        if not mesh:
-            raise RuntimeError(f"Mesh {mesh_id} not found")
-
-        node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
-        if not node:
-            raise RuntimeError(f"Node {node_id} not found in mesh {mesh_id}")
-
-        session_socket_path = core_util.session_socket_path(
-            mesh_id, node_id, session_id
-        )
-        if not session_socket_path.exists():
-            raise RuntimeError(
-                f"Session {session_id} not found for "
-                f"node {node_id} in mesh {mesh_id}"
-            )
-        reader, writer = await asyncio.open_unix_connection(
-            str(session_socket_path)
-        )
-
-        console = Console(file=StdoutProxy(raw=True), force_terminal=True)
-
-        async def receive():
-            try:
-                assistant_message_started = False
-                while True:
-                    length = int.from_bytes(await reader.readexactly(4), 'big')
-                    event_content = (await reader.readexactly(length)).decode()
-                    logger.info(
-                        f"Received event from background session {session_id} for "
-                        f"node {node_id} in mesh {mesh_id}: {event_content}"
-                    )
-                    event = json.loads(event_content)
-                    type = event.get("type")
-                    if type == "assistant_message_start":
-                        assistant_message_started = True
-                    elif type == "assistant_message_end":
-                        assistant_message_started = False
-                    elif type == "message":
-                        role = event.get("role")
-                        message = event.get("message")
-                        if role == "User":
-                            continue
-                        elif role == "Assistant":
-                            if not assistant_message_started:
-                                console.print(f"• {message}")
-                                assistant_message_started = True
-                            else:
-                                console.print(message)
-                        elif role == "System":
-                            console.print(message, style="dim")
-                    else:
-                        logger.warning(
-                            f"Unknown event type: {type} from "
-                            f"background session {session_id} for "
-                            f"node {node_id} in mesh {mesh_id}: {event_content}"
-                        )
-                        continue
-
-            except Exception as e:
-                logger.error(
-                    f"Error receiving events from background session {session_id} for "
-                    f"node {node_id} in mesh {mesh_id}: {e}"
-                )
-                raise e
-
-
-        receive_task = asyncio.create_task(receive())
-
-        bindings = KeyBindings()
-
-        @bindings.add('c-d')
-        def submit_handler(event):
-            event.current_buffer.validate_and_handle()
-
-        prompt_session = PromptSession(
-            multiline=True,
-            key_bindings=bindings
-        )
-        with patch_stdout():
-            try:
-                while True:
-                    user_input = await prompt_session.prompt_async("> ")
-                    if user_input.lower() in ["exit", "/exit"]:
-                        break
-                    user_input_bytes = user_input.encode('utf-8')
-                    writer.write(len(user_input_bytes).to_bytes(4, 'big'))
-                    writer.write(user_input_bytes)
-                    await writer.drain()
-            except Exception as e:
-                logger.error(
-                    f"Error chatting background session {session_id} for "
-                    f"node {node_id} in mesh {mesh_id}: {e}"
-                )
-                raise RuntimeError(
-                    f"Error chatting background session {session_id} for "
-                    f"node {node_id} in mesh {mesh_id}: {e}"
-                )
-            finally:
-                writer.close()
-                await writer.wait_closed()
-
-        receive_task.cancel()
-    
-    
-    async def tail_session(
-        self,
-        mesh_id: str,
-        node_id: str,
-        session_id: str
-    ):
-        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
-        if not mesh:
-            raise RuntimeError(f"Mesh {mesh_id} not found")
-
-        node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
-        if not node:
-            raise RuntimeError(f"Node {node_id} not found in mesh {mesh_id}")
-
-        session_log_path = core_util.session_log_path(
-            mesh_id, node_id, session_id
-        )
-        if not session_log_path.exists():
-            raise RuntimeError(
-                f"Session {session_id} not found for "
-                f"node {node_id} in mesh {mesh_id}"
-            )
-
-        process = await asyncio.create_subprocess_exec(
-            'tail', '-f', str(session_log_path),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-    
-        console = Console()
-        try:
-            assistant_message_started = False
-            async for line in process.stdout:
-                line_content = line.decode('utf-8')
-                if not line_content.strip():
-                    continue
-                json_line = json.loads(line_content)
-                role = json_line.get("role")
-                message = json_line.get("message")
-                if role == "User":
-                    assistant_message_started = False
-                    console.print(f"> {message}")
-                elif role == "Assistant":
-                    if not assistant_message_started:
-                        console.print(f"• {message}")
-                        assistant_message_started = True
-                    else:
-                        console.print(message)
-                elif role == "System":
-                    assistant_message_started = False
-                    console.print(message, style="dim")
-        except KeyboardInterrupt:
-            process.terminate()
-            await process.wait()
-        

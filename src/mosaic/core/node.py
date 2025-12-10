@@ -1,6 +1,5 @@
 import asyncio
 import os
-import json
 import signal
 import zmq
 import zmq.asyncio
@@ -60,10 +59,7 @@ class ZmqServer:
 
     async def stop(self):
         try:
-            logger.info(
-                f"Stopping zmq server for "
-                f"node {self.node.node_id} in mesh {self.node.mesh_id}"
-            )
+            logger.info(f"Stopping zmq server for {self.node}")
             if self._request_processing_task:
                 self._request_processing_task.cancel()
                 self._request_processing_task = None
@@ -73,14 +69,10 @@ class ZmqServer:
             if self._zmq_context:
                 self._zmq_context.term()
                 self._zmq_context = None
-            logger.info(
-                f"Zmq server for "
-                f"node {self.node.node_id} in mesh {self.node.mesh_id} stopped"
-            )
+            logger.info(f"Zmq server for {self.node} stopped")
         except Exception as e:
             logger.error(
-                f"Error stopping zmq server for "
-                f"node {self.node.node_id} in mesh {self.node.mesh_id}: {e}"
+                f"Error stopping zmq server for {self.node}: {e}"
             )
             raise e
         finally:
@@ -95,8 +87,7 @@ class ZmqServer:
                 request_handler = getattr(self.node, request_type)
                 if not request_handler:
                     raise RuntimeError(
-                        f"Request {request_type} not supported by "
-                        f"node {self.node.node_id} in mesh {self.node.mesh_id}"
+                        f"Request {request_type} not supported by {self.node}"
                     )
                 response = await request_handler(**request.get("args", {}))
                 await self._zmq_socket.send_json({
@@ -104,15 +95,11 @@ class ZmqServer:
                     "response": response
                 })
             except asyncio.CancelledError:
-                logger.info(
-                    f"Request processing task for "
-                    f"node {self.node.node_id} in mesh {self.node.mesh_id} cancelled"
-                )
+                logger.info(f"Request processing task for {self.node} cancelled")
                 break
             except Exception as e:
                 logger.error(
-                    f"Error processing request for "
-                    f"node {self.node.node_id} in mesh {self.node.mesh_id}: {e}"
+                    f"Error processing request for {self.node}: {e}"
                 )
                 await self._zmq_socket.send_json({
                     "is_error": True,
@@ -190,68 +177,6 @@ class BaseNode(ABC):
 
         logger.info(f"Node {self.node_id} in mesh {self.mesh_id} stopped")
         self._stop_event.set()
-
-
-    async def _handle_command(self, reader, writer):
-        try:
-            length = int.from_bytes(await reader.readexactly(4), "big")
-            request_content = (await reader.readexactly(length)).decode("utf-8")
-            logger.info(
-                f"Node {self.node_id} in mesh {self.mesh_id} received command: "
-                f"{request_content}"
-            )
-            request = json.loads(request_content)
-            command = request["command"]
-            response = None
-            if command == "status":
-                response = {
-                    "is_error": False,
-                    "status": self._status
-                }
-            elif command == "register_chat_session":
-                await self.register_chat_session(request["session_id"])
-                response = {
-                    "is_error": False
-                }
-            elif command == "unregister_chat_session":
-                await self.unregister_chat_session(request["session_id"])
-                response = {
-                    "is_error": False
-                }
-            elif command == "list_chat_sessions":
-                sessions = await self.list_chat_sessions()
-                response = {
-                    "is_error": False,
-                    "sessions": sessions
-                }
-            elif command == "list_background_sessions":
-                sessions = await self.list_background_sessions()
-                response = {
-                    "is_error": False,
-                    "sessions": sessions
-                }
-            else:
-                response = {
-                    "is_error": True,
-                    "message": f"Invalid command: {command}"
-                }
-            
-            response_content = json.dumps(response, ensure_ascii=False).encode()
-            writer.write(len(response_content).to_bytes(4, "big"))
-            writer.write(response_content)
-            await writer.drain()
-        except Exception as e:
-            response = {
-                "is_error": True,
-                "message": str(e)
-            }
-            response_content = json.dumps(response, ensure_ascii=False).encode()
-            writer.write(len(response_content).to_bytes(4, "big"))
-            writer.write(response_content)
-            await writer.drain()
-        finally:
-            writer.close()
-            await writer.wait_closed()
 
 
     async def _start_event_processing_task(self):

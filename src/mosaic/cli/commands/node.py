@@ -35,19 +35,6 @@ def create(node_id: str, mesh_id: str, type: str, config: Dict[str, str]):
 
 # TODO Add config command to update node config
 
-@node.command(cls=CustomCommand, name="tail-session")
-@option("--node-id", type=str, required=True)
-@option("--mesh-id", type=str, required=True)
-@option("--session-id", type=str, required=True)
-@option("--type", type=str, default="background")   # TODO support it
-def tail_session(node_id: str, mesh_id: str, session_id: str, type: str):
-    """tail the content of a background session"""
-    try:
-        asyncio.run(admin_client.tail_session(mesh_id, node_id, session_id))
-    except Exception as e:
-        console.print(e, style="red")
-
-
 @node.command(cls=CustomCommand, name="list-sessions")
 @option("--node-id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)
@@ -110,25 +97,7 @@ def chat(node_id: str, mesh_id: str, session_id: Optional[str]=None):
     """chat with a mosaic mesh agent node"""
     try:
         asyncio.run(
-            admin_client.chat(mesh_id, node_id, session_id)
-        )
-    except Exception as e:
-        console.print(e, style="red")
-
-
-@node.command(cls=CustomCommand, name="chat-background-session")
-@option("--node-id", type=str, required=True)
-@option("--mesh-id", type=str, required=True)
-@option("--session-id", type=str, required=True)
-def chat_background_session(
-    node_id: str,
-    mesh_id: str,
-    session_id: str
-):
-    """chat with a background session of a mosaic mesh agent node"""
-    try:
-        asyncio.run(
-            admin_client.chat_background_session(mesh_id, node_id, session_id)
+            admin_client.chat_node(mesh_id, node_id, session_id)
         )
     except Exception as e:
         console.print(e, style="red")

@@ -1,15 +1,10 @@
 import json
-from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from datetime import datetime
 from pydantic import BaseModel
 from jsonschema import validate
 
-from mosaic.core.enums import (
-    NodeType, 
-    MeshStatus, 
-    NodeStatus, 
-)
+from mosaic.core.enums import NodeType
 from mosaic.nodes.agent.enums import SessionRoutingStrategy
 
 class SessionTrace(BaseModel):
@@ -27,22 +22,31 @@ class MeshEvent(BaseModel):
     reply_to: Optional[str]
     created_at: datetime
 
+
     def to_xml(self) -> str:
+        assert self.type != "mosaic.node_message"
         return f"""
 <event id="{self.event_id}" type="{self.type}" from="{self.source_id}">
     <payload>{json.dumps(self.payload, ensure_ascii=False)}</payload>
 </event>
 """.strip()
 
+
     def to_node_message_xml(self) -> str:
+        assert self.type == "mosaic.node_message"
         return f"""
 <node_message id="{self.event_id}" from="{self.source_id}">
 {self.payload["message"]}
 </node_message>
 """.strip()
 
+
+
 class Mesh(BaseModel):
     mesh_id: str
+
+    def __str__(self):
+        return f"{self.mesh_id}"
 
 
 class Node(BaseModel):
@@ -50,6 +54,9 @@ class Node(BaseModel):
     mesh_id: str
     type: NodeType
     config: Dict[str, str]
+
+    def __str__(self):
+        return f"{self.mesh_id}#{self.node_id}"
 
 
 class Subscription(BaseModel):
@@ -62,8 +69,8 @@ class Subscription(BaseModel):
     session_routing_strategy_config: Optional[Dict[str, str]] = None
 
 class EventDefinition(BaseModel):
-    name: str   # domain.entity.action, e.g., "cc.tool.pre_tool_use
-    description: str    # llm friendly    
+    name: str
+    description: str
     payload_schema: Dict[str, Any]
 
     def to_mesh_event(
@@ -89,9 +96,3 @@ class EventDefinition(BaseModel):
             reply_to=reply_to,
             created_at=created_at,
         )
-
-class NodeCapability(BaseModel):
-    type: NodeType
-    produced_events: List[str]
-    consumed_events: List[str]
-    description: str

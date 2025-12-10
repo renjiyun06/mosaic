@@ -26,8 +26,12 @@ def sqlite_transport_db_path(mesh_id: str) -> Path:
 def mcp_request_server_sock_path(mesh_id: str, node_id: str) -> Path:
     return mesh_path(mesh_id) / "nodes" / f"{node_id}" / "mcp_request_server.sock"
 
-def session_log_path(mesh_id: str, node_id: str, session_id: str) -> Path:
-    return mesh_path(mesh_id) / "nodes" / f"{node_id}" / "sessions" / f"{session_id}.log"
+def session_broadcast_server_pull_sock_path(
+    mesh_id: str, node_id: str, session_id: str
+) -> Path:
+    return mesh_path(mesh_id) / "nodes" / f"{node_id}" / "sessions" / f"{session_id}" / "pull.sock"
 
-def session_socket_path(mesh_id: str, node_id: str, session_id: str) -> Path:
-    return mesh_path(mesh_id) / "nodes" / f"{node_id}" / "sessions" / f"{session_id}.sock"
+def session_broadcast_server_pub_sock_path(
+    mesh_id: str, node_id: str, session_id: str
+) -> Path:
+    return mesh_path(mesh_id) / "nodes" / f"{node_id}" / "sessions" / f"{session_id}" / "pub.sock"
