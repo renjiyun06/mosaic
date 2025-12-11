@@ -146,6 +146,7 @@ class ClaudeCodeSession(Session):
         self._lock = asyncio.Lock()
         self._cc_client: ClaudeSDKClient = None
         self._system_prompt = None
+        self._handle_hook = self.node.handle_hook_wrapper(self)
     
 
     async def on_start(self):
@@ -176,19 +177,19 @@ class ClaudeCodeSession(Session):
                     hooks={
                         "PreToolUse": [
                             HookMatcher(hooks=[
-                                self.node.handle_hook
+                                self._handle_hook
                             ])
                         ],
                         'UserPromptSubmit': [
                             HookMatcher(hooks=[
-                                self.node.handle_hook
+                                self._handle_hook
                             ])
                         ],
                         # Actually, Python SDK does not support SessionStart, 
                         # SessionEnd, and Notification hooks, just keep it here
                         "SessionEnd": [
                             HookMatcher(hooks=[
-                                self.node.handle_hook
+                                self._handle_hook
                             ])
                         ]
                     },
@@ -198,7 +199,7 @@ class ClaudeCodeSession(Session):
                 )
                 self._cc_client = ClaudeSDKClient(cc_options)
                 await self._cc_client.connect()
-                await self.node.handle_hook(
+                await self._handle_hook(
                     hook_input={
                         "session_id": self.session_id,
                         "hook_event_name": "SessionStart"
@@ -221,7 +222,7 @@ class ClaudeCodeSession(Session):
             if self.mode != SessionMode.PROGRAM:
                 # Python SDK does not support 
                 # SessionStart, SessionEnd, and Notification hooks
-                await self.node.handle_hook(
+                await self._handle_hook(
                     {
                         "session_id": self.session_id,
                         "hook_event_name": "SessionEnd"
@@ -299,7 +300,9 @@ class ClaudeCodeSession(Session):
 
         if message.get("role") == "user":
             async with self._lock:
-                await self._cc_client.query(message.get("message"))
+                await self._cc_client.query(
+                    message.get("message")
+                )
                 await self._receive_assistant_message()
 
 
@@ -553,45 +556,53 @@ Session ID: {session_id}
         return system_prompt
 
 
-    async def handle_hook(
-        self,
-        hook_input: Dict[str, Any],
-        tool_use_id: str | None,
-        context
-    ) -> Dict[str, Any]:
-        logger.info(
-            f"Handling hook for session {hook_input.get('session_id')} of "
-            f"node {self} with input: {hook_input}"
-        )
-        hook_server_sock = core_util.cc_hook_server_sock_path(
-            self.mesh_id, self.node_id
-        )
-        if not hook_server_sock.exists():
-            logger.error(
-                f"Hook server socket path {hook_server_sock} does not exist"
+    def handle_hook_wrapper(self, session: ClaudeCodeSession):
+        async def handle_hook(
+            hook_input: Dict[str, Any],
+            tool_use_id: str | None,
+            context
+        ) -> Dict[str, Any]:
+            claude_code_session_id = hook_input.get('session_id')
+            # TODO fix it
+            logger.warning(
+                f"Session {session} corresponds to claude code session "
+                f"{claude_code_session_id}"
             )
-            raise RuntimeError(
-                f"Hook server socket path {hook_server_sock} does not exist"
+            hook_input["session_id"] = session.session_id
+            logger.info(
+                f"Handling hook for session {session} with input: {hook_input}"
             )
-        
-        reader, writer = await asyncio.open_unix_connection(str(hook_server_sock))
-        try:
-            request = hook_input
-            request_content = json.dumps(request, ensure_ascii=False)
-            request_content_bytes = request_content.encode()
-            writer.write(len(request_content_bytes).to_bytes(4, "big"))
-            writer.write(request_content_bytes)
-            await writer.drain()
-            length = int.from_bytes(await reader.readexactly(4), "big")
-            response_content = await reader.readexactly(length)
-            response = response_content.decode("utf-8")
-            if self.mode == "program":
-                print(response)
-            else:
-                return json.loads(response)
-        except Exception as e:
-            logger.error(f"Error handling hook: {e}")
-            raise e
-        finally:
-            writer.close()
-            await writer.wait_closed()
+            hook_server_sock = core_util.cc_hook_server_sock_path(
+                self.mesh_id, self.node_id
+            )
+            if not hook_server_sock.exists():
+                logger.error(
+                    f"Hook server socket path {hook_server_sock} does not exist"
+                )
+                raise RuntimeError(
+                    f"Hook server socket path {hook_server_sock} does not exist"
+                )
+            
+            reader, writer = await asyncio.open_unix_connection(str(hook_server_sock))
+            try:
+                request = hook_input
+                request_content = json.dumps(request, ensure_ascii=False)
+                request_content_bytes = request_content.encode()
+                writer.write(len(request_content_bytes).to_bytes(4, "big"))
+                writer.write(request_content_bytes)
+                await writer.drain()
+                length = int.from_bytes(await reader.readexactly(4), "big")
+                response_content = await reader.readexactly(length)
+                response = response_content.decode("utf-8")
+                if self.mode == "program":
+                    print(response)
+                else:
+                    return json.loads(response)
+            except Exception as e:
+                logger.error(f"Error handling hook: {e}")
+                raise e
+            finally:
+                writer.close()
+                await writer.wait_closed()
+
+        return handle_hook

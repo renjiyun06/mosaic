@@ -6,6 +6,9 @@ from typing import Dict, Any, Type, List
 
 from mosaic.core.models import MeshEvent, SessionTrace
 from mosaic.core.events import get_event_definition
+from mosaic.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class Hook(ABC, BaseModel):
     mesh_event_type: str
@@ -208,7 +211,7 @@ class UserPromptSubmit(Hook):
         node_id: str,
         target_id: str
     ) -> MeshEvent:
-        return get_event_definition(self.mesh_event_type).to_mesh_event(
+        mesh_event = get_event_definition(self.mesh_event_type).to_mesh_event(
             event_id=str(uuid.uuid4()),
             mesh_id=mesh_id,
             source_id=node_id,
@@ -221,6 +224,7 @@ class UserPromptSubmit(Hook):
             reply_to=None,
             created_at=datetime.now(),
         )
+        return mesh_event
 
     @classmethod
     def from_hook_input(cls, hook_input: Dict[str, Any]) -> 'Hook':
@@ -330,7 +334,7 @@ class SessionStart(Hook):
         node_id: str,
         target_id: str
     ) -> MeshEvent:
-        return get_event_definition(self.mesh_event_type).to_mesh_event(
+        mesh_event = get_event_definition(self.mesh_event_type).to_mesh_event(
             event_id=str(uuid.uuid4()),
             mesh_id=mesh_id,
             source_id=node_id,
@@ -343,6 +347,8 @@ class SessionStart(Hook):
             reply_to=None,
             created_at=datetime.now(),
         )
+
+        return mesh_event
 
     @classmethod
     def from_hook_input(cls, hook_input: Dict[str, Any]) -> 'Hook':
