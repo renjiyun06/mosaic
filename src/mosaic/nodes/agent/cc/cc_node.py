@@ -182,14 +182,14 @@ class ClaudeCodeSession(Session):
                         ],
                         'UserPromptSubmit': [
                             HookMatcher(hooks=[
-                                self._handle_hook
+                                # self._handle_hook
                             ])
                         ],
                         # Actually, Python SDK does not support SessionStart, 
                         # SessionEnd, and Notification hooks, just keep it here
                         "SessionEnd": [
                             HookMatcher(hooks=[
-                                self._handle_hook
+                                # self._handle_hook
                             ])
                         ]
                     },
@@ -300,6 +300,15 @@ class ClaudeCodeSession(Session):
 
         if message.get("role") == "user":
             async with self._lock:
+                await self._handle_hook(
+                    {
+                        "session_id": self.session_id,
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": message.get("message")
+                    },
+                    None,
+                    None
+                )
                 await self._cc_client.query(
                     message.get("message")
                 )
