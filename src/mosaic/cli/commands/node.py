@@ -44,7 +44,7 @@ def show(node_id: str, mesh_id: str):
         console.print(f"mesh id: {node.mesh_id}")
         console.print(f"type: {node.type}")
         console.print(f"label: {node.label}")
-        console.print(f"config: {json.dumps(
+        console.print(f"config: \n{json.dumps(
             node.config, ensure_ascii=False, indent=2)}")
     except Exception as e:
         console.print(e, style="red")
