@@ -224,7 +224,13 @@ class AdminClient:
         
         nodes: List[Node] = await core_repo.list_nodes(mesh_id)
         for node in nodes:
-            await self.stop_node(mesh_id, node.node_id, force)
+            try:
+                await self.stop_node(mesh_id, node.node_id, force)
+            except Exception as e:
+                if force:
+                    continue
+                else:
+                    raise e
     
     
     async def create_node(
