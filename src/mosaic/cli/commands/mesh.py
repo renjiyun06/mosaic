@@ -72,12 +72,12 @@ def list_nodes(mesh_id: str):
             console.print(
                 f"{node.node_id} - "
                 f"{node.type} - "
-                f"{json.dumps(node.config, ensure_ascii=False)}"
+                f"{node.label}"
             )
     except Exception as e:
         console.print(e, style="red")
 
-    
+
 @mesh.command(cls=CustomCommand, name="topology")
 @option("--mesh-id", type=str, required=True)
 def topology(mesh_id: str):

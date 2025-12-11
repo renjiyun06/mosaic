@@ -1,4 +1,5 @@
 import asyncio
+import json
 import click
 from click import option
 from typing import Dict, List, Any, Optional
@@ -32,6 +33,22 @@ def create(node_id: str, mesh_id: str, type: str, config: Dict[str, str]):
     except Exception as e:
         console.print(e, style="red")
 
+@node.command(cls=CustomCommand)
+@option("--node-id", type=str, required=True)
+@option("--mesh-id", type=str, required=True)
+def show(node_id: str, mesh_id: str):
+    """show details of a mosaic mesh node"""
+    try:
+        node = asyncio.run(admin_client.get_node(mesh_id, node_id))
+        console.print(f"node id: {node.node_id}")
+        console.print(f"mesh id: {node.mesh_id}")
+        console.print(f"type: {node.type}")
+        console.print(f"label: {node.label}")
+        console.print(f"config: {json.dumps(
+            node.config, ensure_ascii=False, indent=2)}")
+    except Exception as e:
+        console.print(e, style="red")
+
 
 @node.command(cls=CustomCommand)
 @option("--node-id", type=str, required=True)
@@ -41,9 +58,6 @@ def config(node_id: str, mesh_id: str, config: Dict[str, str]):
     """update the config of a mosaic mesh node"""
     try:
         asyncio.run(admin_client.update_node_config(mesh_id, node_id, config))
-        console.print(
-            f"Node config updated", style="green"
-        )
     except Exception as e:
         console.print(e, style="red")
 
@@ -56,9 +70,6 @@ def add_config(node_id: str, mesh_id: str, config: Dict[str, str]):
     """add new configs to a mosaic mesh node"""
     try:
         asyncio.run(admin_client.add_node_config(mesh_id, node_id, config))
-        console.print(
-            f"Node config added", style="green"
-        )
     except Exception as e:
         console.print(e, style="red")
 
@@ -79,9 +90,18 @@ def add_mcp_server(
         asyncio.run(admin_client.add_mcp_server(
             mesh_id, node_id, server_name, server_config
         ))
-        console.print(
-            f"MCP server added", style="green"
-        )
+    except Exception as e:
+        console.print(e, style="red")
+
+
+@node.command(cls=CustomCommand, name="add-label")
+@option("--node-id", type=str, required=True)
+@option("--mesh-id", type=str, required=True)
+@option("--label", type=str, required=True, help="The label(s) to add to the node, separated by commas")
+def add_label(node_id: str, mesh_id: str, label: str):
+    """add labels to a mosaic mesh node"""
+    try:
+        asyncio.run(admin_client.add_label(mesh_id, node_id, label))
     except Exception as e:
         console.print(e, style="red")
 

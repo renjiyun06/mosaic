@@ -270,6 +270,17 @@ class AdminClient:
         )
         await core_repo.create_node(node)
         return node
+
+
+    async def get_node(self, mesh_id: str, node_id: str) -> Node:
+        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+
+        node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
+        if not node:
+            raise RuntimeError(f"Node {node_id} not found in mesh {mesh}")
+        return node
     
 
     async def update_node_config(
@@ -332,6 +343,30 @@ class AdminClient:
         mcp_servers[server_name] = json.loads(server_config)
         node.config["mcpServers"] = json.dumps(mcp_servers, ensure_ascii=False)
         await core_repo.update_node_config(node)
+    
+
+    async def add_label(
+        self,
+        mesh_id: str,
+        node_id: str,
+        label: str
+    ):
+        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+
+        node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
+        if not node:
+            raise RuntimeError(f"Node {node_id} not found in mesh {mesh}")
+
+        current_labels = node.label.split(",") if node.label else []
+        new_labels = label.split(",")
+        for label in new_labels:
+            label = label.strip()
+            if label not in current_labels:
+                current_labels.append(label)
+        node.label = ",".join(current_labels)
+        await core_repo.update_node_label(node)
     
 
     async def delete_node(self, mesh_id: str, node_id: str):

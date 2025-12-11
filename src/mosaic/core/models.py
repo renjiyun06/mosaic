@@ -54,6 +54,7 @@ class Node(BaseModel):
     mesh_id: str
     type: NodeType
     config: Dict[str, str]
+    label: Optional[str] = None
 
     def __str__(self):
         return f"{self.mesh_id}#{self.node_id}"

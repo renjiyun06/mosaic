@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     mesh_id TEXT NOT NULL,
     type TEXT NOT NULL,
     config TEXT,
+    label TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(mesh_id, node_id)
@@ -95,13 +96,14 @@ async def create_node(node: Node):
     async with _get_conn() as conn:
         await conn.execute(
             "INSERT INTO nodes \
-            (node_id, mesh_id, type, config) VALUES \
-            (?, ?, ?, ?)",
+            (node_id, mesh_id, type, config, label) VALUES \
+            (?, ?, ?, ?, ?)",
             (
                 node.node_id, 
                 node.mesh_id, 
                 str(node.type), 
-                json.dumps(node.config, ensure_ascii=False)
+                json.dumps(node.config, ensure_ascii=False),
+                node.label
             )
         )
         await conn.commit()
@@ -113,6 +115,19 @@ async def update_node_config(node: Node):
             "UPDATE nodes SET config = ? WHERE node_id = ? AND mesh_id = ?",
             (
                 json.dumps(node.config, ensure_ascii=False),
+                node.node_id,
+                node.mesh_id
+            )
+        )
+        await conn.commit()
+
+    
+async def update_node_label(node: Node):
+    async with _get_conn() as conn:
+        await conn.execute(
+            "UPDATE nodes SET label = ? WHERE node_id = ? AND mesh_id = ?",
+            (
+                node.label,
                 node.node_id,
                 node.mesh_id
             )
@@ -132,7 +147,8 @@ async def get_node(mesh_id: str, node_id: str) -> Optional[Node]:
                 node_id=row["node_id"], 
                 mesh_id=row["mesh_id"], 
                 type=NodeType(row["type"]), 
-                config=json.loads(row["config"])
+                config=json.loads(row["config"]),
+                label=row["label"]
             )
         return None
 
@@ -149,7 +165,8 @@ async def list_nodes_by_type(type: NodeType) -> List[Node]:
                 node_id=row["node_id"], 
                 mesh_id=row["mesh_id"], 
                 type=NodeType(row["type"]), 
-                config=json.loads(row["config"])
+                config=json.loads(row["config"]),
+                label=row["label"]
             ) for row in rows
         ]
     
@@ -166,7 +183,8 @@ async def list_nodes(mesh_id: str) -> List[Node]:
                 node_id=row["node_id"], 
                 mesh_id=row["mesh_id"], 
                 type=NodeType(row["type"]), 
-                config=json.loads(row["config"])
+                config=json.loads(row["config"]),
+                label=row["label"]
             ) for row in rows
         ]
 
