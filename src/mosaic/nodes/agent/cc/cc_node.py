@@ -10,6 +10,8 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     AssistantMessage,
     TextBlock,
+    ThinkingBlock,
+    ToolUseBlock,
     HookMatcher
 )
 
@@ -237,11 +239,27 @@ class ClaudeCodeSession(Session):
                     if isinstance(block, TextBlock):
                         await self.broadcast_client.send({
                             "type": "message",
+                            "sub_type": "assistant_text",
                             "session_id": self.session_id,
                             "role": "assistant",
                             "message": block.text
                         })
-
+                    elif isinstance(block, ThinkingBlock):
+                        await self.broadcast_client.send({
+                            "type": "message",
+                            "sub_type": "assistant_thinking",
+                            "session_id": self.session_id,
+                            "role": "assistant",
+                            "message": block.thinking
+                        })
+                    elif isinstance(block, ToolUseBlock):
+                        await self.broadcast_client.send({
+                            "type": "message",
+                            "sub_type": "assistant_tool_use",
+                            "session_id": self.session_id,
+                            "role": "assistant",
+                            "message": block.name
+                        })
 
     async def process_event(self, event: MeshEvent):
         async with self._lock:

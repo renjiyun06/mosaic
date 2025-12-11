@@ -409,7 +409,14 @@ class AdminClient:
             type = message.get("type")
             if type == "message":
                 if message.get("role") == "assistant":
-                    console.print(f"• {message.get("message")}")
+                    sub_type = message.get("sub_type")
+                    if sub_type == "assistant_text":
+                        console.print(f"• {message.get("message")}")
+                    elif sub_type == "assistant_thinking":
+                        console.print(f"• [dim italic]{message.get("message")}[/dim italic]")
+                    elif sub_type == "assistant_tool_use":
+                        console.print(f"• [bold cyan]{message.get("message")}[/bold cyan]")
+                    
                 elif message.get("role") == "user":
                     console.print(f"> {message.get("message")}")
                 else:
