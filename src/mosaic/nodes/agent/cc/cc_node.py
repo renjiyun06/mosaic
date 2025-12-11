@@ -9,6 +9,7 @@ from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
     AssistantMessage,
+    ResultMessage,
     TextBlock,
     ThinkingBlock,
     ToolUseBlock,
@@ -260,6 +261,13 @@ class ClaudeCodeSession(Session):
                             "role": "assistant",
                             "message": block.name
                         })
+            elif isinstance(message, ResultMessage):
+                await self.publish_event(
+                    "cc.session_response",
+                    {
+                        "response": message.result
+                    }
+                )
 
     async def process_event(self, event: MeshEvent):
         async with self._lock:
@@ -341,6 +349,9 @@ class ClaudeCodeNode(AgentNode):
         
 
     async def create_session(self, mode: SessionMode) -> ClaudeCodeSession:
+        logger.info(
+            f"Creating new session in {mode} mode for node {self}"
+        )
         return ClaudeCodeSession(str(uuid.uuid4()), self, mode)
     
         

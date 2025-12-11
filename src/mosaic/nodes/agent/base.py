@@ -1,10 +1,13 @@
+import uuid
+from datetime import datetime
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Any, List, Literal
 
 import mosaic.core.util as core_util
+from mosaic.core.events import get_event_definition
 from mosaic.core.node import BaseNode
 from mosaic.core.client import MeshClient
-from mosaic.core.models import MeshEvent, Subscription
+from mosaic.core.models import MeshEvent, SessionTrace, Subscription
 from mosaic.nodes.agent.enums import (
     SessionMode,
     SessionRoutingStrategy as Strategy,
@@ -48,6 +51,37 @@ class Session(ABC):
         await self.on_close()
         await self.broadcast_client.disconnect()
         await self.broadcast_server.stop()
+
+    
+    async def publish_event(
+        self,
+        event_type: str,
+        payload: Dict[str, Any]
+    ):
+        subscriber_subscriptions = await self.node.client.get_subscribers(
+            self.node.mesh_id,
+            self.node.node_id,  # source id sub target id
+            event_type
+        )
+        if not subscriber_subscriptions:
+            return
+
+        for subscription in subscriber_subscriptions:
+            mesh_event = get_event_definition(event_type).to_mesh_event(
+                event_id=str(uuid.uuid4()),
+                mesh_id=self.node.mesh_id,
+                source_id=self.node.node_id,
+                target_id=subscription.source_id,
+                payload=payload,
+                session_trace=SessionTrace(
+                    upstream_session_id=self.session_id,
+                    downstream_session_id=None
+                ),
+                reply_to=None,
+                created_at=datetime.now(),
+            )
+            await self.node.client.send(mesh_event)
+
 
     @abstractmethod
     async def on_start(self): ...
@@ -115,8 +149,16 @@ class MirroringStrategy(SessionRoutingStrategy):
         upstream_session_id = event.session_trace.upstream_session_id
         session = self._sessions.get(topic, {}).get(upstream_session_id, None)
         if session:
+            logger.info(
+                f"Mirroring strategy: session {session} already exists for "
+                f"topic {topic} and upstream session {upstream_session_id}"
+            )
             return session
         else:
+            logger.info(
+                f"Mirroring strategy: creating new session for "
+                f"topic {topic} and upstream session {upstream_session_id}"
+            )
             session = await self._session_manager.create_session(
                 SessionMode.BACKGROUND
             )

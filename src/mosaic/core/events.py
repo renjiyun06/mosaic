@@ -35,6 +35,17 @@ _EVENTS: Dict[str, EventDefinition] = {
             "required": [],
         }
     ),
+    "cc.session_response": EventDefinition(
+        name="cc.session_response",
+        description="The assistant's response in its local session",
+        payload_schema={
+            "type": "object",
+            "properties": {
+                "response": {"type": "string"},
+            },
+            "required": ["response"],
+        }
+    ),
     "cc.session_end": EventDefinition(
         name="cc.session_end",
         description="A session has ended",
@@ -47,17 +58,6 @@ _EVENTS: Dict[str, EventDefinition] = {
     "mosaic.node_message": EventDefinition(
         name="mosaic.node_message",
         description="A message from a node",
-        payload_schema={
-            "type": "object",
-            "properties": {
-                "message": {"type": "string"},
-            },
-            "required": ["message"],
-        }
-    ),
-    "dummy.dummy_event": EventDefinition(
-        name="dummy.dummy_event",
-        description="A dummy event",
         payload_schema={
             "type": "object",
             "properties": {
