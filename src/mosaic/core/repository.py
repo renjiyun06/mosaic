@@ -107,6 +107,19 @@ async def create_node(node: Node):
         await conn.commit()
 
 
+async def update_node_config(node: Node):
+    async with _get_conn() as conn:
+        await conn.execute(
+            "UPDATE nodes SET config = ? WHERE node_id = ? AND mesh_id = ?",
+            (
+                json.dumps(node.config, ensure_ascii=False),
+                node.node_id,
+                node.mesh_id
+            )
+        )
+        await conn.commit()
+
+
 async def get_node(mesh_id: str, node_id: str) -> Optional[Node]:
     async with _get_conn() as conn:
         result = await conn.execute(

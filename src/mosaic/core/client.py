@@ -271,7 +271,25 @@ class AdminClient:
         await core_repo.create_node(node)
         return node
     
+
+    async def update_node_config(
+        self,
+        mesh_id: str,
+        node_id: str,
+        config: Dict[str, str]
+    ):
+        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+
+        node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
+        if not node:
+            raise RuntimeError(f"Node {node_id} not found in mesh {mesh}")
+        
+        node.config = config
+        await core_repo.update_node_config(node)
     
+
     async def delete_node(self, mesh_id: str, node_id: str):
         raise RuntimeError("Deleting a node is not supported yet")
 

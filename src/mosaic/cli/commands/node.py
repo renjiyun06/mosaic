@@ -33,7 +33,20 @@ def create(node_id: str, mesh_id: str, type: str, config: Dict[str, str]):
         console.print(e, style="red")
 
 
-# TODO Add config command to update node config
+@node.command(cls=CustomCommand)
+@option("--node-id", type=str, required=True)
+@option("--mesh-id", type=str, required=True)
+@option("--config", "-c", multiple=True, callback=parse_config)
+def config(node_id: str, mesh_id: str, config: Dict[str, str]):
+    """update the config of a mosaic mesh node"""
+    try:
+        asyncio.run(admin_client.update_node_config(mesh_id, node_id, config))
+        console.print(
+            f"Node config updated", style="green"
+        )
+    except Exception as e:
+        console.print(e, style="red")
+
 
 @node.command(cls=CustomCommand, name="list-sessions")
 @option("--node-id", type=str, required=True)
