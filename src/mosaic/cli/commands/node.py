@@ -48,6 +48,44 @@ def config(node_id: str, mesh_id: str, config: Dict[str, str]):
         console.print(e, style="red")
 
 
+@node.command(cls=CustomCommand, name="add-config")
+@option("--node-id", type=str, required=True)
+@option("--mesh-id", type=str, required=True)
+@option("--config", "-c", multiple=True, callback=parse_config)
+def add_config(node_id: str, mesh_id: str, config: Dict[str, str]):
+    """add new configs to a mosaic mesh node"""
+    try:
+        asyncio.run(admin_client.add_node_config(mesh_id, node_id, config))
+        console.print(
+            f"Node config added", style="green"
+        )
+    except Exception as e:
+        console.print(e, style="red")
+
+
+@node.command(cls=CustomCommand, name="add-mcp-server")
+@option("--node-id", type=str, required=True)
+@option("--mesh-id", type=str, required=True)
+@option("--server-name", type=str, required=True)
+@option("--server-config", type=str, required=True)
+def add_mcp_server(
+    node_id: str, 
+    mesh_id: str, 
+    server_name: str, 
+    server_config: str
+):
+    """add a new mcp server to a mosaic mesh node"""
+    try:
+        asyncio.run(admin_client.add_mcp_server(
+            mesh_id, node_id, server_name, server_config
+        ))
+        console.print(
+            f"MCP server added", style="green"
+        )
+    except Exception as e:
+        console.print(e, style="red")
+
+
 @node.command(cls=CustomCommand, name="list-sessions")
 @option("--node-id", type=str, required=True)
 @option("--mesh-id", type=str, required=True)

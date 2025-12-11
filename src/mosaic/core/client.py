@@ -288,6 +288,50 @@ class AdminClient:
         
         node.config = config
         await core_repo.update_node_config(node)
+
+
+    async def add_node_config(
+        self,
+        mesh_id: str,
+        node_id: str,
+        config: Dict[str, str]
+    ):
+        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+
+        node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
+        if not node:
+            raise RuntimeError(f"Node {node_id} not found in mesh {mesh}")
+
+        if not node.config:
+            node.config = {}
+        node.config.update(config)
+        await core_repo.update_node_config(node)
+
+
+    async def add_mcp_server(
+        self,
+        mesh_id: str,
+        node_id: str,
+        server_name: str,
+        server_config: str
+    ):
+        mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
+        if not mesh:
+            raise RuntimeError(f"Mesh {mesh_id} not found")
+
+        node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
+        if not node:
+            raise RuntimeError(f"Node {node_id} not found in mesh {mesh}")
+
+        if not node.config:
+            node.config = {}
+        
+        mcp_servers = json.loads(node.config.get("mcpServers", "{}"))
+        mcp_servers[server_name] = json.loads(server_config)
+        node.config["mcpServers"] = json.dumps(mcp_servers, ensure_ascii=False)
+        await core_repo.update_node_config(node)
     
 
     async def delete_node(self, mesh_id: str, node_id: str):
