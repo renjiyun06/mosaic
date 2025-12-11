@@ -480,7 +480,7 @@ class AdminClient:
                         console.print(f"• [bold cyan]{message.get("message")}[/bold cyan]")
                     
                 elif message.get("role") == "user":
-                    console.print(f"> {message.get("message")}")
+                    console.print(f"> [bold white on grey23]{message.get("message")}[/bold white on grey23]")
                 else:
                     console.print(message.get("message"), style="dim")
             elif type == "system":
