@@ -4,7 +4,6 @@ import os
 import asyncio
 from pathlib import Path
 from typing import Dict, Any, Literal
-from importlib.resources import files, as_file
 from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
@@ -16,13 +15,11 @@ from claude_agent_sdk import (
     HookMatcher
 )
 
-import mosaic.core.util as core_util
 from mosaic.core.client import MeshClient
 from mosaic.core.models import MeshEvent
 from mosaic.core.events import get_event_definition
 from mosaic.nodes.agent.base import AgentNode, Session
 from mosaic.nodes.agent.enums import SessionMode
-from mosaic.nodes.agent.cc.hooks import Hook
 from mosaic.nodes.agent.mcp_server import McpRequestServer
 from mosaic.utils.logger import get_logger
 
