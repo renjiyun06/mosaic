@@ -590,52 +590,7 @@ class AdminClient:
         node_id: str,
         transport: TransportType
     ):
-        lock_path = None
-        try:
-            mesh: Optional[Mesh] = await core_repo.get_mesh(mesh_id)
-            if not mesh:
-                raise RuntimeError(f"Mesh {mesh_id} not found")
-
-            node: Optional[Node] = await core_repo.get_node(mesh_id, node_id)
-            if not node:
-                raise RuntimeError(f"Node {node_id} not found in mesh {mesh}")
-
-            pid_path = core_util.node_pid_path(mesh_id, node_id)
-            if pid_path.exists():
-                raise RuntimeError(
-                    f"Node {node} is currently running"
-                )
-
-            lock_path = core_util.node_lock_path(mesh_id, node_id)
-            lock_path.parent.mkdir(parents=True, exist_ok=True)
-            lock_path.touch()
-
-            transport_backend = None
-            if transport == TransportType.SQLITE:
-                transport_backend = SqliteTransportBackend(mesh_id, node_id)
-            else:
-                raise RuntimeError(f"Unsupported transport type: {transport}")
-
-            if node.type == NodeType.CLAUDE_CODE:
-                from mosaic.nodes.agent.cc.cc_node import ClaudeCodeNode
-                cc_node = ClaudeCodeNode(
-                    mesh_id, 
-                    node_id, 
-                    node.config, 
-                    MeshClient(mesh_id, node_id, transport_backend), 
-                    "program"
-                )
-                session_id = str(uuid.uuid4())
-                await cc_node.start_program_mode(session_id)
-                await cc_node.program()
-                await cc_node.stop_program_mode()
-            else:
-                raise RuntimeError(
-                    f"Program is not supported for node {node}"
-                )
-        finally:
-            if lock_path:
-                lock_path.unlink(missing_ok=True)
+        ...
         
         
     async def create_subscription(

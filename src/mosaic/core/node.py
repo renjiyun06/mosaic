@@ -215,3 +215,7 @@ class BaseNode(ABC):
         asyncio.get_running_loop().add_signal_handler(
             signal.SIGTERM, lambda: asyncio.create_task(self.stop())
         )
+
+
+    def __str__(self):
+        return f"{self.mesh_id}#{self.node_id}"
