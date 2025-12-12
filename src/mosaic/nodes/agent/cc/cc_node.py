@@ -245,6 +245,8 @@ class ClaudeCodeNode(AgentNode):
         if self._mcp_request_server:
             await self._mcp_request_server.stop()
             self._mcp_request_server = None
+        
+        await self._session_manager.close()
 
     async def assemble_system_prompt(self, session_id: str) -> str:
         event_types = set[str]()

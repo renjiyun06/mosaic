@@ -100,6 +100,13 @@ class SessionManager:
     def __init__(self, node: 'AgentNode'):
         self._node = node
         self.sessions: Dict[str, Session] = {}
+
+    
+    async def start(self): ...
+    async def close(self):
+        for session in self.sessions.values():
+            await session.close()
+        self.sessions.clear()
     
     def get_session(self, session_id: str) -> Optional[Session]:
         return self.sessions.get(session_id, None)
@@ -339,15 +346,9 @@ class AgentNode(BaseNode):
     @abstractmethod
     async def create_session(self, mode: SessionMode) -> Session: ...
     @abstractmethod
-    async def program(self): ...
-    @abstractmethod
     async def on_start(self): ...
     @abstractmethod
     async def on_shutdown(self): ...
-    @abstractmethod
-    async def start_program_mode(self): ...
-    @abstractmethod
-    async def stop_program_mode(self): ...
 
     def __str__(self):
         return f"{self.mesh_id}#{self.node_id}"
