@@ -1,6 +1,5 @@
 import uvicorn
 import traceback
-import aiosqlite
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -10,6 +9,8 @@ from typing import Dict, Any, Optional, List
 
 import mosaic.core.db as db
 from mosaic.core.type import Node, NodeType
+from mosaic.core.zmq import ZmqServer
+from mosaic.core.node import MosaicNode
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -21,7 +22,16 @@ class Response(BaseModel):
 
 
 class MosaicServer:
-    def __init__(self, mosaic_home: Path, host: str, port: int):
+    def __init__(
+        self, 
+        mosaic_home: Path, 
+        host: str, 
+        port: int,
+        zmq_server_pull_host: str,
+        zmq_server_pull_port: int,
+        zmq_server_pub_host: str,
+        zmq_server_pub_port: int
+    ):
         self._mosaic_home = mosaic_home
         self._host = host
         self._port = port
@@ -30,20 +40,30 @@ class MosaicServer:
         self._setup_routes()
         self._app.include_router(self._router)
 
+        self._zmq_server = ZmqServer(
+            zmq_server_pull_host,
+            zmq_server_pull_port,
+            zmq_server_pub_host,
+            zmq_server_pub_port
+        )
+
+        self._running_nodes: Dict[str, MosaicNode] = {}
+
 
     @asynccontextmanager
     async def lifespan(self, app: FastAPI):
-        await self._initialize()
+        await self._on_start()
         yield
-        await self._shutdown()
+        await self._on_shutdown()
 
 
-    async def _initialize(self):
+    async def _on_start(self):
         await db.ensure_initialized(self._mosaic_home / "mosaic.db")
+        self._zmq_server.start()
 
 
-    async def _shutdown(self):
-        pass
+    async def _on_shutdown(self):
+        self._zmq_server.stop()
 
 
     def _setup_routes(self):
@@ -145,11 +165,56 @@ class MosaicServer:
 
 
     async def start_node(self, node_id: str):
-        pass
+        mosaic_node = None
+        try:
+            node: Optional[Node] = await db.get_node(node_id)
+            if node is None:
+                return Response(
+                    success=False, message=f"Node not found: {node_id}"
+                )
+            if node.node_id in self._running_nodes:
+                return Response(
+                    success=False, message=f"Node already running: {node_id}"
+                )
+            mosaic_node: MosaicNode = MosaicNode(
+                node.node_id, node.type, node.config
+            )
+            await mosaic_node.start()
+            self._running_nodes[node.node_id] = mosaic_node
+            return Response(success=True)
+        except Exception as e:
+            logger.error(
+                f"Failed to start node {node_id}: {e}\n{traceback.format_exc()}"
+            )
+            if mosaic_node is not None:
+                await mosaic_node.shutdown()
+            if node_id in self._running_nodes:
+                del self._running_nodes[node_id]
+            return Response(success=False, message=str(e))
 
 
     async def stop_node(self, node_id: str):
-        pass
+        mosaic_node = None
+        try:
+            node: Optional[Node] = await db.get_node(node_id)
+            if node is None:
+                return Response(
+                    success=False, message=f"Node not found: {node_id}"
+                )
+            if node.node_id not in self._running_nodes:
+                return Response(
+                    success=False, message=f"Node not running: {node_id}"
+                )
+            mosaic_node = self._running_nodes[node.node_id]
+            await mosaic_node.shutdown()
+            del self._running_nodes[node.node_id]
+            return Response(success=True)
+        except Exception as e:
+            logger.error(
+                f"Failed to stop node {node_id}: {e}\n{traceback.format_exc()}"
+            )
+            return Response(success=False, message=str(e))
+
 
     async def chat_node(self, node_id: str):
         pass
@@ -161,3 +226,5 @@ class MosaicServer:
 
     def run(self):
         uvicorn.run(self._app, host=self._host, port=self._port)
+
+

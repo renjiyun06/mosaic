@@ -47,7 +47,19 @@ def reset(mosaic_home: str):
 @click.argument("mosaic_home", type=str, default=".")
 @click.option("--server-host", type=str, default="0.0.0.0", show_default=True)
 @click.option("--server-port", type=int, default=8000, show_default=True)
-def start_server(mosaic_home: str, server_host: str, server_port: int):
+@click.option("--zmq-server-pull-host", type=str, default="0.0.0.0", show_default=True)
+@click.option("--zmq-server-pull-port", type=int, default=5555, show_default=True)
+@click.option("--zmq-server-pub-host", type=str, default="0.0.0.0", show_default=True)
+@click.option("--zmq-server-pub-port", type=int, default=5556, show_default=True)
+def start_server(
+    mosaic_home: str, 
+    server_host: str, 
+    server_port: int,
+    zmq_server_pull_host: str,
+    zmq_server_pull_port: int,
+    zmq_server_pub_host: str,
+    zmq_server_pub_port: int
+):
     """start the mosaic server"""
     mosaic_home = absolute_path(mosaic_home)
     mosaic_flag_file = mosaic_home / "MOSAIC"
@@ -65,7 +77,15 @@ def start_server(mosaic_home: str, server_host: str, server_port: int):
 
     setup_logging(mosaic_home / "logs")
     try:
-        server = MosaicServer(mosaic_home, server_host, server_port)
+        server = MosaicServer(
+            mosaic_home, 
+            server_host, 
+            server_port,
+            zmq_server_pull_host,
+            zmq_server_pull_port,
+            zmq_server_pub_host,
+            zmq_server_pub_port
+        )
         server.run()
     finally:
         pid_file.unlink(missing_ok=True)

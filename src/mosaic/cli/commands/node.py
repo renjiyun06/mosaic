@@ -123,15 +123,47 @@ def config():
 
 
 @node.command(cls=Command)
-def start():
+@click.argument("node-id", type=str, required=True)
+@click.option("--server-host", type=str, default="localhost", show_default=True)
+@click.option("--server-port", type=int, default=8000, show_default=True)
+def start(node_id: str, server_host: str, server_port: int):
     """start the mosaic node"""
-    pass
+    url = f"http://{server_host}:{server_port}/nodes/{node_id}/start"
+    response = requests.post(url)
+    if response.status_code != 200:
+        console.print(
+            f"Failed to start node {node_id}: {response.status_code}", style="red"
+        )
+        return
+    
+    response = Response.model_validate_json(response.text)
+    if not response.success:
+        console.print(f"{response.message}", style="red")
+        return
+
+    console.print(f"Node {node_id} started", style="green")
 
 
 @node.command(cls=Command)
-def stop():
+@click.argument("node-id", type=str, required=True)
+@click.option("--server-host", type=str, default="localhost", show_default=True)
+@click.option("--server-port", type=int, default=8000, show_default=True)
+def stop(node_id: str, server_host: str, server_port: int):
     """stop the mosaic node"""
-    pass
+    url = f"http://{server_host}:{server_port}/nodes/{node_id}/stop"
+    response = requests.post(url)
+    if response.status_code != 200:
+        console.print(
+            f"Failed to stop node {node_id}: {response.status_code}", style="red"
+        )
+        return
+    
+    response = Response.model_validate_json(response.text)
+    if not response.success:
+        console.print(f"{response.message}", style="red")
+        return
+
+    console.print(f"Node {node_id} stopped", style="green")
 
 
 @node.command(cls=Command)
