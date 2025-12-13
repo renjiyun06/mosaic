@@ -8,10 +8,12 @@ dependencies = [
     "aiosqlite>=0.21.0",
     "claude-agent-sdk>=0.1.9",
     "click>=8.3.1",
+    "fastapi>=0.124.4",
     "fastmcp>=2.13.3",
     "prompt-toolkit>=3.0.52",
     "pyzmq>=27.1.0",
     "rich>=14.2.0",
+    "uvicorn>=0.38.0",
 ]
 
 [build-system]
