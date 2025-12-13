@@ -3,8 +3,9 @@ import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
-def setup_logging() -> None:
-    log_dir = Path.home() / ".mosaic" / "logs"
+def setup_logging(log_dir: Path | str):
+    if isinstance(log_dir, str):
+        log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
     formatter = logging.Formatter(
@@ -52,7 +53,6 @@ def setup_logging() -> None:
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
 
+
 def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
-
-setup_logging()
