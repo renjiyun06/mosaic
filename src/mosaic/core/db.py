@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional, List
-from mosaic.core.type import Node, Subscription, NodeType
+from mosaic.core.type import Node, Subscription, NodeType, EventType
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS nodes (
@@ -106,3 +106,56 @@ async def create_node(node: Node):
             )
         )
         await conn.commit()
+
+
+async def get_subscription(
+    source_id: str, 
+    target_id: str, 
+    event_type: EventType
+) -> Optional[Subscription]:
+    async with _get_conn() as conn:
+        result = await conn.execute(
+            "SELECT * FROM subscriptions WHERE source_id = ? \
+                AND target_id = ? AND event_type = ?",
+            (source_id, target_id, event_type)
+        )
+        row = await result.fetchone()
+        if row:
+            return Subscription(
+                source_id=row["source_id"],
+                target_id=row["target_id"],
+                event_type=EventType(row["event_type"]),
+                config=json.loads(row["config"]),
+            )
+        return None
+
+
+async def create_subscription(subscription: Subscription):
+    async with _get_conn() as conn:
+        await conn.execute(
+            "INSERT INTO subscriptions \
+                (source_id, target_id, event_type, config) VALUES (?, ?, ?, ?)",
+            (
+                subscription.source_id,
+                subscription.target_id,
+                subscription.event_type,
+                json.dumps(subscription.config, ensure_ascii=False)
+            )
+        )
+        await conn.commit()
+
+
+async def list_subscriptions() -> List[Subscription]:
+    async with _get_conn() as conn:
+        result = await conn.execute(
+            "SELECT * FROM subscriptions"
+        )
+        rows = await result.fetchall()
+        return [
+            Subscription(
+                source_id=row["source_id"],
+                target_id=row["target_id"],
+                event_type=EventType(row["event_type"]),
+                config=json.loads(row["config"])
+            ) for row in rows
+        ]

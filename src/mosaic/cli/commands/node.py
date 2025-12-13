@@ -6,7 +6,7 @@ from prompt_toolkit.patch_stdout import StdoutProxy
 from typing import Dict, Any, List
 
 from mosaic.core.server import Response
-from mosaic.core.type import NodeType, Node
+from mosaic.core.type import NodeType, Node, Subscription
 from mosaic.utils.click import Group, Command
 
 console = Console()
@@ -78,9 +78,46 @@ def list(server_host: str, server_port: int):
 
 
 @node.command(cls=Command)
-def topology():
+@click.option("--server-host", type=str, default="localhost", show_default=True)
+@click.option("--server-port", type=int, default=8000, show_default=True)
+def topology(server_host: str, server_port: int):
     """show the topology of the mosaic nodes"""
-    pass
+    url = f"http://{server_host}:{server_port}/nodes"
+    response = requests.get(url)
+    if response.status_code != 200:
+        console.print(
+            f"Failed to list nodes: {response.status_code}", style="red"
+        )
+        return
+    response = Response.model_validate_json(response.text)
+    if not response.success:
+        console.print(f"{response.message}", style="red")
+        return
+    nodes: List[Node] = [Node.model_validate_json(node) for node in response.data]
+    
+    url = f"http://{server_host}:{server_port}/subscriptions"
+    response = requests.get(url)
+    if response.status_code != 200:
+        console.print(
+            f"Failed to list subscriptions: {response.status_code}", style="red"
+        )
+        return
+    response = Response.model_validate_json(response.text)
+    if not response.success:
+        console.print(f"{response.message}", style="red")
+        return
+    subscriptions: List[Subscription] = [Subscription.model_validate_json(subscription) for subscription in response.data]
+    
+
+    if not nodes:
+        console.print("No nodes found", style="yellow")
+        return
+
+    console.print("graph LR")
+    for node in nodes:
+        console.print(f"{node.node_id}")
+    for subscription in subscriptions:
+        console.print(f"{subscription.source_id} --> |{subscription.event_type}| {subscription.target_id}")
 
 
 @node.command(cls=Command)

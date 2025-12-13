@@ -8,7 +8,7 @@ from fastapi import FastAPI, APIRouter
 from typing import Dict, Any, Optional, List
 
 import mosaic.core.db as db
-from mosaic.core.type import Node, NodeType
+from mosaic.core.type import Node, NodeType, Subscription
 from mosaic.core.zmq import ZmqServer, ZmqClient
 from mosaic.core.node import MosaicNode
 from mosaic.nodes.agent.claude_code import ClaudeCodeNode
@@ -96,6 +96,8 @@ class MosaicServer:
         self._router.add_api_route("/nodes/{node_id}/chat", self.chat_node, methods=["POST"], response_model=Response)
         self._router.add_api_route("/nodes/{node_id}/program", self.program_node, methods=["POST"], response_model=Response)
         self._router.add_api_route("/nodes/{node_id}/events", self.send_event, methods=["POST"], response_model=Response)
+        self._router.add_api_route("/subscriptions", self.create_subscription, methods=["POST"], response_model=Response)
+        self._router.add_api_route("/subscriptions", self.list_subscriptions, methods=["GET"], response_model=Response)
 
 
     async def create_node(self, node: Dict[str, Any]):
@@ -268,7 +270,48 @@ class MosaicServer:
             )
             return Response(success=False, message=str(e))
 
+        
+    async def create_subscription(self, subscription: Dict[str, Any]):
+        try:
+            subscription: Subscription = Subscription(**subscription)
+            if not await db.get_node(subscription.source_id):
+                return Response(
+                    success=False, 
+                    message=f"Source node not found: {subscription.source_id}"
+                )
+            if not await db.get_node(subscription.target_id):
+                return Response(
+                    success=False, 
+                    message=f"Target node not found: {subscription.target_id}"
+                )
+            if await db.get_subscription(
+                subscription.source_id, 
+                subscription.target_id, 
+                subscription.event_type
+            ):
+                return Response(
+                    success=False, message=f"Subscription already exists"
+                )
+            await db.create_subscription(subscription)
+            return Response(success=True)
+        except Exception as e:
+            logger.error(
+                f"Failed to create subscription: {e}\n{traceback.format_exc()}"
+            )
+            return Response(success=False, message=str(e))
+
+
+    async def list_subscriptions(self):
+        try:
+            subscriptions: List[Subscription] = await db.list_subscriptions()
+            return Response(
+                success=True, data=[subscription.model_dump_json() for subscription in subscriptions]
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to list subscriptions: {e}\n{traceback.format_exc()}"
+            )
+            return Response(success=False, message=str(e))
+
     def run(self):
         uvicorn.run(self._app, host=self._host, port=self._port)
-
-
