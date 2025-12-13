@@ -2,7 +2,7 @@ import asyncio
 import zmq
 import zmq.asyncio
 import json
-from typing import Dict, Any, Callable
+from typing import Dict, Any, Callable, Optional
 
 from mosaic.utils.logger import get_logger
 
@@ -91,7 +91,7 @@ class ZmqClient:
         pub_host: str,
         pub_port: int,
         subscribe_topic: str,
-        on_event: Callable[[Dict[str, Any]], None]
+        on_event: Optional[Callable[[Dict[str, Any]], None]] = None
     ):
         self._pull_host = pull_host
         self._pull_port = pull_port
@@ -108,7 +108,7 @@ class ZmqClient:
         self._receive_task = None
         
     
-    async def connect(self):
+    def connect(self):
         logger.info(
             f"Connecting to zmq server for pull {self._pull_url} "
             f"and pub {self._pub_url}"
@@ -126,7 +126,7 @@ class ZmqClient:
         )
     
 
-    async def disconnect(self):
+    def disconnect(self):
         logger.info(
             f"Disconnecting from zmq server for pull {self._pull_url} "
             f"and pub {self._pub_url}"
@@ -154,20 +154,21 @@ class ZmqClient:
             f"Sending event {json.dumps(event, ensure_ascii=False)} "
             f"on topic {topic}"
         )
-        await self._push_sock.send(topic, zmq.SNDMORE)  
+        await self._push_sock.send_string(topic, zmq.SNDMORE)  
         await self._push_sock.send_json(event)
 
 
     async def _receive_loop(self):
         while True:
             try:
-                topic = await self._sub_sock.recv()
+                topic = await self._sub_sock.recv_string()
                 assert topic == self._subscribe_topic
                 event = await self._sub_sock.recv_json()
                 logger.debug(
                     f"Received event {json.dumps(event, ensure_ascii=False)} "
                     f"on topic {topic}"
                 )
-                await self._on_event(event)
+                if self._on_event:
+                    await self._on_event(event)
             except asyncio.CancelledError:
                 break

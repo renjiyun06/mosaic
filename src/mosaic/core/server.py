@@ -9,11 +9,16 @@ from typing import Dict, Any, Optional, List
 
 import mosaic.core.db as db
 from mosaic.core.type import Node, NodeType
-from mosaic.core.zmq import ZmqServer
+from mosaic.core.zmq import ZmqServer, ZmqClient
 from mosaic.core.node import MosaicNode
+from mosaic.nodes.agent.claude_code import ClaudeCodeNode
 from mosaic.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+_NODES = {
+    NodeType.CLAUDE_CODE: ClaudeCodeNode,
+}
 
 class Response(BaseModel):
     success: bool
@@ -40,16 +45,28 @@ class MosaicServer:
         self._setup_routes()
         self._app.include_router(self._router)
 
+        self._zmq_server_pull_host = zmq_server_pull_host
+        self._zmq_server_pull_port = zmq_server_pull_port
+        self._zmq_server_pub_host = zmq_server_pub_host
+        self._zmq_server_pub_port = zmq_server_pub_port
         self._zmq_server = ZmqServer(
             zmq_server_pull_host,
             zmq_server_pull_port,
             zmq_server_pub_host,
             zmq_server_pub_port
         )
+        self._zmq_client = ZmqClient(
+            zmq_server_pull_host,
+            zmq_server_pull_port,
+            zmq_server_pub_host,
+            zmq_server_pub_port,
+            "",
+            None
+        )
 
         self._running_nodes: Dict[str, MosaicNode] = {}
 
-
+    
     @asynccontextmanager
     async def lifespan(self, app: FastAPI):
         await self._on_start()
@@ -60,9 +77,11 @@ class MosaicServer:
     async def _on_start(self):
         await db.ensure_initialized(self._mosaic_home / "mosaic.db")
         self._zmq_server.start()
+        self._zmq_client.connect()
 
 
     async def _on_shutdown(self):
+        self._zmq_client.disconnect()
         self._zmq_server.stop()
 
 
@@ -76,6 +95,7 @@ class MosaicServer:
         self._router.add_api_route("/nodes/{node_id}/stop", self.stop_node, methods=["POST"], response_model=Response)
         self._router.add_api_route("/nodes/{node_id}/chat", self.chat_node, methods=["POST"], response_model=Response)
         self._router.add_api_route("/nodes/{node_id}/program", self.program_node, methods=["POST"], response_model=Response)
+        self._router.add_api_route("/nodes/{node_id}/events", self.send_event, methods=["POST"], response_model=Response)
 
 
     async def create_node(self, node: Dict[str, Any]):
@@ -176,8 +196,13 @@ class MosaicServer:
                 return Response(
                     success=False, message=f"Node already running: {node_id}"
                 )
-            mosaic_node: MosaicNode = MosaicNode(
-                node.node_id, node.type, node.config
+            mosaic_node: MosaicNode = _NODES[node.type](
+                node.node_id, 
+                node.config,
+                self._zmq_server_pull_host,
+                self._zmq_server_pull_port,
+                self._zmq_server_pub_host,
+                self._zmq_server_pub_port
             )
             await mosaic_node.start()
             self._running_nodes[node.node_id] = mosaic_node
@@ -223,6 +248,25 @@ class MosaicServer:
     async def program_node(self, node_id: str):
         pass
 
+
+    async def send_event(self, node_id: str, event: Dict[str, Any]):
+        try:
+            node: Optional[Node] = await db.get_node(node_id)
+            if node is None:
+                return Response(
+                    success=False, message=f"Node not found: {node_id}"
+                )
+            if node.node_id not in self._running_nodes:
+                return Response(
+                    success=False, message=f"Node not running: {node_id}"
+                )
+            await self._zmq_client.send(node.node_id, event)
+            return Response(success=True)
+        except Exception as e:
+            logger.error(
+                f"Failed to send event to node {node_id}: {e}\n{traceback.format_exc()}"
+            )
+            return Response(success=False, message=str(e))
 
     def run(self):
         uvicorn.run(self._app, host=self._host, port=self._port)

@@ -176,3 +176,26 @@ def chat():
 def program():
     """program the mosaic node"""
     pass
+
+
+@node.command(cls=Command)
+@click.argument("node-id", type=str, required=True)
+@click.argument("event", type=str, required=True)
+@click.option("--server-host", type=str, default="localhost", show_default=True)
+@click.option("--server-port", type=int, default=8000, show_default=True)
+def send_event(node_id: str, event: str, server_host: str, server_port: int):
+    """send an event to the mosaic node"""
+    url = f"http://{server_host}:{server_port}/nodes/{node_id}/events"
+    response = requests.post(url, json=json.loads(event))
+    if response.status_code != 200:
+        console.print(
+            f"Failed to send event to node {node_id}: {response.status_code}", style="red"
+        )
+        return
+
+    response = Response.model_validate_json(response.text)
+    if not response.success:
+        console.print(f"{response.message}", style="red")
+        return
+
+    console.print(f"Event sent to node {node_id}", style="green")
