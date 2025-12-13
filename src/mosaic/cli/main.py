@@ -1,8 +1,10 @@
 import os
+import asyncio
 import click
 from pathlib import Path
 from rich.console import Console
 
+import mosaic.core.db as db
 from mosaic.core.server import MosaicServer
 from mosaic.cli.commands.node import node
 from mosaic.cli.commands.subscription import subscription
@@ -31,6 +33,7 @@ def init(mosaic_home: str):
     (mosaic_home / "logs").mkdir(parents=True, exist_ok=True)
     (mosaic_home / "nodes").mkdir(parents=True, exist_ok=True)
     (mosaic_home / "MOSAIC").touch()
+    asyncio.run(db.ensure_initialized(mosaic_home / "mosaic.db"))
 
 
 @mosaic.command(cls=Command)
@@ -62,7 +65,7 @@ def start_server(mosaic_home: str, server_host: str, server_port: int):
 
     setup_logging(mosaic_home / "logs")
     try:
-        server = MosaicServer(server_host, server_port)
+        server = MosaicServer(mosaic_home, server_host, server_port)
         server.run()
     finally:
         pid_file.unlink(missing_ok=True)
