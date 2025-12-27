@@ -38,5 +38,5 @@ packages = ["src/mosaic"]
 email-threads = { git = "https://github.com/renjiyun06/email-threads.git" }
 
 [project.scripts]
-mosaic = "mosaic.refactor.cli.main:main"
+mosaic = "mosaic.v2.cli.main:main"
 mosaic_old = "mosaic.cli.main:mosaic"

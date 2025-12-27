@@ -8,6 +8,7 @@ from .subscription import Subscription
 from .session import Session
 from .session_routing import SessionRouting
 from .event import Event
+from .message import Message
 
 __all__ = [
     "BaseModel",
@@ -20,4 +21,5 @@ __all__ = [
     "Session",
     "SessionRouting",
     "Event",
+    "Message",
 ]
