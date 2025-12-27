@@ -1,7 +1,7 @@
 from typing import Any
 from sqlmodel import Field, Column, JSON
 from .base import BaseModel
-from ..enums import EventType
+from ..enum import EventType
 
 
 class Event(BaseModel, table=True):

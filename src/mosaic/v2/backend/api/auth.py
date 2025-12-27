@@ -1,7 +1,15 @@
 """Authentication API endpoints"""
 
-from fastapi import APIRouter, Depends, Header
+import random
+import smtplib
+import logging
+from datetime import datetime, timedelta
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+from fastapi import APIRouter, Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from typing import Annotated
 
 from ..schema.response import SuccessResponse
@@ -12,15 +20,74 @@ from ..schema.auth import (
     AuthResponse,
     UserOut,
 )
+from ..model import User, EmailVerification
+from ..dep import get_db_session
+from ..exception import ConflictError, InternalError
+
+logger = logging.getLogger(__name__)
 
 # Router configuration
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-# ==================== Type Aliases (to be defined in core/deps.py) ====================
-# These are placeholders - actual implementation will be in core/deps.py
-# SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
-# CurrentUserDep = Annotated[User, Depends(get_current_user)]
+# ==================== Type Aliases ====================
+
+SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
+# CurrentUserDep = Annotated[User, Depends(get_current_user)]  # TODO: implement JWT auth
+
+
+# ==================== Email Sending Helper ====================
+
+def send_email(
+    to_email: str,
+    subject: str,
+    body: str,
+    smtp_config: dict,
+) -> None:
+    """Send email via SMTP
+
+    Args:
+        to_email: Recipient email address
+        subject: Email subject
+        body: Email body (plain text)
+        smtp_config: SMTP configuration dict with keys:
+            - smtp_host: SMTP server address
+            - smtp_port: SMTP server port
+            - use_ssl: Whether to use SSL
+            - sender_email: Sender email address
+            - sender_password: Sender email password (auth code)
+            - sender_name: Sender display name (optional)
+
+    Raises:
+        Exception: Failed to send email
+    """
+    try:
+        # Create message
+        msg = MIMEMultipart()
+        sender_name = smtp_config.get("sender_name", "Mosaic System")
+        msg["From"] = f"{sender_name} <{smtp_config['sender_email']}>"
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+
+        # Connect and send
+        use_ssl = smtp_config.get("use_ssl", False)
+
+        if use_ssl:
+            server = smtplib.SMTP_SSL(smtp_config["smtp_host"], smtp_config["smtp_port"])
+        else:
+            server = smtplib.SMTP(smtp_config["smtp_host"], smtp_config["smtp_port"])
+            server.starttls()
+
+        server.login(smtp_config["sender_email"], smtp_config["sender_password"])
+        server.send_message(msg)
+        server.close()
+
+        logger.info(f"Email sent successfully to {to_email}")
+
+    except Exception as e:
+        logger.exception(f"Failed to send email to {to_email}")
+        raise
 
 
 @router.post(
@@ -51,13 +118,15 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 )
 async def send_verification_code(
     request: SendCodeRequest,
-    # session: SessionDep,  # Database session dependency
+    req: Request,
+    session: SessionDep,
 ):
     """Send email verification code
 
     Args:
         request: Send code request (email)
-        session: Database session (injected)
+        req: FastAPI request object (to access app state/config)
+        session: Database session (injected via dependency)
 
     Returns:
         SuccessResponse[None]: Success message
@@ -66,10 +135,66 @@ async def send_verification_code(
         ConflictError: Email already registered
         InternalError: Failed to send email
     """
-    # TODO: Implement send verification code logic
-    # 1. Call AuthService.send_verification_code(session, request)
-    # 2. Return SuccessResponse(data=None, message=f"Verification code sent to {request.email}")
-    pass
+    # Get email config from app state
+    email_config = req.app.state.config["email"]
+
+    # 1. Check if email already registered
+    stmt = select(User).where(User.email == request.email, User.deleted_at.is_(None))
+    result = await session.execute(stmt)
+    existing_user = result.scalar_one_or_none()
+
+    if existing_user:
+        logger.warning(f"Email already registered: {request.email}")
+        raise ConflictError("Email already registered")
+
+    # 2. Generate 6-digit verification code
+    code = f"{random.randint(0, 999999):06d}"
+
+    # 3. Calculate expiration time (10 minutes from now)
+    expires_at = datetime.now() + timedelta(minutes=10)
+
+    # 4. Save verification code to database
+    verification = EmailVerification(
+        email=request.email,
+        code=code,
+        expires_at=expires_at,
+        is_used=False,
+    )
+    session.add(verification)
+    await session.commit()
+
+    logger.info(f"Verification code generated for {request.email}: {code}")
+
+    # 5. Send email
+    subject = "Mosaic - Email Verification Code"
+    body = f"""Hello,
+
+Your verification code is: {code}
+
+This code will expire in 10 minutes.
+
+If you did not request this code, please ignore this email.
+
+Best regards,
+Mosaic Team
+"""
+
+    try:
+        send_email(
+            to_email=request.email,
+            subject=subject,
+            body=body,
+            smtp_config=email_config,
+        )
+    except Exception as e:
+        logger.exception(f"Failed to send verification code to {request.email}")
+        raise InternalError(f"Failed to send email: {str(e)}")
+
+    # 6. Return success response
+    return SuccessResponse(
+        data=None,
+        message=f"Verification code sent to {request.email}"
+    )
 
 
 @router.post(

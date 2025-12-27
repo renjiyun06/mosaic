@@ -3,7 +3,7 @@
 from typing import Any
 from sqlmodel import Field, Column, JSON
 from .base import BaseModel
-from ..enums import MessageRole, MessageType
+from ..enum import MessageRole, MessageType
 
 
 class Message(BaseModel, table=True):

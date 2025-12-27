@@ -6,6 +6,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
 
 from .logging import setup_logging
 from .exception import MosaicException
@@ -35,6 +37,33 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
         title="Mosaic API",
         description="Event-driven distributed multi-agent system",
     )
+
+    # ==================== Database Configuration ====================
+
+    # Create async database engine
+    db_path = instance_path / "data" / "mosaic.db"
+    db_url = f"sqlite+aiosqlite:///{db_path}"
+
+    engine = create_async_engine(
+        db_url,
+        echo=False,
+        future=True,
+    )
+
+    # Create async session factory
+    async_session_factory = sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+        autocommit=False,
+    )
+
+    # Store in app state for dependency injection
+    app.state.engine = engine
+    app.state.async_session_factory = async_session_factory
+    app.state.config = config
+    app.state.instance_path = instance_path
 
     # ==================== CORS Configuration ====================
 

@@ -3,7 +3,7 @@ from typing import Optional
 from sqlmodel import Field, Index
 from sqlalchemy import text
 from .base import BaseModel
-from ..enums import SessionAlignment
+from ..enum import SessionAlignment
 
 
 class Connection(BaseModel, table=True):

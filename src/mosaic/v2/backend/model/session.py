@@ -4,7 +4,7 @@ from sqlmodel import Field, Column, JSON
 from datetime import datetime
 from typing import Optional
 from .base import BaseModel
-from ..enums import SessionMode, SessionStatus, LLMModel
+from ..enum import SessionMode, SessionStatus, LLMModel
 
 
 class Session(BaseModel, table=True):

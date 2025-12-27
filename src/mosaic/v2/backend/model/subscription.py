@@ -4,7 +4,7 @@ from sqlmodel import Field
 from typing import Optional
 
 from .base import BaseModel
-from ..enums import EventType
+from ..enum import EventType
 
 
 class Subscription(BaseModel, table=True):

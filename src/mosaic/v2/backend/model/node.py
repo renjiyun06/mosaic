@@ -2,7 +2,7 @@
 from sqlmodel import Field, Column, Text, Index
 from sqlalchemy import text
 from .base import BaseModel
-from ..enums import NodeType
+from ..enum import NodeType
 
 
 class Node(BaseModel, table=True):

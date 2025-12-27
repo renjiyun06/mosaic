@@ -63,6 +63,14 @@ allow_origins = ["http://localhost:3000", "http://localhost:3001"]
 allow_credentials = true
 allow_methods = ["*"]
 allow_headers = ["*"]
+
+[email]
+smtp_host = "smtp.example.com"
+smtp_port = 465
+use_ssl = true
+sender_email = "noreply@example.com"
+sender_password = "your-auth-code-here"
+sender_name = "Mosaic System"
 """
 
     config_file = instance_path / "config.toml"
