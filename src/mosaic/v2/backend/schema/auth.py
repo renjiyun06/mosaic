@@ -100,7 +100,7 @@ class LoginRequest(BaseModel):
 class UserOut(BaseModel):
     """User output schema (safe for API responses, excludes sensitive fields)"""
 
-    id: str = Field(..., description="User ID")
+    id: int = Field(..., description="User ID")
     username: str = Field(..., description="Username")
     email: str = Field(..., description="Email address")
     avatar_url: str | None = Field(None, description="Avatar image URL")

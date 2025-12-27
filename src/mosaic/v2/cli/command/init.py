@@ -64,6 +64,11 @@ allow_credentials = true
 allow_methods = ["*"]
 allow_headers = ["*"]
 
+[jwt]
+secret_key = "your-secret-key-change-this-in-production"
+algorithm = "HS256"
+access_token_expire_minutes = 10080  # 7 days
+
 [email]
 smtp_host = "smtp.example.com"
 smtp_port = 465

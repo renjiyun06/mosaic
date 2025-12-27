@@ -21,8 +21,9 @@ from ..schema.auth import (
     UserOut,
 )
 from ..model import User, EmailVerification
-from ..dep import get_db_session
-from ..exception import ConflictError, InternalError
+from ..dep import get_db_session, get_current_user
+from ..exception import ConflictError, InternalError, ValidationError, AuthenticationError
+from ..security import get_password_hash, verify_password, create_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 # ==================== Type Aliases ====================
 
 SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
-# CurrentUserDep = Annotated[User, Depends(get_current_user)]  # TODO: implement JWT auth
+CurrentUserDep = Annotated[User, Depends(get_current_user)]
 
 
 # ==================== Email Sending Helper ====================
@@ -231,12 +232,14 @@ Mosaic Team
 )
 async def register(
     request: RegisterRequest,
-    # session: SessionDep,  # Database session dependency
+    req: Request,
+    session: SessionDep,
 ):
     """Register a new user account
 
     Args:
         request: Registration request (username, email, password, verification_code)
+        req: FastAPI request object (to access app state)
         session: Database session (injected)
 
     Returns:
@@ -246,14 +249,82 @@ async def register(
         ValidationError: Invalid input format or verification code invalid/expired
         ConflictError: Username or email already exists
     """
-    # TODO: Implement registration logic
-    # 1. Call AuthService.register(session, request)
-    #    - Service will verify verification code first
-    #    - Then check username/email uniqueness
-    #    - Create user and generate token
-    # 2. Wrap result in SuccessResponse
-    # 3. Return SuccessResponse(data=auth_response, message="Registration successful")
-    pass
+    # 1. Verify email verification code
+    stmt = select(EmailVerification).where(
+        EmailVerification.email == request.email,
+        EmailVerification.code == request.verification_code,
+        EmailVerification.is_used == False,
+        EmailVerification.expires_at > datetime.now(),
+    )
+    result = await session.execute(stmt)
+    verification = result.scalar_one_or_none()
+
+    if not verification:
+        logger.warning(f"Invalid or expired verification code for {request.email}")
+        raise ValidationError("Invalid or expired verification code")
+
+    # 2. Check if username already exists
+    stmt = select(User).where(User.username == request.username, User.deleted_at.is_(None))
+    result = await session.execute(stmt)
+    existing_user = result.scalar_one_or_none()
+
+    if existing_user:
+        logger.warning(f"Username already exists: {request.username}")
+        raise ConflictError("Username already exists")
+
+    # 3. Check if email already exists (double check)
+    stmt = select(User).where(User.email == request.email, User.deleted_at.is_(None))
+    result = await session.execute(stmt)
+    existing_user = result.scalar_one_or_none()
+
+    if existing_user:
+        logger.warning(f"Email already exists: {request.email}")
+        raise ConflictError("Email already exists")
+
+    # 4. Hash password
+    password_hash = get_password_hash(request.password)
+
+    # 5. Create user
+    user = User(
+        username=request.username,
+        email=request.email,
+        hashed_password=password_hash,
+        is_active=True,
+    )
+    session.add(user)
+    await session.flush()  # Flush to get user.id
+
+    # 6. Mark verification code as used
+    verification.is_used = True
+    session.add(verification)
+
+    # 7. Commit transaction
+    await session.commit()
+
+    logger.info(f"User registered successfully: {user.email} (id={user.id})")
+
+    # 8. Create user directory
+    try:
+        instance_path = req.app.state.instance_path
+        user_dir = instance_path / "users" / str(user.id)
+        user_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Created user directory: {user_dir}")
+    except Exception as e:
+        logger.error(f"Failed to create user directory for {user.id}: {e}")
+        # Don't fail registration if directory creation fails
+
+    # 9. Generate JWT token
+    jwt_config = req.app.state.config["jwt"]
+    access_token = create_access_token(user.id, jwt_config)
+
+    # 10. Convert user to UserOut
+    user_out = UserOut.model_validate(user)
+
+    # 11. Return response
+    return SuccessResponse(
+        data=AuthResponse(user=user_out, access_token=access_token),
+        message="Registration successful"
+    )
 
 
 @router.post(
@@ -283,12 +354,14 @@ async def register(
 )
 async def login(
     request: LoginRequest,
-    # session: SessionDep,  # Database session dependency
+    req: Request,
+    session: SessionDep,
 ):
     """User login
 
     Args:
         request: Login request (username_or_email, password)
+        req: FastAPI request object (to access app state)
         session: Database session (injected)
 
     Returns:
@@ -298,11 +371,43 @@ async def login(
         AuthenticationError: Invalid credentials
         ValidationError: Account disabled
     """
-    # TODO: Implement login logic
-    # 1. Call AuthService.login(session, request)
-    # 2. Wrap result in SuccessResponse
-    # 3. Return SuccessResponse(data=auth_response)
-    pass
+    # 1. Find user by username or email
+    stmt = select(User).where(
+        (User.username == request.username_or_email) | (User.email == request.username_or_email),
+        User.deleted_at.is_(None),
+    )
+    result = await session.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    # 2. Check if user exists
+    if not user:
+        logger.warning(f"Login attempt with non-existent user: {request.username_or_email}")
+        raise AuthenticationError("Invalid credentials")
+
+    # 3. Verify password
+    if not verify_password(request.password, user.hashed_password):
+        logger.warning(f"Login attempt with wrong password for user: {user.email}")
+        raise AuthenticationError("Invalid credentials")
+
+    # 4. Check if account is active
+    if not user.is_active:
+        logger.warning(f"Login attempt for inactive account: {user.email}")
+        raise ValidationError("Account is disabled")
+
+    logger.info(f"User logged in successfully: {user.email} (id={user.id})")
+
+    # 5. Generate JWT token
+    jwt_config = req.app.state.config["jwt"]
+    access_token = create_access_token(user.id, jwt_config)
+
+    # 6. Convert user to UserOut
+    user_out = UserOut.model_validate(user)
+
+    # 7. Return response
+    return SuccessResponse(
+        data=AuthResponse(user=user_out, access_token=access_token),
+        message=None
+    )
 
 
 @router.post(
@@ -328,13 +433,8 @@ async def login(
     - message: "Logout successful"
     """
 )
-async def logout(
-    # authorization: str = Header(None, alias="Authorization"),  # Optional token header
-):
+async def logout():
     """User logout
-
-    Args:
-        authorization: JWT token from Authorization header (optional)
 
     Returns:
         SuccessResponse[None]: Success message
@@ -342,11 +442,13 @@ async def logout(
     Note:
         Since JWT is stateless, logout is mainly for client-side token cleanup.
         Server doesn't maintain session state or token blacklist.
+        This endpoint exists for API consistency and to signal the client
+        to clear local authentication state.
     """
-    # TODO: Implement logout logic
-    # 1. Optionally validate token from header
-    # 2. Return SuccessResponse(data=None, message="Logout successful")
-    pass
+    # JWT is stateless, no server-side action needed
+    # Client should clear token from localStorage/sessionStorage
+    logger.debug("Logout endpoint called")
+    return SuccessResponse(data=None, message="Logout successful")
 
 
 @router.get(
@@ -380,7 +482,7 @@ async def logout(
     """
 )
 async def get_current_user_info(
-    # current_user: CurrentUserDep,  # Current user dependency (extracted from JWT)
+    current_user: CurrentUserDep,
 ):
     """Get current authenticated user information
 
@@ -394,8 +496,9 @@ async def get_current_user_info(
         AuthenticationError: Invalid or expired token
         NotFoundError: User not found
     """
-    # TODO: Implement get current user logic
     # 1. Current user is already injected by dependency
     # 2. Convert to UserOut schema
-    # 3. Return SuccessResponse(data=user_out)
-    pass
+    user_out = UserOut.model_validate(current_user)
+
+    # 3. Return response
+    return SuccessResponse(data=user_out, message=None)
