@@ -51,11 +51,22 @@ def init(path: str = None):
     (instance_path / "logs").mkdir(exist_ok=True)
     (instance_path / "users").mkdir(exist_ok=True)
 
-    # 2. Generate config.toml (empty file)
+    # 2. Generate config.toml with default settings
     console.print("Generating configuration...")
 
+    config_content = """[server]
+host = "0.0.0.0"
+port = 18888
+
+[cors]
+allow_origins = ["http://localhost:3000", "http://localhost:3001"]
+allow_credentials = true
+allow_methods = ["*"]
+allow_headers = ["*"]
+"""
+
     config_file = instance_path / "config.toml"
-    config_file.write_text("")
+    config_file.write_text(config_content)
 
     # 3. Create .mosaic_instance flag file
     flag_data = {
