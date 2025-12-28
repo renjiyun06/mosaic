@@ -76,6 +76,14 @@ use_ssl = true
 sender_email = "noreply@example.com"
 sender_password = "your-auth-code-here"
 sender_name = "Mosaic System"
+
+[zmq]
+host = "localhost"
+pull_port = 5555
+pub_port = 5556
+
+[runtime]
+max_threads = 4  # Number of worker threads for mosaic instances
 """
 
     config_file = instance_path / "config.toml"

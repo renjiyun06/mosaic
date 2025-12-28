@@ -1,6 +1,7 @@
 """FastAPI application factory and configuration"""
 
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -13,6 +14,7 @@ from .logging import setup_logging
 from .exception import MosaicException
 from .schema.response import ErrorResponse
 from .api import auth_router
+from .runtime.manager import RuntimeManager
 
 
 def create_app(instance_path: Path, config: dict) -> FastAPI:
@@ -32,10 +34,24 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
     # Initialize logging first
     setup_logging(instance_path)
 
-    # Create FastAPI application
+    # ==================== Lifespan Context Manager ====================
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """Manage application lifespan (startup and shutdown)"""
+        # Startup: Start runtime manager
+        await app.state.runtime_manager.start()
+
+        yield  # Application is running
+
+        # Shutdown: Clean up runtime manager
+        await app.state.runtime_manager.stop()
+
+    # Create FastAPI application with lifespan
     app = FastAPI(
         title="Mosaic API",
         description="Event-driven distributed multi-agent system",
+        lifespan=lifespan
     )
 
     # ==================== Database Configuration ====================
@@ -65,14 +81,36 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
     app.state.config = config
     app.state.instance_path = instance_path
 
+    # ==================== Runtime Manager Configuration ====================
+
+    # Create RuntimeManager singleton with dependencies
+    app.state.runtime_manager = RuntimeManager.create_instance(
+        async_session_factory=async_session_factory,
+        config=config
+    )
+
     # ==================== CORS Configuration ====================
 
     # Get CORS settings from config (required, no defaults)
-    cors_config = config.get('cors', {})
-    allow_origins = cors_config.get('allow_origins', [])
-    allow_credentials = cors_config.get('allow_credentials', True)
-    allow_methods = cors_config.get('allow_methods', ["*"])
-    allow_headers = cors_config.get('allow_headers', ["*"])
+    cors_config = config.get('cors')
+    if not cors_config:
+        raise ValueError("Missing required configuration: [cors]")
+
+    allow_origins = cors_config.get('allow_origins')
+    allow_credentials = cors_config.get('allow_credentials')
+    allow_methods = cors_config.get('allow_methods')
+    allow_headers = cors_config.get('allow_headers')
+
+    if not all([
+        allow_origins is not None,
+        allow_credentials is not None,
+        allow_methods is not None,
+        allow_headers is not None
+    ]):
+        raise ValueError(
+            "Missing required CORS configuration fields: "
+            "allow_origins, allow_credentials, allow_methods, allow_headers"
+        )
 
     app.add_middleware(
         CORSMiddleware,

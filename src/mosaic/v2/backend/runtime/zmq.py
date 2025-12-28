@@ -39,7 +39,7 @@ class ZmqServer:
 
     def __init__(
         self,
-        db_url: str,
+        async_session_factory,
         host: str,
         pull_port: int,
         pub_port: int
@@ -47,12 +47,12 @@ class ZmqServer:
         """Initialize ZMQ server
 
         Args:
-            db_url: Database URL for event persistence
+            async_session_factory: AsyncSession factory from app.state (shared connection pool)
             host: Host address to bind to
             pull_port: PULL socket port
             pub_port: PUB socket port
         """
-        self.db_url = db_url
+        self.async_session_factory = async_session_factory
         self.host = host
         self.pull_port = pull_port
         self.pub_port = pub_port
@@ -64,9 +64,6 @@ class ZmqServer:
         self._broadcast_task: Optional[asyncio.Task] = None
         self._running = False
 
-        # Database engine for event storage
-        self._engine = None
-
         logger.info(
             f"ZmqServer initialized (global singleton): "
             f"host={host}, pull_port={pull_port}, pub_port={pub_port}"
@@ -75,7 +72,7 @@ class ZmqServer:
     @classmethod
     async def get_instance(
         cls,
-        db_url: str,
+        async_session_factory,
         host: str,
         pull_port: int,
         pub_port: int
@@ -83,7 +80,7 @@ class ZmqServer:
         """Get or create the global singleton instance
 
         Args:
-            db_url: Database URL for event persistence
+            async_session_factory: AsyncSession factory from app.state (shared connection pool)
             host: Host address to bind to
             pull_port: PULL socket port
             pub_port: PUB socket port
@@ -93,7 +90,7 @@ class ZmqServer:
         """
         if cls._instance is None:
             cls._instance = cls(
-                db_url=db_url,
+                async_session_factory=async_session_factory,
                 host=host,
                 pull_port=pull_port,
                 pub_port=pub_port
@@ -120,20 +117,6 @@ class ZmqServer:
             return
 
         logger.info("Starting global ZmqServer...")
-
-        # Initialize database engine
-        try:
-            from sqlalchemy.ext.asyncio import create_async_engine
-            # Convert sqlite:/// to sqlite+aiosqlite:/// for async driver
-            async_db_url = self.db_url.replace("sqlite://", "sqlite+aiosqlite://")
-            self._engine = create_async_engine(async_db_url, echo=False)
-            logger.info("ZmqServer database engine initialized")
-        except Exception as e:
-            logger.error(
-                f"Failed to initialize database engine: {e}",
-                exc_info=True
-            )
-            raise
 
         # Initialize ZMQ context and sockets
         self._context = zmq.asyncio.Context()
@@ -190,11 +173,6 @@ class ZmqServer:
         if self._context:
             self._context.term()
             logger.debug("ZMQ context terminated")
-
-        # Close database engine
-        if self._engine:
-            await self._engine.dispose()
-            logger.info("Database engine disposed")
 
         logger.info("ZmqServer stopped")
 
@@ -301,12 +279,11 @@ class ZmqServer:
             )
 
             # Query user_id from nodes table
-            from sqlalchemy.ext.asyncio import AsyncSession
             from sqlalchemy import select
             from ..model.node import Node
             from ..model.event import Event
 
-            async with AsyncSession(self._engine) as db:
+            async with self.async_session_factory() as db:
                 # Find user_id for this mosaic
                 result = await db.execute(
                     select(Node.user_id).where(
