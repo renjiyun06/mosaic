@@ -67,19 +67,6 @@ class StopMosaicCommand(Command):
     mosaic: 'Mosaic' = None
 
 
-@dataclass
-class RestartMosaicCommand(Command):
-    """
-    Command to restart a mosaic instance.
-
-    This is equivalent to stop + start in the same event loop.
-
-    Attributes:
-        mosaic: Mosaic model object
-    """
-    mosaic: 'Mosaic' = None
-
-
 # ========== Node Lifecycle Commands ==========
 
 @dataclass
@@ -107,19 +94,6 @@ class StopNodeCommand(Command):
     - Stop event processing
     - Cleanup ZMQ client
     - Release node resources
-
-    Attributes:
-        node: Node model object
-    """
-    node: 'Node' = None
-
-
-@dataclass
-class RestartNodeCommand(Command):
-    """
-    Command to restart a node in the mosaic.
-
-    This is equivalent to stop + start for the node.
 
     Attributes:
         node: Node model object

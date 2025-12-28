@@ -314,8 +314,76 @@ class RuntimeManager:
             Uses run_coroutine_threadsafe for synchronous startup guarantee.
             FastAPI layer must validate mosaic existence and permissions before calling.
         """
-        # TODO: Implementation
-        pass
+        logger.info(f"Starting mosaic: id={mosaic.id}, mosaic_id={mosaic.mosaic_id}")
+
+        # 1. Validate mosaic is not already running
+        if mosaic.id in self._mosaic_instances:
+            raise MosaicAlreadyRunningError(
+                f"Mosaic with id={mosaic.id} is already running"
+            )
+
+        # 2. Select a worker thread using round-robin
+        thread = self._select_thread()
+
+        # Get the event loop for the selected thread
+        with self._thread_loops_lock:
+            loop = self._thread_loops.get(thread)
+
+        if not loop:
+            raise RuntimeInternalError(
+                f"Event loop not found for thread: {thread.name}"
+            )
+
+        # 3. Create MosaicInstance with mosaic model object
+        from .mosaic_instance import MosaicInstance
+
+        mosaic_instance = MosaicInstance(
+            mosaic=mosaic,
+            async_session_factory=self.async_session_factory,
+            config=self.config
+        )
+
+        logger.debug(
+            f"Created MosaicInstance for mosaic_id={mosaic.mosaic_id} "
+            f"in thread={thread.name}"
+        )
+
+        # 4. Start instance in worker thread (run_coroutine_threadsafe)
+        # This is the ONLY operation that uses run_coroutine_threadsafe
+        future = asyncio.run_coroutine_threadsafe(mosaic_instance.start(), loop)
+
+        # 5. Wait for startup to complete (with timeout)
+        # Convert concurrent.futures.Future to asyncio.Future to avoid blocking
+        try:
+            await asyncio.wait_for(
+                asyncio.wrap_future(future),
+                timeout=timeout
+            )
+            logger.debug(
+                f"MosaicInstance started successfully for mosaic_id={mosaic.mosaic_id}"
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                f"Mosaic startup timeout: id={mosaic.id}, mosaic_id={mosaic.mosaic_id} "
+                f"after {timeout}s"
+            )
+            raise RuntimeTimeoutError(
+                f"Mosaic startup timed out after {timeout}s"
+            )
+        except Exception as e:
+            logger.error(
+                f"Mosaic startup failed: id={mosaic.id}, mosaic_id={mosaic.mosaic_id}, "
+                f"error: {e}"
+            )
+            raise
+
+        # 6. Cache instance in _mosaic_instances
+        self._mosaic_instances[mosaic.id] = (mosaic_instance, thread)
+
+        logger.info(
+            f"Mosaic started successfully: id={mosaic.id}, mosaic_id={mosaic.mosaic_id} "
+            f"in thread={thread.name}"
+        )
 
     async def stop_mosaic(self, mosaic: 'Mosaic', timeout: float = 60.0) -> None:
         """
@@ -355,34 +423,6 @@ class RuntimeManager:
         self._mosaic_instances.pop(mosaic.id, None)
 
         logger.info(f"Mosaic stopped successfully: id={mosaic.id}, mosaic_id={mosaic.mosaic_id}")
-
-    async def restart_mosaic(self, mosaic: 'Mosaic', timeout: float = 90.0) -> None:
-        """
-        Restart a mosaic instance.
-
-        Args:
-            mosaic: Mosaic model object (validated by FastAPI layer)
-            timeout: Maximum wait time in seconds
-
-        Raises:
-            MosaicNotRunningError: If mosaic not running
-            RuntimeTimeoutError: If restart times out
-
-        Note:
-            FastAPI layer must validate mosaic existence and permissions before calling.
-        """
-        logger.info(f"Restarting mosaic: id={mosaic.id}, mosaic_id={mosaic.mosaic_id}")
-
-        # Import command here to avoid circular import
-        from .command import RestartMosaicCommand
-
-        # Create RestartMosaicCommand
-        command = RestartMosaicCommand(mosaic=mosaic)
-
-        # Submit command and wait for completion
-        await self._submit_command_and_wait(mosaic.id, command, timeout)
-
-        logger.info(f"Mosaic restarted successfully: id={mosaic.id}, mosaic_id={mosaic.mosaic_id}")
 
     async def get_mosaic_status(self, mosaic: 'Mosaic') -> MosaicStatus:
         """
@@ -474,41 +514,6 @@ class RuntimeManager:
 
         logger.info(
             f"Node stopped successfully: id={node.id}, node_id={node.node_id}"
-        )
-
-    async def restart_node(self, node: 'Node', timeout: float = 60.0) -> None:
-        """
-        Restart a node in a mosaic.
-
-        Uses command queue with Future for async wait.
-
-        Args:
-            node: Node model object (validated by FastAPI layer)
-            timeout: Maximum wait time in seconds
-
-        Raises:
-            MosaicNotRunningError: If mosaic not running
-            RuntimeTimeoutError: If operation times out
-
-        Note:
-            FastAPI layer must validate node existence and permissions before calling.
-        """
-        logger.info(
-            f"Restarting node: id={node.id}, node_id={node.node_id}, "
-            f"mosaic_id={node.mosaic_id}"
-        )
-
-        # Import command here to avoid circular import
-        from .command import RestartNodeCommand
-
-        # Create RestartNodeCommand
-        command = RestartNodeCommand(node=node)
-
-        # Submit command and wait for completion
-        await self._submit_command_and_wait(node.mosaic_id, command, timeout)
-
-        logger.info(
-            f"Node restarted successfully: id={node.id}, node_id={node.node_id}"
         )
 
     async def get_node_status(self, node: 'Node') -> NodeStatus:
