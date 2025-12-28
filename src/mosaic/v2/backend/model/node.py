@@ -1,6 +1,6 @@
 """Node-related data models"""
 from sqlmodel import Field, Column, Text, Index
-from sqlalchemy import text
+from sqlalchemy import text, JSON
 from .base import BaseModel
 from ..enum import NodeType
 
@@ -26,9 +26,9 @@ class Node(BaseModel, table=True):
     node_id: str = Field(max_length=100, index=True, description="Unique node identifier within mosaic")
     node_type: NodeType = Field(description="Node type")
     description: str | None = Field(default=None, max_length=1000, description="Node description")
-    mcp_servers: str = Field(
-        default="{}",
-        sa_column=Column(Text),
+    mcp_servers: dict = Field(
+        default_factory=dict,
+        sa_column=Column(JSON),
         description="MCP servers configuration (JSON object)"
     )
     auto_start: bool = Field(default=False, description="Auto-start when mosaic starts")
