@@ -7,6 +7,17 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from ..enum import MosaicStatus, NodeStatus
+from ..exception import (
+    RuntimeConfigError,
+    RuntimeAlreadyStartedError,
+    RuntimeNotStartedError,
+    MosaicAlreadyRunningError,
+    MosaicNotRunningError,
+    NodeNotFoundError,
+    SessionNotFoundError,
+    RuntimeTimeoutError,
+    RuntimeInternalError,
+)
 
 if TYPE_CHECKING:
     from ..model.mosaic import Mosaic
@@ -85,10 +96,10 @@ class RuntimeManager:
             Created RuntimeManager instance
 
         Raises:
-            RuntimeError: If instance already exists
+            RuntimeAlreadyStartedError: If instance already exists
         """
         if cls._instance is not None:
-            raise RuntimeError("RuntimeManager already initialized")
+            raise RuntimeAlreadyStartedError("RuntimeManager already initialized")
 
         cls._instance = cls(async_session_factory, config)
         return cls._instance
@@ -110,36 +121,36 @@ class RuntimeManager:
         6. Wait for all event loops to be ready
 
         Raises:
-            RuntimeError: If already started
-            ValueError: If required configuration is missing
+            RuntimeAlreadyStartedError: If already started
+            RuntimeConfigError: If required configuration is missing
         """
         if self._started:
-            raise RuntimeError("RuntimeManager already started")
+            raise RuntimeAlreadyStartedError("RuntimeManager already started")
 
         logger.info("Starting RuntimeManager...")
 
         # 1. Validate and read ZMQ configuration
         zmq_config = self.config.get('zmq')
         if not zmq_config:
-            raise ValueError("Missing required configuration: [zmq]")
+            raise RuntimeConfigError("Missing required configuration: [zmq]")
 
         zmq_host = zmq_config.get('host')
         zmq_pull_port = zmq_config.get('pull_port')
         zmq_pub_port = zmq_config.get('pub_port')
 
         if not all([zmq_host, zmq_pull_port, zmq_pub_port]):
-            raise ValueError(
+            raise RuntimeConfigError(
                 "Missing required ZMQ configuration fields: host, pull_port, pub_port"
             )
 
         # 2. Validate and read runtime configuration
         runtime_config = self.config.get('runtime')
         if not runtime_config:
-            raise ValueError("Missing required configuration: [runtime]")
+            raise RuntimeConfigError("Missing required configuration: [runtime]")
 
         max_threads = runtime_config.get('max_threads')
         if not max_threads:
-            raise ValueError("Missing required runtime configuration field: max_threads")
+            raise RuntimeConfigError("Missing required runtime configuration field: max_threads")
 
         logger.info(f"Runtime configuration: max_threads={max_threads}")
 
@@ -295,9 +306,9 @@ class RuntimeManager:
             timeout: Maximum wait time in seconds
 
         Raises:
-            ValueError: If mosaic already running
-            RuntimeError: If no worker threads available
-            asyncio.TimeoutError: If startup times out
+            MosaicAlreadyRunningError: If mosaic already running
+            RuntimeInternalError: If no worker threads available
+            RuntimeTimeoutError: If startup times out
 
         Note:
             Uses run_coroutine_threadsafe for synchronous startup guarantee.
@@ -322,8 +333,8 @@ class RuntimeManager:
             timeout: Maximum wait time in seconds
 
         Raises:
-            ValueError: If mosaic not running
-            asyncio.TimeoutError: If stop operation times out
+            MosaicNotRunningError: If mosaic not running
+            RuntimeTimeoutError: If stop operation times out
 
         Note:
             Session cleanup (database + WebSocket) should be done BEFORE calling this.
@@ -354,8 +365,8 @@ class RuntimeManager:
             timeout: Maximum wait time in seconds
 
         Raises:
-            ValueError: If mosaic not running
-            asyncio.TimeoutError: If restart times out
+            MosaicNotRunningError: If mosaic not running
+            RuntimeTimeoutError: If restart times out
 
         Note:
             FastAPI layer must validate mosaic existence and permissions before calling.
@@ -404,8 +415,8 @@ class RuntimeManager:
             timeout: Maximum wait time in seconds
 
         Raises:
-            ValueError: If mosaic not running
-            asyncio.TimeoutError: If operation times out
+            MosaicNotRunningError: If mosaic not running
+            RuntimeTimeoutError: If operation times out
 
         Note:
             FastAPI layer must validate node existence and permissions before calling.
@@ -439,8 +450,8 @@ class RuntimeManager:
             timeout: Maximum wait time in seconds
 
         Raises:
-            ValueError: If mosaic not running
-            asyncio.TimeoutError: If operation times out
+            MosaicNotRunningError: If mosaic not running
+            RuntimeTimeoutError: If operation times out
 
         Note:
             Session cleanup (database + WebSocket) should be done BEFORE calling this.
@@ -476,8 +487,8 @@ class RuntimeManager:
             timeout: Maximum wait time in seconds
 
         Raises:
-            ValueError: If mosaic not running
-            asyncio.TimeoutError: If operation times out
+            MosaicNotRunningError: If mosaic not running
+            RuntimeTimeoutError: If operation times out
 
         Note:
             FastAPI layer must validate node existence and permissions before calling.
@@ -559,8 +570,9 @@ class RuntimeManager:
             timeout: Maximum wait time in seconds
 
         Raises:
-            ValueError: If mosaic not running or node not found
-            asyncio.TimeoutError: If operation times out
+            MosaicNotRunningError: If mosaic not running
+            NodeNotFoundError: If node not found
+            RuntimeTimeoutError: If operation times out
 
         Note:
             FastAPI layer must validate session and node existence/permissions before calling.
@@ -594,7 +606,7 @@ class RuntimeManager:
             message: User message content
 
         Raises:
-            ValueError: If mosaic not running
+            MosaicNotRunningError: If mosaic not running
 
         Note:
             This is a non-blocking operation. Use this for user message submission.
@@ -629,8 +641,8 @@ class RuntimeManager:
             timeout: Maximum wait time in seconds
 
         Raises:
-            ValueError: If session not found
-            asyncio.TimeoutError: If operation times out
+            SessionNotFoundError: If session not found
+            RuntimeTimeoutError: If operation times out
 
         Note:
             FastAPI layer must validate session existence and permissions before calling.
@@ -673,8 +685,8 @@ class RuntimeManager:
             timeout: Maximum wait time in seconds
 
         Raises:
-            ValueError: If session not found
-            asyncio.TimeoutError: If operation times out
+            SessionNotFoundError: If session not found
+            RuntimeTimeoutError: If operation times out
 
         Note:
             Database status should be updated BEFORE calling this method.
@@ -727,8 +739,9 @@ class RuntimeManager:
             Command execution result (can be None)
 
         Raises:
-            ValueError: If mosaic not running
-            asyncio.TimeoutError: If command doesn't complete in time
+            MosaicNotRunningError: If mosaic not running
+            RuntimeInternalError: If event loop not found for thread
+            RuntimeTimeoutError: If command doesn't complete in time
             Exception: Any exception raised during command execution
 
         Note:
@@ -742,7 +755,7 @@ class RuntimeManager:
             loop = self._thread_loops.get(thread)
 
         if not loop:
-            raise RuntimeError(
+            raise RuntimeInternalError(
                 f"Event loop not found for thread: {thread.name}"
             )
 
@@ -773,7 +786,9 @@ class RuntimeManager:
                 f"Command timeout: {command.__class__.__name__} "
                 f"for mosaic_id={mosaic_id} after {timeout}s"
             )
-            raise
+            raise RuntimeTimeoutError(
+                f"Command {command.__class__.__name__} timed out after {timeout}s"
+            )
 
     def _submit_command_no_wait(self, mosaic_id: int, command: 'Command') -> None:
         """
@@ -786,7 +801,8 @@ class RuntimeManager:
             command: Command object to execute
 
         Raises:
-            ValueError: If mosaic not running
+            MosaicNotRunningError: If mosaic not running
+            RuntimeInternalError: If event loop not found for thread
         """
         # Get running mosaic instance and its thread
         instance, thread = self._get_running_mosaic(mosaic_id)
@@ -796,7 +812,7 @@ class RuntimeManager:
             loop = self._thread_loops.get(thread)
 
         if not loop:
-            raise RuntimeError(
+            raise RuntimeInternalError(
                 f"Event loop not found for thread: {thread.name}"
             )
 
@@ -821,10 +837,10 @@ class RuntimeManager:
             Tuple of (MosaicInstance, Thread)
 
         Raises:
-            ValueError: If mosaic not running
+            MosaicNotRunningError: If mosaic not running
         """
         if mosaic_id not in self._mosaic_instances:
-            raise ValueError(f"Mosaic with id={mosaic_id} is not running")
+            raise MosaicNotRunningError(f"Mosaic with id={mosaic_id} is not running")
 
         return self._mosaic_instances[mosaic_id]
 
@@ -836,7 +852,7 @@ class RuntimeManager:
             Selected thread
 
         Raises:
-            RuntimeError: If no worker threads available
+            RuntimeInternalError: If no worker threads available
 
         Thread Safety:
             Uses _thread_loops_lock when accessing _thread_loops.
@@ -847,7 +863,7 @@ class RuntimeManager:
 
         # Validate we have worker threads
         if not threads:
-            raise RuntimeError("No worker threads available")
+            raise RuntimeInternalError("No worker threads available")
 
         # Round-robin selection using modulo
         selected_thread = threads[self._next_thread_index % len(threads)]

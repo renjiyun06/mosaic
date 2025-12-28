@@ -105,3 +105,126 @@ class InternalError(MosaicException):
 
     def __init__(self, message: str):
         super().__init__(message, "INTERNAL_ERROR")
+
+
+# ==================== Runtime Layer Exceptions ====================
+
+
+class RuntimeException(MosaicException):
+    """Base exception for all runtime layer errors
+
+    Runtime layer exceptions are thrown by RuntimeManager and related
+    components. They inherit from MosaicException so they are caught
+    by the global exception handler.
+    """
+
+    def __init__(self, message: str, code: str):
+        super().__init__(message, code)
+
+
+class RuntimeConfigError(RuntimeException):
+    """Runtime configuration error
+
+    Examples:
+        - Missing required configuration (zmq, runtime)
+        - Invalid configuration values
+        - Missing configuration fields
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message, "RUNTIME_CONFIG_ERROR")
+
+
+class RuntimeAlreadyStartedError(RuntimeException):
+    """RuntimeManager is already started
+
+    Examples:
+        - Attempting to start RuntimeManager twice
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message, "RUNTIME_ALREADY_STARTED")
+
+
+class RuntimeNotStartedError(RuntimeException):
+    """RuntimeManager is not started
+
+    Examples:
+        - Attempting to use RuntimeManager before starting
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message, "RUNTIME_NOT_STARTED")
+
+
+class MosaicAlreadyRunningError(RuntimeException):
+    """Mosaic instance is already running
+
+    Examples:
+        - Attempting to start a mosaic that's already running
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message, "MOSAIC_ALREADY_RUNNING")
+
+
+class MosaicNotRunningError(RuntimeException):
+    """Mosaic instance is not running
+
+    Examples:
+        - Attempting to stop a mosaic that's not running
+        - Attempting to operate on nodes/sessions when mosaic is stopped
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message, "MOSAIC_NOT_RUNNING")
+
+
+class NodeNotFoundError(RuntimeException):
+    """Node not found in runtime
+
+    Examples:
+        - Node doesn't exist in mosaic instance
+        - Node has been removed
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message, "NODE_NOT_FOUND")
+
+
+class SessionNotFoundError(RuntimeException):
+    """Session not found in runtime
+
+    Examples:
+        - Session doesn't exist in node
+        - Session has been closed
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message, "SESSION_NOT_FOUND")
+
+
+class RuntimeTimeoutError(RuntimeException):
+    """Runtime operation timeout
+
+    Examples:
+        - Mosaic startup timeout
+        - Node startup timeout
+        - Command execution timeout
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message, "RUNTIME_TIMEOUT")
+
+
+class RuntimeInternalError(RuntimeException):
+    """Runtime internal error (unexpected runtime failures)
+
+    Examples:
+        - Event loop not found
+        - No worker threads available
+        - Thread communication failure
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message, "RUNTIME_INTERNAL_ERROR")

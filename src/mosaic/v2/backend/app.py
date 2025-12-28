@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from .logging import setup_logging
 from .exception import MosaicException
 from .schema.response import ErrorResponse
-from .api import auth_router
+from .api import auth_router, mosaic_router
 from .runtime.manager import RuntimeManager
 
 
@@ -169,8 +169,50 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
             ).model_dump()
         )
 
+    @app.exception_handler(Exception)
+    async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        """Handle all uncaught exceptions (fallback handler)
+
+        This is the last-resort exception handler that catches any exception
+        not handled by the specific handlers above. It logs the full error
+        details and returns a generic error response to the client.
+
+        Args:
+            request: The incoming request
+            exc: The exception instance
+
+        Returns:
+            JSONResponse with ErrorResponse format (HTTP 200, success=false)
+
+        Note:
+            - Logs full exception details (including traceback) for debugging
+            - Returns generic message to client (don't expose internal details)
+            - This handler is registered AFTER specific handlers so it acts as fallback
+        """
+        import logging
+        import traceback
+
+        logger = logging.getLogger(__name__)
+
+        # Log full error details for debugging (including traceback)
+        logger.error(
+            f"Uncaught exception in {request.method} {request.url.path}: "
+            f"{exc.__class__.__name__}: {str(exc)}\n"
+            f"Traceback:\n{traceback.format_exc()}"
+        )
+
+        # Return generic error to client (don't expose internal details)
+        return JSONResponse(
+            status_code=200,  # Keep consistent with other error responses
+            content=ErrorResponse(
+                message="An unexpected error occurred. Please try again later.",
+                error={"code": "INTERNAL_ERROR"}
+            ).model_dump()
+        )
+
     # ==================== Router Registration ====================
 
     app.include_router(auth_router, prefix="/api")
+    app.include_router(mosaic_router, prefix="/api")
 
     return app
