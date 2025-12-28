@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from .logging import setup_logging
 from .exception import MosaicException
 from .schema.response import ErrorResponse
-from .api import auth_router, mosaic_router
+from .api import auth_router, mosaic_router, node_router
 from .runtime.manager import RuntimeManager
 
 
@@ -214,5 +214,6 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
 
     app.include_router(auth_router, prefix="/api")
     app.include_router(mosaic_router, prefix="/api")
+    app.include_router(node_router, prefix="/api")
 
     return app

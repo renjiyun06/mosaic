@@ -19,7 +19,7 @@ from ..model import Mosaic, Node, Session
 from ..dep import get_db_session, get_current_user
 from ..model.user import User
 from ..exception import ConflictError, NotFoundError, PermissionError, ValidationError, InternalError
-from ..enum import NodeStatus, SessionStatus
+from ..enum import NodeStatus, SessionStatus, MosaicStatus
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +65,94 @@ async def create_node(
         ConflictError: Node with same node_id already exists in this mosaic
         InternalError: Failed to create node directory
     """
-    # TODO: Implement
-    pass
+    logger.info(
+        f"Creating node: mosaic_id={mosaic_id}, node_id={request.node_id}, "
+        f"user_id={current_user.id}"
+    )
+
+    # 1. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Validate node_id uniqueness within mosaic
+    node_check_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.node_id == request.node_id,
+        Node.deleted_at.is_(None)
+    )
+    node_check_result = await session.execute(node_check_stmt)
+    existing_node = node_check_result.scalar_one_or_none()
+
+    if existing_node:
+        logger.warning(
+            f"Node with node_id={request.node_id} already exists in mosaic {mosaic_id}"
+        )
+        raise ConflictError(
+            f"Node with node_id '{request.node_id}' already exists in this mosaic"
+        )
+
+    # 3. Create Node record in database
+    node = Node(
+        user_id=current_user.id,
+        mosaic_id=mosaic_id,
+        node_id=request.node_id,
+        node_type=request.node_type,
+        description=request.description,
+        mcp_servers=request.mcp_servers or {},
+        auto_start=request.auto_start
+    )
+    session.add(node)
+    await session.flush()  # Get the ID
+
+    logger.info(f"Node created in database: id={node.id}, node_id={node.node_id}")
+
+    # 4. Create node working directory
+    instance_path = req.app.state.instance_path
+    node_dir = instance_path / "users" / str(current_user.id) / str(mosaic_id) / str(node.id)
+
+    try:
+        node_dir.mkdir(parents=True, exist_ok=False)
+        logger.info(f"Node directory created: {node_dir}")
+    except FileExistsError:
+        logger.warning(f"Node directory already exists: {node_dir}")
+    except Exception as e:
+        logger.error(f"Failed to create node directory: {node_dir}, error: {e}")
+        await session.rollback()
+        raise InternalError(f"Failed to create node directory: {e}")
+
+    # 5. Construct response (new node is always stopped with zero sessions)
+    node_out = NodeOut(
+        id=node.id,
+        user_id=node.user_id,
+        mosaic_id=node.mosaic_id,
+        node_id=node.node_id,
+        node_type=node.node_type,
+        description=node.description,
+        mcp_servers=node.mcp_servers,
+        auto_start=node.auto_start,
+        status=NodeStatus.STOPPED,
+        active_session_count=0,
+        created_at=node.created_at,
+        updated_at=node.updated_at
+    )
+
+    logger.info(f"Node created successfully: id={node.id}, node_id={node.node_id}")
+    return SuccessResponse(data=node_out)
 
 
 @router.get("", response_model=SuccessResponse[list[NodeOut]])
@@ -91,8 +177,76 @@ async def list_nodes(
         NotFoundError: Mosaic not found or deleted
         PermissionError: Current user is not the mosaic owner
     """
-    # TODO: Implement
-    pass
+    logger.info(f"Listing nodes: mosaic_id={mosaic_id}, user_id={current_user.id}")
+
+    # 1. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Query all nodes for this mosaic
+    nodes_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.deleted_at.is_(None)
+    ).order_by(Node.created_at.asc())
+
+    nodes_result = await session.execute(nodes_stmt)
+    nodes = nodes_result.scalars().all()
+
+    logger.debug(f"Found {len(nodes)} nodes in mosaic {mosaic_id}")
+
+    # 3. Get RuntimeManager from app state
+    runtime_manager = req.app.state.runtime_manager
+
+    # 4. Build response with statistics for each node
+    node_list = []
+    for node in nodes:
+        # Count active sessions
+        session_count_stmt = select(func.count(Session.id)).where(
+            Session.mosaic_id == mosaic_id,
+            Session.node_id == node.node_id,
+            Session.deleted_at.is_(None),
+            Session.status == SessionStatus.ACTIVE
+        )
+        session_count_result = await session.execute(session_count_stmt)
+        active_session_count = session_count_result.scalar() or 0
+
+        # Get runtime status
+        status = await runtime_manager.get_node_status(node)
+
+        # Construct NodeOut
+        node_out = NodeOut(
+            id=node.id,
+            user_id=node.user_id,
+            mosaic_id=node.mosaic_id,
+            node_id=node.node_id,
+            node_type=node.node_type,
+            description=node.description,
+            mcp_servers=node.mcp_servers,
+            auto_start=node.auto_start,
+            status=status,
+            active_session_count=active_session_count,
+            created_at=node.created_at,
+            updated_at=node.updated_at
+        )
+        node_list.append(node_out)
+
+    logger.info(f"Listed {len(node_list)} nodes in mosaic {mosaic_id}")
+    return SuccessResponse(data=node_list)
 
 
 @router.get("/{node_id}", response_model=SuccessResponse[NodeOut])
@@ -117,8 +271,75 @@ async def get_node(
         NotFoundError: Mosaic or node not found or deleted
         PermissionError: Current user is not the mosaic owner
     """
-    # TODO: Implement
-    pass
+    logger.info(
+        f"Getting node: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"user_id={current_user.id}"
+    )
+
+    # 1. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Query node
+    node_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.node_id == node_id,
+        Node.deleted_at.is_(None)
+    )
+    node_result = await session.execute(node_stmt)
+    node = node_result.scalar_one_or_none()
+
+    if not node:
+        logger.warning(f"Node not found: mosaic_id={mosaic_id}, node_id={node_id}")
+        raise NotFoundError("Node not found")
+
+    # 3. Count active sessions
+    session_count_stmt = select(func.count(Session.id)).where(
+        Session.mosaic_id == mosaic_id,
+        Session.node_id == node.node_id,
+        Session.deleted_at.is_(None),
+        Session.status == SessionStatus.ACTIVE
+    )
+    session_count_result = await session.execute(session_count_stmt)
+    active_session_count = session_count_result.scalar() or 0
+
+    # 4. Get runtime status
+    runtime_manager = req.app.state.runtime_manager
+    status = await runtime_manager.get_node_status(node)
+
+    # 5. Construct response
+    node_out = NodeOut(
+        id=node.id,
+        user_id=node.user_id,
+        mosaic_id=node.mosaic_id,
+        node_id=node.node_id,
+        node_type=node.node_type,
+        description=node.description,
+        mcp_servers=node.mcp_servers,
+        auto_start=node.auto_start,
+        status=status,
+        active_session_count=active_session_count,
+        created_at=node.created_at,
+        updated_at=node.updated_at
+    )
+
+    logger.info(f"Node retrieved successfully: id={node.id}, node_id={node.node_id}")
+    return SuccessResponse(data=node_out)
 
 
 @router.patch("/{node_id}", response_model=SuccessResponse[NodeOut])
@@ -150,8 +371,102 @@ async def update_node(
         NotFoundError: Mosaic or node not found or deleted
         PermissionError: Current user is not the mosaic owner
     """
-    # TODO: Implement
-    pass
+    logger.info(
+        f"Updating node: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"user_id={current_user.id}"
+    )
+
+    # 1. Validate request: at least one field must be provided
+    if (request.description is None and
+        request.mcp_servers is None and
+        request.auto_start is None):
+        raise ValidationError(
+            "At least one field (description, mcp_servers, or auto_start) must be provided"
+        )
+
+    # 2. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 3. Query node
+    node_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.node_id == node_id,
+        Node.deleted_at.is_(None)
+    )
+    node_result = await session.execute(node_stmt)
+    node = node_result.scalar_one_or_none()
+
+    if not node:
+        logger.warning(f"Node not found: mosaic_id={mosaic_id}, node_id={node_id}")
+        raise NotFoundError("Node not found")
+
+    # 4. Verify node is stopped
+    runtime_manager = req.app.state.runtime_manager
+    status = await runtime_manager.get_node_status(node)
+    if status == NodeStatus.RUNNING:
+        logger.warning(f"Cannot update running node: id={node.id}, node_id={node_id}")
+        raise ValidationError("Cannot update running node. Please stop it first.")
+
+    # 5. Update provided fields
+    if request.description is not None:
+        node.description = request.description
+        logger.debug(f"Node description updated: id={node.id}")
+
+    if request.mcp_servers is not None:
+        node.mcp_servers = request.mcp_servers
+        logger.debug(f"Node mcp_servers updated: id={node.id}")
+
+    if request.auto_start is not None:
+        node.auto_start = request.auto_start
+        logger.debug(f"Node auto_start updated: id={node.id}, auto_start={request.auto_start}")
+
+    # 6. Update the updated_at timestamp
+    node.updated_at = datetime.now()
+
+    # 7. Count active sessions for response
+    session_count_stmt = select(func.count(Session.id)).where(
+        Session.mosaic_id == mosaic_id,
+        Session.node_id == node.node_id,
+        Session.deleted_at.is_(None),
+        Session.status == SessionStatus.ACTIVE
+    )
+    session_count_result = await session.execute(session_count_stmt)
+    active_session_count = session_count_result.scalar() or 0
+
+    # 8. Construct response
+    node_out = NodeOut(
+        id=node.id,
+        user_id=node.user_id,
+        mosaic_id=node.mosaic_id,
+        node_id=node.node_id,
+        node_type=node.node_type,
+        description=node.description,
+        mcp_servers=node.mcp_servers,
+        auto_start=node.auto_start,
+        status=status,  # Already retrieved, reuse it
+        active_session_count=active_session_count,
+        created_at=node.created_at,
+        updated_at=node.updated_at
+    )
+
+    logger.info(f"Node updated successfully: id={node.id}, node_id={node_id}")
+    return SuccessResponse(data=node_out)
 
 
 @router.delete("/{node_id}", response_model=SuccessResponse[None])
@@ -185,8 +500,88 @@ async def delete_node(
         ValidationError: Node is running or directory is not empty
         InternalError: Failed to delete node directory
     """
-    # TODO: Implement
-    pass
+    logger.info(
+        f"Deleting node: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"user_id={current_user.id}"
+    )
+
+    # 1. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Query node
+    node_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.node_id == node_id,
+        Node.deleted_at.is_(None)
+    )
+    node_result = await session.execute(node_stmt)
+    node = node_result.scalar_one_or_none()
+
+    if not node:
+        logger.warning(f"Node not found: mosaic_id={mosaic_id}, node_id={node_id}")
+        raise NotFoundError("Node not found")
+
+    # 3. Validate deletion prerequisites
+
+    # Check if node is stopped
+    runtime_manager = req.app.state.runtime_manager
+    status = await runtime_manager.get_node_status(node)
+    if status == NodeStatus.RUNNING:
+        logger.warning(f"Cannot delete running node: id={node.id}, node_id={node_id}")
+        raise ValidationError("Cannot delete running node. Please stop it first.")
+
+    # Check if node directory is empty
+    instance_path = req.app.state.instance_path
+    node_dir = instance_path / "users" / str(current_user.id) / str(mosaic_id) / str(node.id)
+
+    if node_dir.exists():
+        contents = list(node_dir.iterdir())
+        if contents:
+            logger.warning(
+                f"Node directory is not empty: {node_dir}, "
+                f"contents={[p.name for p in contents]}"
+            )
+            raise ValidationError(
+                "Node directory is not empty. Please ensure all data is removed first."
+            )
+
+    # 4. Soft delete (set deleted_at)
+    node.deleted_at = datetime.now()
+    logger.debug(f"Node soft deleted in database: id={node.id}, node_id={node_id}")
+
+    # 5. Delete node directory
+    try:
+        if node_dir.exists():
+            # Directory is empty (already checked above), safe to remove
+            node_dir.rmdir()
+            logger.info(f"Node directory deleted: {node_dir}")
+        else:
+            logger.warning(f"Node directory does not exist: {node_dir}")
+
+    except Exception as e:
+        logger.error(f"Failed to delete node directory: {node_dir}, error: {e}")
+        await session.rollback()
+        raise InternalError(f"Failed to delete node directory: {e}")
+
+    # 6. Commit and return success
+    logger.info(f"Node deleted successfully: id={node.id}, node_id={node_id}")
+    return SuccessResponse(data=None)
 
 
 @router.post("/{node_id}/start", response_model=SuccessResponse[NodeOut])
@@ -219,8 +614,94 @@ async def start_node(
         ValidationError: Mosaic is not running (nodes can only start in running mosaic)
         RuntimeError: Node start operation failed (from RuntimeManager)
     """
-    # TODO: Implement
-    pass
+    logger.info(
+        f"Starting node: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"user_id={current_user.id}"
+    )
+
+    # 1. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Query node
+    node_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.node_id == node_id,
+        Node.deleted_at.is_(None)
+    )
+    node_result = await session.execute(node_stmt)
+    node = node_result.scalar_one_or_none()
+
+    if not node:
+        logger.warning(f"Node not found: mosaic_id={mosaic_id}, node_id={node_id}")
+        raise NotFoundError("Node not found")
+
+    # 3. Get runtime manager
+    runtime_manager = req.app.state.runtime_manager
+
+    # Verify mosaic is running
+    mosaic_status = await runtime_manager.get_mosaic_status(mosaic)
+    if mosaic_status != MosaicStatus.RUNNING:
+        logger.warning(
+            f"Cannot start node in stopped mosaic: mosaic_id={mosaic_id}, "
+            f"node_id={node_id}"
+        )
+        raise ValidationError(
+            "Cannot start node. The mosaic is not running. Please start the mosaic first."
+        )
+
+    # 4. Check if node is already running (idempotent)
+    node_status = await runtime_manager.get_node_status(node)
+    if node_status == NodeStatus.RUNNING:
+        logger.info(f"Node already running: id={node.id}, node_id={node_id}")
+    else:
+        # 5. Start node via RuntimeManager
+        await runtime_manager.start_node(node, timeout=30.0)
+        logger.info(f"Node started successfully: id={node.id}, node_id={node_id}")
+        node_status = NodeStatus.RUNNING
+
+    # 6. Count active sessions for response
+    session_count_stmt = select(func.count(Session.id)).where(
+        Session.mosaic_id == mosaic_id,
+        Session.node_id == node.node_id,
+        Session.deleted_at.is_(None),
+        Session.status == SessionStatus.ACTIVE
+    )
+    session_count_result = await session.execute(session_count_stmt)
+    active_session_count = session_count_result.scalar() or 0
+
+    # 7. Construct response
+    node_out = NodeOut(
+        id=node.id,
+        user_id=node.user_id,
+        mosaic_id=node.mosaic_id,
+        node_id=node.node_id,
+        node_type=node.node_type,
+        description=node.description,
+        mcp_servers=node.mcp_servers,
+        auto_start=node.auto_start,
+        status=node_status,
+        active_session_count=active_session_count,
+        created_at=node.created_at,
+        updated_at=node.updated_at
+    )
+
+    return SuccessResponse(data=node_out)
 
 
 @router.post("/{node_id}/stop", response_model=SuccessResponse[NodeOut])
@@ -249,5 +730,79 @@ async def stop_node(
         PermissionError: Current user is not the mosaic owner
         RuntimeError: Node stop operation failed (from RuntimeManager)
     """
-    # TODO: Implement
-    pass
+    logger.info(
+        f"Stopping node: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"user_id={current_user.id}"
+    )
+
+    # 1. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Query node
+    node_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.node_id == node_id,
+        Node.deleted_at.is_(None)
+    )
+    node_result = await session.execute(node_stmt)
+    node = node_result.scalar_one_or_none()
+
+    if not node:
+        logger.warning(f"Node not found: mosaic_id={mosaic_id}, node_id={node_id}")
+        raise NotFoundError("Node not found")
+
+    # 3. Get runtime manager and check status
+    runtime_manager = req.app.state.runtime_manager
+    node_status = await runtime_manager.get_node_status(node)
+
+    if node_status == NodeStatus.STOPPED:
+        logger.info(f"Node already stopped: id={node.id}, node_id={node_id}")
+    else:
+        # 4. Stop node via RuntimeManager
+        await runtime_manager.stop_node(node, timeout=60.0)
+        logger.info(f"Node stopped successfully: id={node.id}, node_id={node_id}")
+        node_status = NodeStatus.STOPPED
+
+    # 5. Count active sessions for response
+    session_count_stmt = select(func.count(Session.id)).where(
+        Session.mosaic_id == mosaic_id,
+        Session.node_id == node.node_id,
+        Session.deleted_at.is_(None),
+        Session.status == SessionStatus.ACTIVE
+    )
+    session_count_result = await session.execute(session_count_stmt)
+    active_session_count = session_count_result.scalar() or 0
+
+    # 6. Construct response
+    node_out = NodeOut(
+        id=node.id,
+        user_id=node.user_id,
+        mosaic_id=node.mosaic_id,
+        node_id=node.node_id,
+        node_type=node.node_type,
+        description=node.description,
+        mcp_servers=node.mcp_servers,
+        auto_start=node.auto_start,
+        status=node_status,
+        active_session_count=active_session_count,
+        created_at=node.created_at,
+        updated_at=node.updated_at
+    )
+
+    return SuccessResponse(data=node_out)
