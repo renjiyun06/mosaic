@@ -12,6 +12,7 @@ class NodeType(str, Enum):
 
 class MosaicStatus(str, Enum):
     """Mosaic instance status enumeration"""
+    STARTING = "starting"  # Mosaic is being initialized (placeholder state)
     RUNNING = "running"
     STOPPED = "stopped"
 
@@ -62,11 +63,18 @@ class EventType(str, Enum):
 class SessionStatus(str, Enum):
     """Session status enumeration
 
-    Defines the lifecycle states of a session.
+    Defines the lifecycle states of agent sessions (database only).
 
-    ACTIVE: Session is currently active and can accept new messages
-    CLOSED: Session has been closed but not yet archived
+    ACTIVE: Session is currently active and processing events
+    CLOSED: Session has been closed (before archiving)
     ARCHIVED: Session has been archived for long-term storage
+
+    Database lifecycle: ACTIVE → CLOSED → ARCHIVED
+
+    Note:
+        This enum is only used for agent sessions (those backed by database).
+        Runtime-only sessions (scheduler, email) don't use this enum.
+        Runtime state flags (_initialized, _should_close) are managed in MosaicSession.
     """
     ACTIVE = "active"
     CLOSED = "closed"

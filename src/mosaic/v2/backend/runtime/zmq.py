@@ -576,12 +576,12 @@ class ZmqClient:
                     )
                     continue
 
-                # Dispatch to callback
+                # Dispatch to callback (sequential processing)
                 if self.on_event:
                     logger.debug(
                         f"[ZMQ_CLIENT_RECV] Dispatching to callback: event_id={event_id}"
                     )
-                    asyncio.create_task(self.on_event(event))
+                    await self.on_event(event)
                 else:
                     logger.warning(
                         f"[ZMQ_CLIENT_RECV] No callback registered, dropping event: "

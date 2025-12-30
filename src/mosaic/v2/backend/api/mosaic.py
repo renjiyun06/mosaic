@@ -533,11 +533,15 @@ async def start_mosaic(
                 "Cannot start mosaic with no nodes. Please add at least one node first."
             )
 
-        # 4. Start runtime mosaic instance
-        await runtime_manager.start_mosaic(mosaic, timeout=30.0)
+        # 4. Compute mosaic path
+        instance_path = req.app.state.instance_path
+        mosaic_path = instance_path / "users" / str(current_user.id) / str(mosaic.id)
+
+        # 5. Start runtime mosaic instance
+        await runtime_manager.start_mosaic(mosaic, mosaic_path, timeout=30.0)
         logger.info(f"Mosaic started successfully: id={mosaic_id}")
 
-    # 5. Get statistics for response
+    # 6. Get statistics for response
     # Recount nodes (already done above, but for consistency)
     node_count_stmt = select(func.count(Node.id)).where(
         Node.mosaic_id == mosaic.id,
@@ -554,7 +558,7 @@ async def start_mosaic(
     session_count_result = await session.execute(session_count_stmt)
     active_session_count = session_count_result.scalar() or 0
 
-    # 6. Construct response
+    # 7. Construct response
     mosaic_out = MosaicOut(
         id=mosaic.id,
         user_id=mosaic.user_id,

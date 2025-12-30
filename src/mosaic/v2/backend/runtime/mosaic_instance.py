@@ -46,7 +46,7 @@ class MosaicInstance:
 
     Lifecycle:
     1. __init__: Initialize state (STOPPED)
-    2. start(): Start command loop, load nodes, start auto_start nodes � RUNNING
+    2. start(): Start command loop, load nodes, start auto_start nodes → RUNNING
     3. [process commands via queue]
     4. StopMosaicCommand → _handle_stop_mosaic(): Stop all nodes → STOPPED, then loop exits
 
@@ -58,6 +58,7 @@ class MosaicInstance:
     def __init__(
         self,
         mosaic: 'Mosaic',
+        mosaic_path: Path,
         async_session_factory,
         config: dict
     ):
@@ -66,13 +67,15 @@ class MosaicInstance:
 
         Args:
             mosaic: Mosaic model object from database
+            mosaic_path: Mosaic working directory path
             async_session_factory: AsyncSession factory for database access
-            config: Configuration dict (must contain 'instance_path')
+            config: Configuration dict
 
         Note:
             Does NOT start the instance. Call start() to begin operation.
         """
         self.mosaic = mosaic
+        self.mosaic_path = mosaic_path
         self.async_session_factory = async_session_factory
         self.config = config
 
@@ -86,7 +89,7 @@ class MosaicInstance:
 
         logger.info(
             f"MosaicInstance initialized: id={mosaic.id}, "
-            f"mosaic_id={mosaic.mosaic_id}"
+            f"mosaic_id={mosaic.mosaic_id}, path={mosaic_path}"
         )
 
     # ========== Lifecycle Methods ==========
@@ -427,8 +430,8 @@ class MosaicInstance:
         Handle CreateSessionCommand.
 
         Steps:
-        1. Get the MosaicNode instance via self._get_node(command.session.node)
-        2. Delegate to mosaic_node.create_session(command.session)
+        1. Get the MosaicNode instance via self._get_node(command.node)
+        2. Delegate to mosaic_node.create_session(command.session_id, command.config)
         3. Return None
 
         Args:
@@ -439,17 +442,21 @@ class MosaicInstance:
 
         Raises:
             NodeNotFoundError: If node is not running
+            SessionConflictError: If session already exists in database
         """
-        mosaic_node = self._get_node(command.session.node)
-        await mosaic_node.create_session(command.session)
+        mosaic_node = self._get_node(command.node)
+        await mosaic_node.create_session(
+            session_id=command.session_id,
+            config=command.config
+        )
 
     async def _handle_send_message(self, command: SendMessageCommand) -> None:
         """
         Handle SendMessageCommand.
 
         Steps:
-        1. Get the MosaicNode instance via self._get_node(command.session.node)
-        2. Delegate to mosaic_node.send_message(command.session, command.message)
+        1. Get the MosaicNode instance via self._get_node(command.node)
+        2. Delegate to mosaic_node.send_message(command.session_id, command.message)
         3. Return None
 
         Args:
@@ -461,16 +468,16 @@ class MosaicInstance:
         Raises:
             NodeNotFoundError: If node is not running
         """
-        mosaic_node = self._get_node(command.session.node)
-        await mosaic_node.send_message(command.session, command.message)
+        mosaic_node = self._get_node(command.node)
+        await mosaic_node.send_message(command.session_id, command.message)
 
     async def _handle_interrupt_session(self, command: InterruptSessionCommand) -> None:
         """
         Handle InterruptSessionCommand.
 
         Steps:
-        1. Get the MosaicNode instance via self._get_node(command.session.node)
-        2. Delegate to mosaic_node.interrupt_session(command.session)
+        1. Get the MosaicNode instance via self._get_node(command.node)
+        2. Delegate to mosaic_node.interrupt_session(command.session_id)
         3. Return None
 
         Args:
@@ -482,16 +489,16 @@ class MosaicInstance:
         Raises:
             NodeNotFoundError: If node is not running
         """
-        mosaic_node = self._get_node(command.session.node)
-        await mosaic_node.interrupt_session(command.session)
+        mosaic_node = self._get_node(command.node)
+        await mosaic_node.interrupt_session(command.session_id)
 
     async def _handle_close_session(self, command: CloseSessionCommand) -> None:
         """
         Handle CloseSessionCommand.
 
         Steps:
-        1. Get the MosaicNode instance via self._get_node(command.session.node)
-        2. Delegate to mosaic_node.close_session(command.session, force=command.force)
+        1. Get the MosaicNode instance via self._get_node(command.node)
+        2. Delegate to mosaic_node.close_session(command.session_id)
         3. Return None
 
         Args:
@@ -503,8 +510,8 @@ class MosaicInstance:
         Raises:
             NodeNotFoundError: If node is not running
         """
-        mosaic_node = self._get_node(command.session.node)
-        await mosaic_node.close_session(command.session, force=command.force)
+        mosaic_node = self._get_node(command.node)
+        await mosaic_node.close_session(command.session_id)
 
     # ========== Node Management (Internal) ==========
 
@@ -538,8 +545,12 @@ class MosaicInstance:
         # 2. Create MosaicNode instance
         from .mosaic_node import MosaicNode
 
+        # Compute node working directory path
+        node_path = self.mosaic_path / str(node.id)
+
         mosaic_node = MosaicNode(
             node=node,
+            node_path=node_path,
             mosaic_instance=self,
             async_session_factory=self.async_session_factory,
             config=self.config

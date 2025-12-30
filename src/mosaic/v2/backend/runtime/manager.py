@@ -6,12 +6,13 @@ from typing import Dict, Optional, Any, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from ..enum import MosaicStatus, NodeStatus
+from ..enum import MosaicStatus, NodeStatus, SessionMode, LLMModel
 from ..exception import (
     RuntimeConfigError,
     RuntimeAlreadyStartedError,
     RuntimeNotStartedError,
     MosaicAlreadyRunningError,
+    MosaicStartingError,
     MosaicNotRunningError,
     NodeNotFoundError,
     SessionNotFoundError,
@@ -74,8 +75,14 @@ class RuntimeManager:
         self._next_thread_index = 0
         self._zmq_server = None
 
-        # Thread safety: lock for _thread_loops (accessed by worker threads)
-        self._thread_loops_lock = threading.Lock()
+        # Thread safety locks
+        self._thread_loops_lock = threading.Lock()  # Protects _thread_loops
+        self._mosaic_instances_lock = threading.Lock()  # Protects _mosaic_instances
+
+        # Starting counter for graceful shutdown coordination
+        # Note: No lock needed - all async methods run in same event loop
+        self._starting_count = 0  # Number of mosaics currently starting
+        self._all_started_event: Optional[asyncio.Event] = None  # Set in start()
 
         logger.info("RuntimeManager initialized")
 
@@ -183,6 +190,10 @@ class RuntimeManager:
             event.wait()
             logger.debug(f"Worker thread {i} event loop ready")
 
+        # Create the event for tracking startup completion
+        self._all_started_event = asyncio.Event()
+        self._all_started_event.set()  # Initially set (no startups in progress)
+
         self._started = True
         logger.info(
             f"RuntimeManager started successfully with {max_threads} worker threads"
@@ -195,13 +206,16 @@ class RuntimeManager:
         This must be called from the main event loop (FastAPI shutdown).
 
         Steps:
-        1. Stop all running mosaic instances (via command queue)
-        2. Stop all worker thread event loops
-        3. Shutdown thread pool (wait for all threads to finish)
-        4. Stop global ZMQ server
+        1. Wait for all in-progress mosaic startups to complete (graceful shutdown)
+        2. Stop all running mosaic instances (via command queue)
+        3. Stop all worker thread event loops
+        4. Shutdown thread pool (wait for all threads to finish)
+        5. Stop global ZMQ server
 
         Note:
             All mosaic stop operations use command queue for consistency.
+            The starting counter mechanism ensures no orphaned instances are created.
+            This method blocks until all in-progress startups complete (usually brief).
         """
         if not self._started:
             logger.warning("RuntimeManager is not started, nothing to stop")
@@ -209,9 +223,27 @@ class RuntimeManager:
 
         logger.info("Stopping RuntimeManager...")
 
+        # Wait for all in-progress mosaic startups to complete
+        # This ensures no orphaned instances are created
+        if self._all_started_event:
+            logger.info("Waiting for all in-progress mosaic startups to complete...")
+            await self._all_started_event.wait()
+            logger.info("All mosaic startups completed")
+
         try:
             # 1. Stop all running mosaic instances (parallel)
-            mosaic_items = list(self._mosaic_instances.items())
+            # Defensive check: filter out placeholders (should not exist after wait)
+            with self._mosaic_instances_lock:
+                mosaic_items = []
+                for mosaic_id, (instance, thread) in self._mosaic_instances.items():
+                    if instance is not None:
+                        mosaic_items.append((mosaic_id, instance, thread))
+                    else:
+                        # This should never happen after waiting for all startups to complete
+                        logger.warning(
+                            f"Found placeholder for mosaic_id={mosaic_id} after startup "
+                            f"completion wait - this indicates a bug in synchronization logic"
+                        )
 
             if mosaic_items:
                 logger.info(f"Stopping {len(mosaic_items)} running mosaic instances...")
@@ -221,7 +253,7 @@ class RuntimeManager:
 
                 # Create stop tasks for all mosaics
                 stop_tasks = []
-                for mosaic_id, (instance, thread) in mosaic_items:
+                for mosaic_id, instance, thread in mosaic_items:
                     # Create StopMosaicCommand for each
                     command = StopMosaicCommand(mosaic=instance.mosaic)
 
@@ -243,8 +275,9 @@ class RuntimeManager:
                     else:
                         logger.info(f"Mosaic {mosaic_id} stopped successfully")
 
-                # Clear the instances map
-                self._mosaic_instances.clear()
+                # Clear the instances map (with lock protection)
+                with self._mosaic_instances_lock:
+                    self._mosaic_instances.clear()
                 logger.info("All mosaic instances stopped")
 
             # 2. Stop all worker thread event loops
@@ -278,51 +311,102 @@ class RuntimeManager:
             self._thread_ready_events.clear()
             self._next_thread_index = 0
             self._started = False
+            self._starting_count = 0  # Reset counter
+            self._all_started_event = None  # Clear event
 
             logger.info("RuntimeManager stopped successfully")
 
         except Exception as e:
             logger.error(f"Error during RuntimeManager shutdown: {e}")
+            # Reset state even on error to allow restart
+            self._starting_count = 0
+            self._all_started_event = None
             raise
 
     # ========== Mosaic Lifecycle ==========
 
-    async def start_mosaic(self, mosaic: 'Mosaic', timeout: float = 30.0) -> None:
+    async def start_mosaic(
+        self,
+        mosaic: 'Mosaic',
+        mosaic_path: Path,
+        timeout: float = 30.0
+    ) -> None:
         """
         Start a mosaic instance.
 
-        This is the ONLY operation that uses direct cross-thread call.
+        This is the ONLY operation that uses run_coroutine_threadsafe for direct
+        coroutine invocation. All other operations use the command queue mechanism
+        (call_soon_threadsafe + Future) for cross-thread communication.
 
         Steps:
-        1. Validate mosaic is not already running
-        2. Select a worker thread using round-robin
-        3. Create MosaicInstance with mosaic model object
-        4. Start instance in worker thread (run_coroutine_threadsafe)
-        5. Wait for startup to complete
-        6. Cache instance in _mosaic_instances
+        1. Increment starting counter (for graceful shutdown coordination)
+        2. Check and reserve slot (with lock protection to prevent race condition)
+        3. Select a worker thread using round-robin
+        4. Create MosaicInstance with mosaic model object and path
+        5. Start instance in worker thread (run_coroutine_threadsafe)
+        6. Create background task to wait for startup completion
+        7. Wait for background task with timeout
+        8. If task completes: get result; if timeout: raise error (task continues)
 
         Args:
             mosaic: Mosaic model object (validated by FastAPI layer)
+            mosaic_path: Mosaic working directory path (computed by API layer)
             timeout: Maximum wait time in seconds
 
         Raises:
-            MosaicAlreadyRunningError: If mosaic already running
+            MosaicStartingError: If mosaic is already starting (concurrent start attempt)
+            MosaicAlreadyRunningError: If mosaic is already running
             RuntimeInternalError: If no worker threads available
             RuntimeTimeoutError: If startup times out
 
         Note:
-            Uses run_coroutine_threadsafe for synchronous startup guarantee.
+            Uses starting counter to coordinate with stop() method for graceful shutdown.
+            The stop() method waits for all in-progress startups to complete.
+            Uses placeholder (None, None) during startup to prevent race conditions.
+            Multiple concurrent start requests for the same mosaic will be rejected.
+            Counter decrement is ALWAYS handled by background task (in its finally block).
             FastAPI layer must validate mosaic existence and permissions before calling.
+            FastAPI layer must also compute and provide mosaic_path.
         """
-        logger.info(f"Starting mosaic: id={mosaic.id}, mosaic_id={mosaic.mosaic_id}")
+        logger.info(
+            f"Starting mosaic: id={mosaic.id}, mosaic_id={mosaic.mosaic_id}, "
+            f"path={mosaic_path}"
+        )
 
-        # 1. Validate mosaic is not already running
-        if mosaic.id in self._mosaic_instances:
-            raise MosaicAlreadyRunningError(
-                f"Mosaic with id={mosaic.id} is already running"
-            )
+        # 1. Increment starting counter (for graceful shutdown coordination)
+        # No lock needed - all operations run in same event loop (no await yet)
+        self._starting_count += 1
+        if self._all_started_event:
+            self._all_started_event.clear()
+        logger.debug(
+            f"Incremented starting counter: {self._starting_count} "
+            f"(mosaic id={mosaic.id})"
+        )
 
-        # 2. Select a worker thread using round-robin
+        # 2. Check and reserve slot (atomic operation with lock)
+        with self._mosaic_instances_lock:
+            if mosaic.id in self._mosaic_instances:
+                instance, _ = self._mosaic_instances[mosaic.id]
+                if instance is None:
+                    # Placeholder exists - another request is starting this mosaic
+                    # Decrement counter before raising
+                    self._decrement_starting_counter(mosaic.id)
+                    raise MosaicStartingError(
+                        f"Mosaic with id={mosaic.id} is already starting, please wait"
+                    )
+                else:
+                    # Real instance exists - mosaic is already running
+                    # Decrement counter before raising
+                    self._decrement_starting_counter(mosaic.id)
+                    raise MosaicAlreadyRunningError(
+                        f"Mosaic with id={mosaic.id} is already running"
+                    )
+
+            # Reserve slot with placeholder to prevent concurrent starts
+            self._mosaic_instances[mosaic.id] = (None, None)
+            logger.debug(f"Reserved slot for mosaic id={mosaic.id} (placeholder)")
+
+        # 3. Select a worker thread using round-robin
         thread = self._select_thread()
 
         # Get the event loop for the selected thread
@@ -330,60 +414,60 @@ class RuntimeManager:
             loop = self._thread_loops.get(thread)
 
         if not loop:
+            # Cleanup placeholder and decrement counter before raising
+            with self._mosaic_instances_lock:
+                self._mosaic_instances.pop(mosaic.id, None)
+            self._decrement_starting_counter(mosaic.id)
             raise RuntimeInternalError(
                 f"Event loop not found for thread: {thread.name}"
             )
 
-        # 3. Create MosaicInstance with mosaic model object
+        # 4. Create MosaicInstance with mosaic model object and path
         from .mosaic_instance import MosaicInstance
 
         mosaic_instance = MosaicInstance(
             mosaic=mosaic,
+            mosaic_path=mosaic_path,
             async_session_factory=self.async_session_factory,
             config=self.config
         )
 
         logger.debug(
             f"Created MosaicInstance for mosaic_id={mosaic.mosaic_id} "
-            f"in thread={thread.name}"
+            f"in thread={thread.name}, path={mosaic_path}"
         )
 
-        # 4. Start instance in worker thread (run_coroutine_threadsafe)
+        # 5. Start instance in worker thread (run_coroutine_threadsafe)
         # This is the ONLY operation that uses run_coroutine_threadsafe
         future = asyncio.run_coroutine_threadsafe(mosaic_instance.start(), loop)
 
-        # 5. Wait for startup to complete (with timeout)
-        # Convert concurrent.futures.Future to asyncio.Future to avoid blocking
-        try:
-            await asyncio.wait_for(
-                asyncio.wrap_future(future),
-                timeout=timeout
+        # 6. Create background task to wait for startup completion
+        # This task will handle counter decrement in its finally block
+        startup_task = asyncio.create_task(
+            self._wait_for_startup_completion(mosaic.id, mosaic_instance, future, thread)
+        )
+
+        # 7. Wait for background task with timeout
+        done, pending = await asyncio.wait([startup_task], timeout=timeout)
+
+        # 8. Check result
+        if startup_task in done:
+            # Task completed - check if it succeeded or failed
+            # This will re-raise any exception from the background task
+            await startup_task
+            logger.info(
+                f"Mosaic started successfully: id={mosaic.id}, mosaic_id={mosaic.mosaic_id} "
+                f"in thread={thread.name}"
             )
-            logger.debug(
-                f"MosaicInstance started successfully for mosaic_id={mosaic.mosaic_id}"
-            )
-        except asyncio.TimeoutError:
+        else:
+            # Timeout - task is still running in background
             logger.error(
                 f"Mosaic startup timeout: id={mosaic.id}, mosaic_id={mosaic.mosaic_id} "
-                f"after {timeout}s"
+                f"after {timeout}s. Background task will continue and handle completion."
             )
             raise RuntimeTimeoutError(
                 f"Mosaic startup timed out after {timeout}s"
             )
-        except Exception as e:
-            logger.error(
-                f"Mosaic startup failed: id={mosaic.id}, mosaic_id={mosaic.mosaic_id}, "
-                f"error: {e}"
-            )
-            raise
-
-        # 6. Cache instance in _mosaic_instances
-        self._mosaic_instances[mosaic.id] = (mosaic_instance, thread)
-
-        logger.info(
-            f"Mosaic started successfully: id={mosaic.id}, mosaic_id={mosaic.mosaic_id} "
-            f"in thread={thread.name}"
-        )
 
     async def stop_mosaic(self, mosaic: 'Mosaic', timeout: float = 60.0) -> None:
         """
@@ -419,8 +503,9 @@ class RuntimeManager:
         # 2. Submit command and wait for completion
         await self._submit_command_and_wait(mosaic.id, command, timeout)
 
-        # 3. Remove instance from _mosaic_instances cache
-        self._mosaic_instances.pop(mosaic.id, None)
+        # 3. Remove instance from _mosaic_instances cache (with lock protection)
+        with self._mosaic_instances_lock:
+            self._mosaic_instances.pop(mosaic.id, None)
 
         logger.info(f"Mosaic stopped successfully: id={mosaic.id}, mosaic_id={mosaic.mosaic_id}")
 
@@ -432,15 +517,25 @@ class RuntimeManager:
             mosaic: Mosaic model object (validated by FastAPI layer)
 
         Returns:
-            MosaicStatus.RUNNING or MosaicStatus.STOPPED
+            MosaicStatus.STARTING if placeholder exists (being initialized)
+            MosaicStatus.RUNNING if actual instance exists
+            MosaicStatus.STOPPED if not in cache
 
         Note:
             FastAPI layer must validate mosaic existence and permissions before calling.
-            Currently uses simple implementation (check instance existence).
+            Uses lock protection to ensure consistent read of instance state.
         """
-        if mosaic.id in self._mosaic_instances:
-            return MosaicStatus.RUNNING
-        return MosaicStatus.STOPPED
+        with self._mosaic_instances_lock:
+            if mosaic.id not in self._mosaic_instances:
+                return MosaicStatus.STOPPED
+
+            instance, _ = self._mosaic_instances[mosaic.id]
+            if instance is None:
+                # Placeholder exists - mosaic is starting
+                return MosaicStatus.STARTING
+            else:
+                # Real instance exists - mosaic is running
+                return MosaicStatus.RUNNING
 
     # ========== Node Lifecycle ==========
 
@@ -526,13 +621,24 @@ class RuntimeManager:
         Returns:
             NodeStatus.RUNNING or NodeStatus.STOPPED
 
+        Raises:
+            MosaicNotRunningError: If mosaic not running
+            MosaicStartingError: If mosaic is starting but not ready yet
+            RuntimeTimeoutError: If query times out
+
         Note:
             FastAPI layer must validate node existence and permissions before calling.
-            If mosaic is not running, returns NodeStatus.STOPPED.
+            If mosaic is not running or still starting, returns NodeStatus.STOPPED.
         """
-        # If mosaic is not running, node must be stopped
-        if node.mosaic_id not in self._mosaic_instances:
-            return NodeStatus.STOPPED
+        # Check if mosaic is running (with lock protection)
+        with self._mosaic_instances_lock:
+            if node.mosaic_id not in self._mosaic_instances:
+                return NodeStatus.STOPPED
+
+            instance, _ = self._mosaic_instances[node.mosaic_id]
+            # If mosaic is starting (placeholder), nodes are not ready yet
+            if instance is None:
+                return NodeStatus.STOPPED
 
         # Import command here to avoid circular import
         from .command import GetNodeStatusCommand
@@ -541,38 +647,41 @@ class RuntimeManager:
         command = GetNodeStatusCommand(node=node)
 
         # Submit command and wait for result (with short timeout for query)
-        try:
-            status = await self._submit_command_and_wait(
-                node.mosaic_id, command, timeout=5.0
-            )
-            return status
-        except Exception as e:
-            logger.warning(
-                f"Failed to query node status: id={node.id}, node_id={node.node_id}, "
-                f"error: {e}"
-            )
-            # On error, assume stopped
-            return NodeStatus.STOPPED
+        status = await self._submit_command_and_wait(
+            node.mosaic_id, command, timeout=5.0
+        )
+        return status
 
     # ========== Session Operations ==========
 
     async def create_session(
         self,
-        session: 'Session',
+        node: 'Node',
+        mode: 'SessionMode',
+        model: 'LLMModel',
         timeout: float = 10.0
-    ) -> None:
+    ) -> str:
         """
-        Create a runtime session in a node.
+        Create a runtime session in an agent node.
 
         Uses command queue with Future for async wait.
 
+        This method is ONLY for agent sessions (PROGRAM or CHAT mode).
+        Background sessions are automatically created by the runtime when events arrive.
+
         Steps:
-        1. Create CreateSessionCommand
-        2. Submit command and wait for completion
+        1. Generate a unique session_id
+        2. Create CreateSessionCommand with node, session_id, and config (mode/model)
+        3. Submit command and wait for completion
 
         Args:
-            session: Session model object (validated by FastAPI layer)
+            node: Node model object (validated by FastAPI layer)
+            mode: Session mode (PROGRAM or CHAT)
+            model: LLM model to use (SONNET, OPUS, or HAIKU)
             timeout: Maximum wait time in seconds
+
+        Returns:
+            Generated session_id string
 
         Raises:
             MosaicNotRunningError: If mosaic not running
@@ -580,33 +689,53 @@ class RuntimeManager:
             RuntimeTimeoutError: If operation times out
 
         Note:
-            FastAPI layer must validate session and node existence/permissions before calling.
+            FastAPI layer must validate node existence and permissions before calling.
+            FastAPI layer must ensure mode is PROGRAM or CHAT (not BACKGROUND).
+            The session_id is auto-generated using UUID.
         """
+        # Generate unique session_id
+        import uuid
+        session_id = str(uuid.uuid4())
+
         logger.info(
-            f"Creating session: id={session.id}, session_id={session.session_id}, "
-            f"node_id={session.node.node_id}, mosaic_id={session.node.mosaic_id}"
+            f"Creating session: session_id={session_id}, "
+            f"node_id={node.node_id}, mosaic_id={node.mosaic_id}, "
+            f"mode={mode.value}, model={model.value}"
         )
 
         # Import command here to avoid circular import
         from .command import CreateSessionCommand
 
+        # Build config dictionary for agent session
+        config = {
+            'mode': mode,
+            'model': model
+        }
+
         # Create CreateSessionCommand
-        command = CreateSessionCommand(session=session)
-
-        # Submit command and wait for completion
-        await self._submit_command_and_wait(session.mosaic_id, command, timeout)
-
-        logger.info(
-            f"Session created successfully: id={session.id}, session_id={session.session_id}"
+        command = CreateSessionCommand(
+            node=node,
+            session_id=session_id,
+            config=config
         )
 
-    def submit_send_message(self, session: 'Session', message: str) -> None:
+        # Submit command and wait for completion
+        await self._submit_command_and_wait(node.mosaic_id, command, timeout)
+
+        logger.info(
+            f"Session created successfully: session_id={session_id}, node_id={node.node_id}"
+        )
+
+        return session_id
+
+    def submit_send_message(self, node: 'Node', session: 'Session', message: str) -> None:
         """
         Submit a send message command (fire-and-forget).
 
         Does NOT wait for completion. Message sending is asynchronous.
 
         Args:
+            node: Node model object (validated by FastAPI layer)
             session: Session model object (validated by FastAPI layer)
             message: User message content
 
@@ -615,64 +744,73 @@ class RuntimeManager:
 
         Note:
             This is a non-blocking operation. Use this for user message submission.
-            FastAPI layer must validate session existence and permissions before calling.
+            FastAPI layer must validate node and session existence/permissions before calling.
         """
         logger.info(
-            f"Submitting message for session: id={session.id}, "
-            f"session_id={session.session_id}, message_length={len(message)}"
+            f"Submitting message for session: session_id={session.session_id}, "
+            f"node_id={node.node_id}, message_length={len(message)}"
         )
 
         # Import command here to avoid circular import
         from .command import SendMessageCommand
 
         # Create SendMessageCommand
-        command = SendMessageCommand(session=session, message=message)
-
-        # Submit command without waiting (fire-and-forget)
-        self._submit_command_no_wait(session.mosaic_id, command)
-
-        logger.debug(
-            f"Message submitted for session: id={session.id}, session_id={session.session_id}"
+        command = SendMessageCommand(
+            node=node,
+            session=session,
+            message=message
         )
 
-    async def interrupt_session(self, session: 'Session', timeout: float = 5.0) -> None:
+        # Submit command without waiting (fire-and-forget)
+        self._submit_command_no_wait(node.mosaic_id, command)
+
+        logger.debug(
+            f"Message submitted for session: session_id={session.session_id}, node_id={node.node_id}"
+        )
+
+    async def interrupt_session(self, node: 'Node', session: 'Session', timeout: float = 5.0) -> None:
         """
         Interrupt a running session.
 
         Uses command queue with Future for async wait.
 
         Args:
+            node: Node model object (validated by FastAPI layer)
             session: Session model object (validated by FastAPI layer)
             timeout: Maximum wait time in seconds
 
         Raises:
+            MosaicNotRunningError: If mosaic not running
             SessionNotFoundError: If session not found
             RuntimeTimeoutError: If operation times out
 
         Note:
-            FastAPI layer must validate session existence and permissions before calling.
+            FastAPI layer must validate node and session existence/permissions before calling.
         """
         logger.info(
-            f"Interrupting session: id={session.id}, session_id={session.session_id}"
+            f"Interrupting session: session_id={session.session_id}, node_id={node.node_id}"
         )
 
         # Import command here to avoid circular import
         from .command import InterruptSessionCommand
 
         # Create InterruptSessionCommand
-        command = InterruptSessionCommand(session=session)
+        command = InterruptSessionCommand(
+            node=node,
+            session=session
+        )
 
         # Submit command and wait for completion
-        await self._submit_command_and_wait(session.mosaic_id, command, timeout)
+        await self._submit_command_and_wait(node.mosaic_id, command, timeout)
 
         logger.info(
-            f"Session interrupted successfully: id={session.id}, session_id={session.session_id}"
+            f"Session interrupted successfully: session_id={session.session_id}, node_id={node.node_id}"
         )
 
     async def close_session(
         self,
+        node: 'Node',
         session: 'Session',
-        force: bool = False,
         timeout: float = 10.0
     ) -> None:
         """
@@ -685,34 +823,37 @@ class RuntimeManager:
         2. Submit command and wait for completion
 
         Args:
+            node: Node model object (validated by FastAPI layer)
             session: Session model object (validated by FastAPI layer)
-            force: Force close even if session is busy
             timeout: Maximum wait time in seconds
 
         Raises:
+            MosaicNotRunningError: If mosaic not running
             SessionNotFoundError: If session not found
             RuntimeTimeoutError: If operation times out
 
         Note:
             Database status should be updated BEFORE calling this method.
-            FastAPI layer must validate session existence and permissions before calling.
+            FastAPI layer must validate node and session existence/permissions before calling.
         """
         logger.info(
-            f"Closing session: id={session.id}, session_id={session.session_id}, "
-            f"force={force}"
+            f"Closing session: session_id={session.session_id}, node_id={node.node_id}"
         )
 
         # Import command here to avoid circular import
         from .command import CloseSessionCommand
 
         # Create CloseSessionCommand
-        command = CloseSessionCommand(session=session, force=force)
+        command = CloseSessionCommand(
+            node=node,
+            session=session
+        )
 
         # Submit command and wait for completion
-        await self._submit_command_and_wait(session.mosaic_id, command, timeout)
+        await self._submit_command_and_wait(node.mosaic_id, command, timeout)
 
         logger.info(
-            f"Session closed successfully: id={session.id}, session_id={session.session_id}"
+            f"Session closed successfully: session_id={session.session_id}, node_id={node.node_id}"
         )
 
     # ========== Command Submission Utilities ==========
@@ -779,14 +920,21 @@ class RuntimeManager:
         )
 
         # 5. Wait for Future to be resolved (with timeout)
+        # Use shield() to protect future from cancellation on timeout.
+        # The worker thread task should continue running even if we stop waiting.
         try:
-            result = await asyncio.wait_for(future, timeout=timeout)
+            result = await asyncio.wait_for(
+                asyncio.shield(future),
+                timeout=timeout
+            )
             logger.debug(
                 f"Command completed: {command.__class__.__name__} "
                 f"for mosaic_id={mosaic_id}"
             )
             return result
         except asyncio.TimeoutError:
+            # Timeout occurred, but the worker thread task is still running (shielded).
+            # We simply stop waiting and let the task complete on its own.
             logger.error(
                 f"Command timeout: {command.__class__.__name__} "
                 f"for mosaic_id={mosaic_id} after {timeout}s"
@@ -831,6 +979,103 @@ class RuntimeManager:
 
     # ========== Internal Helpers ==========
 
+    async def _wait_for_startup_completion(
+        self,
+        mosaic_id: int,
+        mosaic_instance: 'MosaicInstance',
+        future: 'asyncio.Future',
+        thread: threading.Thread
+    ) -> None:
+        """
+        Background task to wait for mosaic startup completion and manage counter.
+
+        This task is created immediately when start_mosaic begins the startup process.
+        It waits for the actual startup to complete (without timeout) and handles cleanup.
+        The starting counter is ALWAYS decremented in this task's finally block.
+
+        Philosophy:
+        - User timeout: User stops waiting and receives error (start_mosaic returns)
+        - Startup process: Continues running, never times out internally
+        - This task: Waits indefinitely for completion, handles result, manages counter
+
+        Steps:
+        1. Wait for startup to complete (no timeout, let it finish naturally)
+        2. If success: Replace placeholder with actual instance
+        3. If failure: Remove placeholder and re-raise exception
+        4. Always decrement starting counter (in finally block)
+
+        Args:
+            mosaic_id: Mosaic database ID
+            mosaic_instance: The MosaicInstance being started
+            future: The concurrent.futures.Future from run_coroutine_threadsafe
+            thread: The worker thread running the instance
+
+        Raises:
+            Exception: Re-raises any exception from the startup process
+
+        Note:
+            This task runs for ALL startup attempts (not just timeouts).
+            Counter management is centralized here to avoid race conditions.
+        """
+        try:
+            logger.debug(
+                f"Background task waiting for mosaic startup completion: id={mosaic_id}"
+            )
+
+            # Wait for the startup to complete (no timeout - let it finish naturally)
+            await asyncio.wrap_future(future)
+
+            # Startup succeeded! Replace placeholder with actual instance
+            with self._mosaic_instances_lock:
+                self._mosaic_instances[mosaic_id] = (mosaic_instance, thread)
+
+            logger.debug(
+                f"Mosaic startup completed successfully: id={mosaic_id}"
+            )
+
+        except Exception as e:
+            # Startup failed, remove placeholder
+            with self._mosaic_instances_lock:
+                self._mosaic_instances.pop(mosaic_id, None)
+
+            logger.error(
+                f"Mosaic startup failed: id={mosaic_id}, error: {e}"
+            )
+            # Re-raise to propagate to start_mosaic caller
+            raise
+
+        finally:
+            # Always decrement starting counter (success, failure, or timeout)
+            self._decrement_starting_counter(mosaic_id)
+            logger.debug(
+                f"Background task completed for mosaic startup: id={mosaic_id}"
+            )
+
+    def _decrement_starting_counter(self, mosaic_id: int) -> None:
+        """
+        Decrement the starting counter and signal completion if all startups are done.
+
+        This method is called when a mosaic startup completes (success or failure).
+        When the counter reaches 0, it signals _all_started_event to allow graceful shutdown.
+
+        Args:
+            mosaic_id: Mosaic database ID (for logging purposes)
+
+        Note:
+            No lock needed - all async operations run in same event loop.
+            This method should only be called from async methods in the main event loop.
+        """
+        self._starting_count -= 1
+        logger.debug(
+            f"Decremented starting counter: {self._starting_count} "
+            f"(mosaic id={mosaic_id})"
+        )
+
+        # If all startups are complete, signal the event
+        if self._starting_count == 0 and self._all_started_event:
+            self._all_started_event.set()
+            logger.info("All mosaic startups completed - ready for graceful shutdown")
+
     def _get_running_mosaic(self, mosaic_id: int) -> tuple['MosaicInstance', threading.Thread]:
         """
         Get a running mosaic instance and its thread.
@@ -843,11 +1088,24 @@ class RuntimeManager:
 
         Raises:
             MosaicNotRunningError: If mosaic not running
+            MosaicStartingError: If mosaic is starting but not ready yet
+
+        Note:
+            This method rejects placeholder entries (mosaic is starting but not ready).
+            Callers should wait for startup to complete before submitting commands.
         """
         if mosaic_id not in self._mosaic_instances:
             raise MosaicNotRunningError(f"Mosaic with id={mosaic_id} is not running")
 
-        return self._mosaic_instances[mosaic_id]
+        instance, thread = self._mosaic_instances[mosaic_id]
+
+        # Check for placeholder (mosaic is starting)
+        if instance is None:
+            raise MosaicStartingError(
+                f"Mosaic with id={mosaic_id} is currently starting, please retry later"
+            )
+
+        return instance, thread
 
     def _select_thread(self) -> threading.Thread:
         """

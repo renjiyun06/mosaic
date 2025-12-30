@@ -1,0 +1,645 @@
+"""Base class for runtime node representations"""
+import asyncio
+import logging
+from abc import ABC, abstractmethod
+from typing import Optional, Dict, Any, Set, TYPE_CHECKING
+from pathlib import Path
+
+from ..enum import NodeStatus
+from ..exception import (
+    RuntimeInternalError,
+    RuntimeConfigError,
+    NodeAlreadyRunningError,
+    SessionNotFoundError,
+    SessionConflictError,
+)
+
+if TYPE_CHECKING:
+    from ..model.node import Node
+    from ..model.session import Session
+    from .mosaic_instance import MosaicInstance
+    from .mosaic_session import MosaicSession
+    from .zmq import ZmqClient
+
+logger = logging.getLogger(__name__)
+
+
+class MosaicNode(ABC):
+    """
+    Base class for all runtime node types.
+
+    This is an abstract base class that provides common functionality for all nodes:
+    - ZMQ client lifecycle management
+    - Event receiving loop
+    - Status tracking
+    - Node path resolution
+
+    Subclasses must implement:
+    - _on_start(): Custom initialization logic
+    - _on_stop(): Custom cleanup logic
+    - create_session(): Create a new session (fully implemented by subclass)
+    - close_session(): Close a session
+
+    Optional methods for agent nodes:
+    - send_message(): Send message to a session
+    - interrupt_session(): Interrupt a running session
+
+    Architecture:
+    - Each node runs in the same event loop as its parent MosaicInstance
+    - ZMQ client connects to global ZmqServer
+    - Event receiving happens in a background task (_event_loop)
+    - All operations are async and non-blocking
+    - Session map (self._sessions) is directly accessible to subclasses
+    - create_session() and close_session() are called only from command loop (serialized, no lock needed)
+    """
+
+    def __init__(
+        self,
+        node: 'Node',
+        node_path: Path,
+        mosaic_instance: 'MosaicInstance',
+        async_session_factory,
+        config: dict
+    ):
+        """
+        Initialize node instance.
+
+        Args:
+            node: Node model object from database
+            node_path: Node working directory path
+            mosaic_instance: Parent MosaicInstance reference
+            async_session_factory: AsyncSession factory for database access
+            config: Configuration dict (must contain 'zmq')
+
+        Note:
+            Does NOT start the node. Call start() to begin operation.
+        """
+        self.node = node
+        self.node_path = node_path
+        self.mosaic_instance = mosaic_instance
+        self.async_session_factory = async_session_factory
+        self.config = config
+
+        # Initialize state
+        self._status = NodeStatus.STOPPED
+        self._zmq_client: Optional['ZmqClient'] = None
+
+        # Session management (accessed only from command loop - no lock needed)
+        self._sessions: Dict[str, 'MosaicSession'] = {}       # session_id -> MosaicSession
+
+        logger.info(
+            f"MosaicNode initialized: node_id={node.node_id}, "
+            f"node_type={node.node_type}, path={node_path}"
+        )
+
+    # ========== Lifecycle Methods ==========
+
+    async def start(self) -> None:
+        """
+        Start the node.
+
+        Steps:
+        1. Validate current status (must be STOPPED)
+        2. Call subclass _on_start() hook (prepare resources BEFORE accepting events)
+        3. Create and connect ZMQ client (start accepting events)
+        4. Set status to RUNNING
+
+        Raises:
+            NodeAlreadyRunningError: If node is already running
+            RuntimeConfigError: If required ZMQ configuration is missing
+            RuntimeInternalError: If startup fails
+
+        Note:
+            This is a template method that calls _on_start() for subclass customization.
+            Subclass resources MUST be ready before ZMQ starts receiving events.
+        """
+        if self._status != NodeStatus.STOPPED:
+            raise NodeAlreadyRunningError(
+                f"Node {self.node.node_id} is already running"
+            )
+
+        logger.info(
+            f"Starting node: node_id={self.node.node_id}, node_type={self.node.node_type}"
+        )
+
+        try:
+            # 1. Call subclass initialization hook FIRST (prepare resources)
+            await self._on_start()
+            logger.debug(f"Subclass initialization complete for node: {self.node.node_id}")
+
+            # 2. Create and connect ZMQ client (start accepting events)
+            from .zmq import ZmqClient
+
+            # Get ZMQ server configuration (no defaults - must be provided)
+            zmq_config = self.config.get('zmq')
+            if not zmq_config:
+                raise RuntimeConfigError("Missing required configuration: [zmq]")
+
+            server_host = zmq_config.get('host')
+            server_pull_port = zmq_config.get('pull_port')
+            server_pub_port = zmq_config.get('pub_port')
+
+            if not all([server_host, server_pull_port, server_pub_port]):
+                raise RuntimeConfigError(
+                    "Missing required ZMQ configuration fields: host, pull_port, pub_port"
+                )
+
+            self._zmq_client = ZmqClient(
+                mosaic_id=self.mosaic_instance.mosaic.id,
+                node_id=self.node.node_id,
+                server_host=server_host,
+                server_pull_port=server_pull_port,
+                server_pub_port=server_pub_port,
+                on_event=self._on_event_received  # Register event callback
+            )
+            self._zmq_client.connect()
+            logger.debug(f"ZMQ client connected for node: {self.node.node_id}")
+
+            # 3. Set status to RUNNING
+            self._status = NodeStatus.RUNNING
+
+            logger.info(
+                f"Node started successfully: node_id={self.node.node_id}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to start node {self.node.node_id}: {e}")
+            # Cleanup on failure
+            await self._cleanup()
+            raise RuntimeInternalError(f"Node startup failed: {e}") from e
+
+    async def stop(self) -> None:
+        """
+        Stop the node.
+
+        Steps:
+        1. Check if already stopped (idempotent)
+        2. Set status to STOPPED (prevent new operations from API)
+        3. Cleanup ZMQ and sessions (via _cleanup)
+        4. Call subclass _on_stop() hook (cleanup resources after all sessions stopped)
+
+        Note:
+            This is a template method that calls _on_stop() for subclass customization.
+            Does not raise exceptions - used during cleanup.
+            Sessions are cleaned BEFORE _on_stop() because session workers may still need
+            subclass resources (e.g., Claude client) to process queued events.
+        """
+        if self._status == NodeStatus.STOPPED:
+            logger.info(f"Node {self.node.node_id} already stopped")
+            return
+
+        logger.info(f"Stopping node: node_id={self.node.node_id}")
+
+        # 1. Set status to STOPPED (prevents new operations from API)
+        self._status = NodeStatus.STOPPED
+
+        # 2. Cleanup ZMQ and sessions (via _cleanup)
+        await self._cleanup()
+
+        # 3. Call subclass cleanup hook (safe to cleanup resources now)
+        try:
+            await self._on_stop()
+        except Exception as e:
+            logger.error(
+                f"Error in _on_stop() for node {self.node.node_id}: {e}",
+                exc_info=True
+            )
+
+        logger.info(f"Node stopped: node_id={self.node.node_id}")
+
+    async def _cleanup(self) -> None:
+        """
+        Cleanup base class resources (ZMQ client and sessions).
+
+        Called by:
+        - stop(): After setting status to STOPPED, before calling _on_stop()
+        - start() exception handler: When startup fails
+
+        Steps:
+        1. Disconnect ZMQ client (if connected)
+        2. Clean up all sessions (cancel worker tasks)
+
+        Note:
+            This method does NOT call _on_stop(). Subclass resource cleanup is handled separately:
+            - In stop(): _on_stop() is called AFTER _cleanup()
+            - In start() failure: Subclasses should use try-finally in _on_start() to cleanup
+              their own resources, or ensure partial initialization is safe.
+
+            This method is idempotent and safe to call multiple times.
+        """
+        # 1. Disconnect ZMQ client (idempotent)
+        if self._zmq_client:
+            try:
+                self._zmq_client.disconnect()
+                logger.debug(f"ZMQ client disconnected for node: {self.node.node_id}")
+            except Exception as e:
+                logger.error(f"Error disconnecting ZMQ client: {e}")
+            self._zmq_client = None
+
+        # 2. Clean up all sessions (idempotent)
+        await self._cleanup_all_sessions()
+
+        logger.debug(f"Cleanup complete for node: {self.node.node_id}")
+
+    # ========== Event Processing ==========
+
+    async def _on_event_received(self, event_data: Dict[str, Any]) -> None:
+        """
+        Event callback invoked by ZmqClient when an event is received.
+
+        This is called by the ZmqClient's internal receive loop (sequential).
+        Routes event to the target session's queue (non-blocking).
+
+        Responsibilities:
+        1. Check node status (drop if not RUNNING)
+        2. Parse target_session_id from event
+        3. Ensure session exists (create if needed via create_session)
+        4. Enqueue event to session's queue (non-blocking)
+        5. Return immediately (never blocks ZMQ receive loop)
+
+        Args:
+            event_data: Event data dict from ZMQ
+        """
+        try:
+            # 1. Defensive check: drop events if node is not running
+            if self._status != NodeStatus.RUNNING:
+                logger.warning(
+                    f"Received event while node not running (status={self._status}), dropping: "
+                    f"node_id={self.node.node_id}, event_id={event_data.get('event_id', 'UNKNOWN')}"
+                )
+                return
+
+            target_session_id = event_data.get('target_session_id')
+            event_type = event_data.get('event_type', 'UNKNOWN')
+            event_id = event_data.get('event_id', 'UNKNOWN')
+
+            if not target_session_id:
+                logger.warning(
+                    f"Event missing target_session_id, dropping: "
+                    f"event_id={event_id}, event_type={event_type}"
+                )
+                return
+
+            logger.debug(
+                f"Routing event: node_id={self.node.node_id}, "
+                f"session_id={target_session_id}, event_type={event_type}"
+            )
+
+            # Ensure session exists (create via command if needed)
+            # All management operations must go through command queue for serialization
+            if target_session_id not in self._sessions:
+                logger.info(
+                    f"Auto-creating session for incoming event: "
+                    f"session_id={target_session_id}, event_type={event_type}"
+                )
+
+                # Import here to avoid circular dependency
+                from .command import CreateSessionCommand
+
+                # Get default session config from subclass
+                default_config = self.get_default_session_config()
+
+                # Create command with future for synchronization
+                command = CreateSessionCommand(
+                    node=self.node,
+                    session_id=target_session_id,
+                    config=default_config,  # Use subclass-provided defaults
+                    future=asyncio.Future()
+                )
+
+                # Submit to command queue (non-blocking)
+                self.mosaic_instance.process_command(command)
+
+                # Wait for command completion (blocks until session created)
+                try:
+                    await command.future
+                    logger.debug(
+                        f"Session created via command: session_id={target_session_id}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to create session via command: "
+                        f"session_id={target_session_id}, error={e}"
+                    )
+                    return
+
+            # Get session (should exist after command completion)
+            session = self._sessions.get(target_session_id)
+            if not session:
+                logger.error(
+                    f"Session not found after creation: session_id={target_session_id}"
+                )
+                return
+
+            # Enqueue event to session (non-blocking, session manages its own queue)
+            session.enqueue_event(event_data)
+            logger.debug(
+                f"Event enqueued to session: session_id={target_session_id}, "
+                f"event_id={event_id}, event_type={event_type}"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Error routing event in node {self.node.node_id}: {e}",
+                exc_info=True
+            )
+            # Don't re-raise - prevent crashing the ZmqClient's receive loop
+
+    async def send_event(
+        self,
+        target_mosaic_id: int,
+        target_node_id: str,
+        event: Dict[str, Any]
+    ) -> None:
+        """
+        Send an event to the ZMQ message bus.
+
+        This is a helper method for subclasses to emit events.
+
+        Args:
+            target_mosaic_id: Target mosaic ID
+            target_node_id: Target node ID
+            event: Complete event dict (must contain event_id, event_type, source/target info, payload)
+
+        Raises:
+            RuntimeInternalError: If ZMQ client is not connected
+
+        Note:
+            The event dict should contain:
+            - event_id (str): Unique event identifier
+            - event_type (str): Event type
+            - source_node_id (str): This node's node_id
+            - source_session_id (str): Source session ID
+            - target_node_id (str): Recipient node ID
+            - target_session_id (str): Recipient session ID
+            - payload (dict, optional): Event-specific data
+        """
+        if not self._zmq_client:
+            raise RuntimeInternalError(
+                f"Cannot send event: ZMQ client not connected for node {self.node.node_id}"
+            )
+
+        await self._zmq_client.send(
+            target_mosaic_id=target_mosaic_id,
+            target_node_id=target_node_id,
+            event=event
+        )
+
+        logger.debug(
+            f"Event sent from node {self.node.node_id}: event_type={event.get('event_type')}, "
+            f"target={target_node_id}"
+        )
+
+    # ========== Session Configuration ==========
+
+    def get_default_session_config(self) -> Optional[Dict[str, Any]]:
+        """
+        Get default configuration for session creation.
+
+        This method is called when a session is auto-created due to incoming event
+        (without explicit config provided). Subclasses can override to provide
+        node-type-specific default configuration.
+
+        Returns:
+            Dict with default session configuration, or None for no defaults
+
+        Examples:
+            # Agent node with default mode and model
+            return {"mode": "planning", "model": "sonnet"}
+
+            # Scheduler node with default interval
+            return {"interval_seconds": 60}
+
+            # Email node with default template
+            return {"template": "default"}
+
+            # No defaults
+            return None
+
+        Note:
+            This is NOT an abstract method - default implementation returns None.
+            Subclasses only need to override if they have meaningful defaults.
+        """
+        return None
+
+    # ========== Abstract Methods (Must be implemented by subclasses) ==========
+
+    @abstractmethod
+    async def _on_start(self) -> None:
+        """
+        Subclass initialization hook.
+
+        Called BEFORE ZMQ client connects (ensures resources ready before events arrive).
+        Subclasses should implement their custom initialization logic here.
+
+        Examples:
+        - Agent nodes: Initialize Claude SDK, load system prompts
+        - Scheduler nodes: Load schedule configuration, start timers
+        - Email nodes: Connect to email server
+
+        Resource cleanup on failure:
+            If initialization fails, subclasses should cleanup their own resources using
+            try-finally pattern:
+
+            async def _on_start(self):
+                self.claude_client = None
+                try:
+                    self.claude_client = Anthropic(api_key=...)
+                    self.system_prompt = await load_prompt(...)
+                except Exception:
+                    # Cleanup on failure
+                    if self.claude_client:
+                        await self.claude_client.close()
+                    raise
+
+            Alternatively, ensure partial initialization is safe (resources set to None
+            and checked before use).
+
+        Raises:
+            Exception: Any exception will cause node startup to fail and trigger cleanup
+        """
+        pass
+
+    @abstractmethod
+    async def _on_stop(self) -> None:
+        """
+        Subclass cleanup hook.
+
+        Called AFTER ZMQ disconnects and all sessions are cleaned up.
+        All session workers have stopped, so it's safe to cleanup shared resources.
+
+        Subclasses should implement their custom cleanup logic here.
+
+        Examples:
+        - Agent nodes: Cleanup SDK resources (close Claude client)
+        - Scheduler nodes: Cancel all scheduled tasks
+        - Email nodes: Disconnect from email server
+
+        Resource cleanup:
+            async def _on_stop(self):
+                # Safe to cleanup now - no sessions are using these resources
+                if self.claude_client:
+                    await self.claude_client.close()
+                    self.claude_client = None
+
+        Note:
+            Should not raise exceptions - log errors and continue cleanup.
+            This hook is NOT called if _on_start() fails during node startup.
+        """
+        pass
+
+    async def _cleanup_all_sessions(self):
+        """
+        Clean up all running sessions.
+
+        Called by _cleanup() to gracefully shut down all sessions.
+
+        Steps:
+        1. Get all session IDs from registry
+        2. For each session:
+           - Call self.close_session() (delegates to subclass implementation)
+
+        Note:
+            Delegates to subclass close_session() for consistent cleanup logic.
+            No lock needed - invoked from _cleanup() which runs in the event loop
+            (either from stop() or start() exception handler, serialized execution).
+        """
+        session_ids = list(self._sessions.keys())
+
+        if not session_ids:
+            return
+
+        logger.info(
+            f"Cleaning up {len(session_ids)} sessions for node {self.node.node_id}"
+        )
+
+        for session_id in session_ids:
+            try:
+                # Delegate to subclass close_session() implementation
+                # Subclass handles:
+                # - Calling session.close() (worker cancellation, _on_close hook)
+                # - Database updates (for agent sessions)
+                # - Unregistering from session map
+                await self.close_session(session_id)
+            except Exception as e:
+                logger.error(
+                    f"Error closing session: session_id={session_id}, error={e}",
+                    exc_info=True
+                )
+
+        logger.info(f"All sessions cleaned up for node {self.node.node_id}")
+
+
+    @abstractmethod
+    async def create_session(
+        self,
+        session_id: str,
+        config: Optional[Dict[str, Any]] = None
+    ) -> 'MosaicSession':
+        """
+        Create a session (fully implemented by subclass).
+
+        Different node types have fundamentally different session characteristics:
+        - Agent nodes: Use database storage, config contains mode/model
+        - Scheduler nodes: Runtime-only, config contains schedule settings
+        - Email nodes: Runtime-only, config contains email settings
+
+        Args:
+            session_id: Session identifier (required)
+            config: Session configuration (optional, subclass-specific)
+
+        Returns:
+            MosaicSession: The created session instance
+
+        Raises:
+            SessionConflictError: If session_id already exists (optional, subclass decision)
+            Exception: Any subclass-specific creation errors
+
+        Important:
+            - Called ONLY from command loop (no lock needed, serialized by command queue)
+            - Must register created session in self._sessions map
+            - Subclasses decide when to call session.initialize() and when to register
+            - Access self.async_session_factory for database operations (if needed)
+        """
+        pass
+
+    async def send_message(self, session_id: str, message: str) -> None:
+        """
+        Send a message to a session (only for agent nodes).
+
+        Args:
+            session_id: Session identifier
+            message: User message content
+
+        Raises:
+            SessionNotFoundError: If session not found
+            NotImplementedError: If this node type doesn't support messages
+
+        Note:
+            This is typically implemented by creating and enqueuing a "user_message" event.
+            Default implementation raises NotImplementedError.
+        """
+        raise NotImplementedError(
+            f"Node type {self.node.node_type} does not support send_message"
+        )
+
+    async def interrupt_session(self, session_id: str) -> None:
+        """
+        Interrupt a running session.
+
+        Delegates to the session's interrupt() method.
+        If the session type doesn't support interruption, it will raise NotImplementedError.
+
+        Args:
+            session_id: Session identifier
+
+        Raises:
+            SessionNotFoundError: If session not found
+            NotImplementedError: If session type doesn't support interruption
+
+        Note:
+            This method has a default implementation that delegates to the session.
+            Subclasses typically don't need to override this.
+        """
+        mosaic_session = self._sessions.get(session_id)
+        if mosaic_session is None:
+            raise SessionNotFoundError(
+                f"Session not found: session_id={session_id}"
+            )
+
+        await mosaic_session.interrupt()
+
+    @abstractmethod
+    async def close_session(self, session_id: str) -> None:
+        """
+        Close a session (fully implemented by subclass).
+
+        Different node types may have different close strategies:
+        - Agent nodes: Update database status, cleanup session resources
+        - Scheduler nodes: Cancel timers, cleanup runtime-only state
+        - Email nodes: Cleanup connections, runtime-only state
+
+        Args:
+            session_id: Session identifier
+
+        Raises:
+            SessionNotFoundError: If session not found
+
+        Important:
+            - Called ONLY from command loop (no lock needed, serialized by command queue)
+            - Must call session.close() to stop worker and cleanup resources
+            - Must unregister from self._sessions map after session cleanup
+            - Access self.async_session_factory for database operations (if needed)
+        """
+        pass
+
+    # ========== State Properties ==========
+
+    @property
+    def status(self) -> NodeStatus:
+        """Get current node status"""
+        return self._status
+
+    def is_running(self) -> bool:
+        """Check if node is running"""
+        return self._status == NodeStatus.RUNNING

@@ -1,6 +1,6 @@
 """Command definitions for cross-thread communication between RuntimeManager and MosaicInstance"""
 from dataclasses import dataclass
-from typing import Optional, Any, TYPE_CHECKING
+from typing import Optional, Any, Dict, TYPE_CHECKING
 import asyncio
 
 if TYPE_CHECKING:
@@ -121,17 +121,20 @@ class GetNodeStatusCommand(Command):
 @dataclass
 class CreateSessionCommand(Command):
     """
-    Command to create a runtime session in a node.
+    Command to create a session in a node.
 
-    Steps:
-    - Create session runtime state
-    - Initialize Claude SDK session (if node is claude-code type)
-    - Register session in node's session map
+    Different node types handle session creation differently:
+    - Agent nodes: Create database record + runtime instance
+    - Scheduler/Email nodes: Create runtime instance only (no database)
 
     Attributes:
-        session: Session model object (must have node relationship loaded)
+        node: Node model object (required, identifies which node to create session in)
+        session_id: Session identifier (required)
+        config: Session configuration (optional, subclass-specific, e.g., mode/model for agent nodes)
     """
-    session: 'Session' = None
+    node: 'Node'
+    session_id: str
+    config: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -142,11 +145,13 @@ class SendMessageCommand(Command):
     This is typically a fire-and-forget operation (future=None).
 
     Attributes:
-        session: Session model object
-        message: User message content
+        node: Node model object (required)
+        session: Session model object (required)
+        message: User message content (required)
     """
-    session: 'Session' = None
-    message: str = ""
+    node: 'Node'
+    session: 'Session'
+    message: str
 
 
 @dataclass
@@ -154,18 +159,20 @@ class InterruptSessionCommand(Command):
     """
     Command to interrupt a running session.
 
-    This sends an interrupt signal to the Claude SDK session.
+    This sends an interrupt signal to the session (e.g., Claude SDK interrupt).
 
     Attributes:
-        session: Session model object
+        node: Node model object (required)
+        session: Session model object (required)
     """
-    session: 'Session' = None
+    node: 'Node'
+    session: 'Session'
 
 
 @dataclass
 class CloseSessionCommand(Command):
     """
-    Command to close a runtime session.
+    Command to close a session.
 
     Steps:
     - Stop any ongoing operations
@@ -173,8 +180,8 @@ class CloseSessionCommand(Command):
     - Unregister from node's session map
 
     Attributes:
-        session: Session model object
-        force: Force close even if session is busy
+        node: Node model object (required)
+        session: Session model object (required)
     """
-    session: 'Session' = None
-    force: bool = False
+    node: 'Node'
+    session: 'Session'

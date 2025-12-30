@@ -168,6 +168,18 @@ class MosaicAlreadyRunningError(RuntimeException):
         super().__init__(message, "MOSAIC_ALREADY_RUNNING")
 
 
+class MosaicStartingError(RuntimeException):
+    """Mosaic instance is currently starting
+
+    Examples:
+        - Attempting to start a mosaic that's already in startup process
+        - Attempting to operate on a mosaic before startup completes
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message, "MOSAIC_STARTING")
+
+
 class MosaicNotRunningError(RuntimeException):
     """Mosaic instance is not running
 
@@ -178,6 +190,29 @@ class MosaicNotRunningError(RuntimeException):
 
     def __init__(self, message: str):
         super().__init__(message, "MOSAIC_NOT_RUNNING")
+
+
+class NodeAlreadyRunningError(RuntimeException):
+    """Node is already running
+
+    Examples:
+        - Attempting to start a node that's already running
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message, "NODE_ALREADY_RUNNING")
+
+
+class NodeNotRunningError(RuntimeException):
+    """Node is not running
+
+    Examples:
+        - Attempting to stop a node that's not running
+        - Attempting to operate on sessions when node is stopped
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message, "NODE_NOT_RUNNING")
 
 
 class NodeNotFoundError(RuntimeException):
@@ -202,6 +237,19 @@ class SessionNotFoundError(RuntimeException):
 
     def __init__(self, message: str):
         super().__init__(message, "SESSION_NOT_FOUND")
+
+
+class SessionConflictError(RuntimeException):
+    """Session already exists (conflict)
+
+    Examples:
+        - Session ID already exists in database (orphan session from crash)
+        - Session ID already exists in memory
+        - Attempting to create session with duplicate session_id
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message, "SESSION_CONFLICT")
 
 
 class RuntimeTimeoutError(RuntimeException):
