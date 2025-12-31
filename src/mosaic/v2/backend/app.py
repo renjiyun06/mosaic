@@ -14,7 +14,9 @@ from .logging import setup_logging
 from .exception import MosaicException
 from .schema.response import ErrorResponse
 from .api import auth_router, mosaic_router, node_router
+from .api.websocket import router as websocket_router
 from .runtime.manager import RuntimeManager
+from .websocket import UserMessageBroker
 
 
 def create_app(instance_path: Path, config: dict) -> FastAPI:
@@ -39,12 +41,21 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """Manage application lifespan (startup and shutdown)"""
-        # Startup: Start runtime manager
+        # Startup
+        # 1. Set main event loop for UserMessageBroker
+        import asyncio
+        app.state.user_message_broker.set_main_loop(asyncio.get_running_loop())
+
+        # 2. Start runtime manager
         await app.state.runtime_manager.start()
 
         yield  # Application is running
 
-        # Shutdown: Clean up runtime manager
+        # Shutdown
+        # 1. Disconnect all WebSocket connections
+        await app.state.user_message_broker.disconnect_all_users()
+
+        # 2. Clean up runtime manager
         await app.state.runtime_manager.stop()
 
     # Create FastAPI application with lifespan
@@ -88,6 +99,11 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
         async_session_factory=async_session_factory,
         config=config
     )
+
+    # ==================== WebSocket Configuration ====================
+
+    # Create UserMessageBroker singleton
+    app.state.user_message_broker = UserMessageBroker.create_instance()
 
     # ==================== CORS Configuration ====================
 
@@ -215,5 +231,6 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
     app.include_router(auth_router, prefix="/api")
     app.include_router(mosaic_router, prefix="/api")
     app.include_router(node_router, prefix="/api")
+    app.include_router(websocket_router, prefix="/api")
 
     return app

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from sqlmodel import select
 
-from ..enum import NodeStatus
+from ..enum import NodeStatus, SessionMode, EventType
 from ..exception import (
     RuntimeInternalError,
     RuntimeConfigError,
@@ -353,7 +353,7 @@ class MosaicNode(ABC):
     async def send_event(
         self,
         source_session_id: str,
-        event_type: str,
+        event_type: EventType,
         payload: Optional[Dict[str, Any]] = None,
         target_node_id: Optional[str] = None
     ) -> None:
@@ -365,7 +365,8 @@ class MosaicNode(ABC):
 
         Event Routing:
             1. Unicast mode (target_node_id provided):
-               - Sends event to the specified target node
+               - Validates that a Connection exists from this node to target_node_id
+               - If no connection found, the event is dropped (logged as WARNING)
                - Uses SessionRouting table to determine target_session_id
                - If no routing exists, generates new target_session_id and creates bidirectional routing
 
@@ -401,14 +402,15 @@ class MosaicNode(ABC):
 
         Business Logic:
             - Only events within the same mosaic_id are allowed (no cross-mosaic events)
+            - Unicast mode requires an active Connection (no connection = no send, logged as WARNING)
+            - Broadcast mode uses Subscriptions to find targets (no subscribers = no send, logged as DEBUG)
             - Event persistence is handled by ZmqServer (events are logged to database)
             - SessionRouting is created bidirectionally for session pair binding
-            - Subscriptions determine broadcast targets (source_node_id -> target_node_id for event_type)
-            - If broadcast finds no subscribers, the event is silently dropped (logged as DEBUG)
 
         Database Models Used:
+            - Connection: Validates node-to-node connections (unicast mode)
+            - Subscription: Defines which nodes subscribe to which event types (broadcast mode)
             - SessionRouting: Maps session pairs between nodes
-            - Subscription: Defines which nodes subscribe to which event types
         """
         # 1. Validate ZMQ client is connected
         if not self._zmq_client:
@@ -430,7 +432,26 @@ class MosaicNode(ABC):
         # 3. Determine target node list
         target_nodes: List[str] = []
         if target_node_id:
-            # Unicast mode
+            # Unicast mode: Verify connection exists
+            from ..model.connection import Connection
+
+            async with self.async_session_factory() as db_session:
+                stmt = select(Connection).where(
+                    Connection.mosaic_id == self.mosaic_instance.mosaic.id,
+                    Connection.source_node_id == self.node.node_id,
+                    Connection.target_node_id == target_node_id,
+                    Connection.deleted_at.is_(None)
+                )
+                result = await db_session.execute(stmt)
+                connection = result.scalar_one_or_none()
+
+            if not connection:
+                logger.warning(
+                    f"No connection found from {self.node.node_id} to {target_node_id}, "
+                    f"event will not be sent: event_type={event_type}, source_session={source_session_id}"
+                )
+                return
+
             target_nodes = [target_node_id]
         else:
             # Broadcast mode: query subscriptions
@@ -561,30 +582,36 @@ class MosaicNode(ABC):
         Get default configuration for session creation.
 
         This method is called when a session is auto-created due to incoming event
-        (without explicit config provided). Subclasses can override to provide
-        node-type-specific default configuration.
+        (without explicit config provided).
+
+        Default behavior:
+        - Reads all configuration from node.config (from database)
+        - Ensures 'mode' is set to BACKGROUND if not specified
+        - Returns the merged configuration
+
+        Subclasses can override to add node-type-specific defaults
+        (e.g., default model for agent nodes).
 
         Returns:
-            Dict with default session configuration, or None for no defaults
+            Dict with default session configuration
 
         Examples:
-            # Agent node with default mode and model
-            return {"mode": "planning", "model": "sonnet"}
-
-            # Scheduler node with default interval
-            return {"interval_seconds": 60}
-
-            # Email node with default template
-            return {"template": "default"}
-
-            # No defaults
-            return None
-
-        Note:
-            This is NOT an abstract method - default implementation returns None.
-            Subclasses only need to override if they have meaningful defaults.
+            # Override to add node-type-specific defaults
+            def get_default_session_config(self):
+                config = super().get_default_session_config()
+                config.setdefault("model", LLMModel.SONNET)
+                return config
         """
-        return None
+        # Get config from database node model
+        node_config = self.node.config or {}
+
+        # Copy to avoid modifying the original
+        config = node_config.copy()
+
+        # Ensure mode is always set to BACKGROUND for auto-created sessions
+        config.setdefault("mode", SessionMode.BACKGROUND)
+
+        return config
 
     # ========== Abstract Methods (Must be implemented by subclasses) ==========
 

@@ -7,6 +7,8 @@ from typing import Any
 
 from jose import jwt, JWTError
 from passlib.context import CryptContext
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -120,3 +122,57 @@ def decode_access_token(token: str, jwt_config: dict) -> dict[str, Any] | None:
     except JWTError as e:
         logger.debug(f"Failed to decode JWT token: {e}")
         return None
+
+
+async def verify_token_and_get_user(token: str, jwt_config: dict, session: AsyncSession):
+    """Verify JWT token and retrieve user from database.
+
+    This function combines JWT token validation with database user lookup,
+    providing complete authentication logic used by both HTTP API and WebSocket.
+
+    Args:
+        token: JWT token string
+        jwt_config: JWT configuration dict (from app.state.config['jwt'])
+        session: Database session
+
+    Returns:
+        User: Authenticated user object
+
+    Raises:
+        AuthenticationError: If token is invalid, expired, or user not found
+    """
+    # Import here to avoid circular dependency
+    from .model import User
+    from .exception import AuthenticationError
+
+    # Decode JWT token
+    logger.debug(f"Decoding JWT token: {token[:20]}...")
+    payload = decode_access_token(token, jwt_config)
+    if not payload:
+        logger.warning("Invalid or expired JWT token")
+        raise AuthenticationError("Invalid or expired token")
+
+    # Extract user ID from token payload
+    user_id = payload.get("sub")
+    if not user_id:
+        logger.warning("JWT token missing 'sub' claim")
+        raise AuthenticationError("Invalid token payload")
+
+    user_id = int(user_id)
+
+    # Query user from database
+    stmt = select(User).where(User.id == user_id, User.deleted_at.is_(None))
+    result = await session.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        logger.warning(f"User {user_id} not found or deleted")
+        raise AuthenticationError("User not found")
+
+    # Check if user is active
+    if not user.is_active:
+        logger.warning(f"User {user_id} is inactive")
+        raise AuthenticationError("User account is disabled")
+
+    logger.debug(f"Authenticated user: {user.email}")
+    return user

@@ -45,6 +45,9 @@ class EventType(str, Enum):
 
     Defines all types of events that can be emitted and subscribed to
     in the event mesh.
+
+    Internal event types (session queue only, not published to mesh):
+    - USER_MESSAGE_EVENT: User message input to session queue
     """
     SESSION_START = "session_start"
     SESSION_RESPONSE = "session_response"
@@ -58,6 +61,9 @@ class EventType(str, Enum):
     EMAIL_MESSAGE = "email_message"
     SCHEDULER_MESSAGE = "scheduler_message"
     REDDIT_SCRAPER_MESSAGE = "reddit_scraper_message"
+
+    # Internal session events (not published to Event Mesh)
+    USER_MESSAGE_EVENT = "user_message_event"
 
 
 class SessionStatus(str, Enum):

@@ -53,7 +53,7 @@ async def create_node(
     3. Create Node record in database:
        - user_id = current_user.id
        - mosaic_id = mosaic_id
-       - node_id, node_type, description, mcp_servers (default={}), auto_start from request
+       - node_id, node_type, description, config (default={}), auto_start from request
     4. Create node working directory:
        - Path: {instance_path}/users/{user_id}/{mosaic_id}/{node.id}/
        - This provides isolated workspace for the node
@@ -113,7 +113,7 @@ async def create_node(
         node_id=request.node_id,
         node_type=request.node_type,
         description=request.description,
-        mcp_servers=request.mcp_servers or {},
+        config=request.config or {},
         auto_start=request.auto_start
     )
     session.add(node)
@@ -143,7 +143,7 @@ async def create_node(
         node_id=node.node_id,
         node_type=node.node_type,
         description=node.description,
-        mcp_servers=node.mcp_servers,
+        config=node.config,
         auto_start=node.auto_start,
         status=NodeStatus.STOPPED,
         active_session_count=0,
@@ -236,7 +236,7 @@ async def list_nodes(
             node_id=node.node_id,
             node_type=node.node_type,
             description=node.description,
-            mcp_servers=node.mcp_servers,
+            config=node.config,
             auto_start=node.auto_start,
             status=status,
             active_session_count=active_session_count,
@@ -330,7 +330,7 @@ async def get_node(
         node_id=node.node_id,
         node_type=node.node_type,
         description=node.description,
-        mcp_servers=node.mcp_servers,
+        config=node.config,
         auto_start=node.auto_start,
         status=status,
         active_session_count=active_session_count,
@@ -354,14 +354,14 @@ async def update_node(
     """Update node configuration
 
     Business logic:
-    1. Validate request: at least one field (description, mcp_servers, or auto_start) must be provided
+    1. Validate request: at least one field (description, config, or auto_start) must be provided
     2. Verify mosaic exists and ownership
     3. Query node and verify it exists
     4. Verify node is stopped (check RuntimeManager.get_node_status())
        - Cannot modify running node configuration
     5. Update provided fields:
        - description (if provided)
-       - mcp_servers (if provided)
+       - config (if provided)
        - auto_start (if provided)
     6. Update updated_at timestamp
     7. Return updated node information
@@ -378,10 +378,10 @@ async def update_node(
 
     # 1. Validate request: at least one field must be provided
     if (request.description is None and
-        request.mcp_servers is None and
+        request.config is None and
         request.auto_start is None):
         raise ValidationError(
-            "At least one field (description, mcp_servers, or auto_start) must be provided"
+            "At least one field (description, config, or auto_start) must be provided"
         )
 
     # 2. Verify mosaic exists and ownership
@@ -428,9 +428,9 @@ async def update_node(
         node.description = request.description
         logger.debug(f"Node description updated: id={node.id}")
 
-    if request.mcp_servers is not None:
-        node.mcp_servers = request.mcp_servers
-        logger.debug(f"Node mcp_servers updated: id={node.id}")
+    if request.config is not None:
+        node.config = request.config
+        logger.debug(f"Node config updated: id={node.id}")
 
     if request.auto_start is not None:
         node.auto_start = request.auto_start
@@ -457,7 +457,7 @@ async def update_node(
         node_id=node.node_id,
         node_type=node.node_type,
         description=node.description,
-        mcp_servers=node.mcp_servers,
+        config=node.config,
         auto_start=node.auto_start,
         status=status,  # Already retrieved, reuse it
         active_session_count=active_session_count,
@@ -693,7 +693,7 @@ async def start_node(
         node_id=node.node_id,
         node_type=node.node_type,
         description=node.description,
-        mcp_servers=node.mcp_servers,
+        config=node.config,
         auto_start=node.auto_start,
         status=node_status,
         active_session_count=active_session_count,
@@ -797,7 +797,7 @@ async def stop_node(
         node_id=node.node_id,
         node_type=node.node_type,
         description=node.description,
-        mcp_servers=node.mcp_servers,
+        config=node.config,
         auto_start=node.auto_start,
         status=node_status,
         active_session_count=active_session_count,

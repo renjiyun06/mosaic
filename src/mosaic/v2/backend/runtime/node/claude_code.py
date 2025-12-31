@@ -1,0 +1,1169 @@
+"""Claude Code node and session implementation"""
+import asyncio
+import json
+import logging
+from pathlib import Path
+from datetime import datetime
+from typing import Optional, Dict, Any, TYPE_CHECKING
+
+from claude_agent_sdk import (
+    ClaudeSDKClient,
+    ClaudeAgentOptions,
+    AssistantMessage,
+    ResultMessage,
+    TextBlock,
+    ThinkingBlock,
+    ToolUseBlock,
+    HookMatcher,
+    tool,
+    create_sdk_mcp_server
+)
+
+from ..mosaic_node import MosaicNode
+from ..mosaic_session import MosaicSession
+from ...enum import (
+    SessionStatus,
+    SessionMode,
+    SessionAlignment,
+    LLMModel,
+    EventType,
+    MessageRole,
+    MessageType
+)
+from ...exception import SessionNotFoundError, SessionConflictError
+
+if TYPE_CHECKING:
+    from ...model.node import Node
+    from ...model.session import Session
+
+logger = logging.getLogger(__name__)
+
+
+class ClaudeCodeNode(MosaicNode):
+    """
+    Claude Code node - manages Claude Agent SDK sessions.
+
+    This node type provides:
+    - Claude Agent SDK integration for AI coding assistance
+    - WebSocket-based real-time communication with frontend
+    - Database persistence for sessions and messages
+    - Event mesh integration for inter-node communication
+    - MCP tools for Mosaic-specific operations
+
+    Architecture:
+    - Each session runs independently with its own Claude SDK client
+    - Sessions can be in different modes (background/interactive)
+    - Events are published to the mesh for monitoring and collaboration
+    """
+
+    def __init__(
+        self,
+        node: 'Node',
+        node_path: Path,
+        mosaic_instance,
+        async_session_factory,
+        config: dict
+    ):
+        """
+        Initialize Claude Code node.
+
+        Args:
+            node: Node model object from database
+            node_path: Node working directory path
+            mosaic_instance: Parent MosaicInstance reference
+            async_session_factory: AsyncSession factory for database access
+            config: Configuration dict (must contain 'zmq')
+        """
+        super().__init__(node, node_path, mosaic_instance, async_session_factory, config)
+
+        # System prompt template (generated during startup, cached for all sessions)
+        # Contains {session_id} placeholder to be filled per session
+        self._system_prompt_template: Optional[str] = None
+
+        logger.info(
+            f"Initialized ClaudeCodeNode: node_id={node.node_id}, path={node_path}"
+        )
+
+    # ========== Lifecycle Hooks ==========
+
+    async def _on_start(self) -> None:
+        """
+        Node startup hook.
+
+        For Claude Code nodes, we generate the system prompt template during startup.
+        This template contains network topology and event definitions, and will be
+        cached for all sessions to avoid repeated database queries.
+        """
+        logger.info(f"ClaudeCodeNode {self.node.node_id} starting...")
+
+        # Generate system prompt template (with {session_id} placeholder)
+        from ..system_prompt import generate_system_prompt_template
+
+        self._system_prompt_template = await generate_system_prompt_template(
+            node=self.node,
+            mosaic_id=self.mosaic_instance.mosaic.id,
+            async_session_factory=self.async_session_factory
+        )
+
+        logger.info(
+            f"ClaudeCodeNode {self.node.node_id} started, "
+            f"system_prompt_length={len(self._system_prompt_template)}"
+        )
+
+    async def _on_stop(self) -> None:
+        """
+        Node cleanup hook.
+
+        For Claude Code nodes, all cleanup is session-level.
+        No node-level cleanup is needed - just log the shutdown.
+        """
+        logger.info(f"ClaudeCodeNode {self.node.node_id} stopped")
+
+    # ========== Session Management ==========
+
+    async def create_session(
+        self,
+        session_id: str,
+        config: Optional[Dict[str, Any]] = None
+    ) -> 'MosaicSession':
+        """
+        Create a Claude Code session.
+
+        This is an agent node, so sessions are persisted to database.
+
+        Strategy:
+        1. Check runtime conflict (self._sessions)
+        2. Check database conflict (if session_id already exists)
+        3. Create runtime session instance
+        4. Initialize session (starts worker task, connects to Claude SDK)
+        5. Register in self._sessions
+        6. Create database session record (only after successful initialization)
+
+        Args:
+            session_id: Session identifier (UUID string)
+            config: Session configuration (optional)
+                - mode: SessionMode value (BACKGROUND, PROGRAM, CHAT)
+                - model: LLMModel value (SONNET, OPUS, HAIKU)
+                - mcp_servers: Additional MCP server configurations
+
+        Returns:
+            ClaudeCodeSession instance
+
+        Raises:
+            SessionConflictError: If session already exists in runtime or database
+        """
+        logger.info(
+            f"Creating Claude Code session: session_id={session_id}, "
+            f"node_id={self.node.node_id}"
+        )
+
+        # 1. Check if session already exists in runtime
+        if session_id in self._sessions:
+            raise SessionConflictError(
+                f"Session {session_id} already exists in runtime for node {self.node.node_id}"
+            )
+
+        # 2. Check if session already exists in database
+        from ...model.session import Session
+        from sqlmodel import select
+
+        async with self.async_session_factory() as db_session:
+            stmt = select(Session).where(Session.session_id == session_id)
+            result = await db_session.execute(stmt)
+            db_session_obj = result.scalar_one_or_none()
+
+            if db_session_obj:
+                raise SessionConflictError(
+                    f"Session {session_id} already exists in database"
+                )
+
+        # 3. Create runtime session instance
+        session = ClaudeCodeSession(
+            session_id=session_id,
+            node=self,
+            async_session_factory=self.async_session_factory,
+            config=config or {}
+        )
+
+        # 4. Initialize session (starts worker task, connects to Claude SDK)
+        await session.initialize()
+
+        # 5. Register in session map
+        self._sessions[session_id] = session
+
+        # 6. Create database session record (only after successful initialization)
+        async with self.async_session_factory() as db_session:
+            db_session_obj = Session(
+                session_id=session_id,
+                user_id=self.node.user_id,
+                mosaic_id=self.mosaic_instance.mosaic.id,
+                node_id=self.node.node_id,
+                mode=session.mode,
+                model=session.model,
+                status=SessionStatus.ACTIVE
+            )
+            db_session.add(db_session_obj)
+            await db_session.commit()
+
+            logger.info(
+                f"Created database session: session_id={session_id}, "
+                f"status={SessionStatus.ACTIVE}"
+            )
+
+        logger.info(
+            f"Claude Code session created and initialized: session_id={session_id}"
+        )
+
+        return session
+
+    async def close_session(self, session_id: str) -> None:
+        """
+        Close a Claude Code session.
+
+        Updates database status and cleans up runtime resources.
+
+        Args:
+            session_id: Session identifier
+
+        Raises:
+            SessionNotFoundError: If session not found
+        """
+        logger.info(
+            f"Closing Claude Code session: session_id={session_id}, "
+            f"node_id={self.node.node_id}"
+        )
+
+        # Get session from map
+        session = self._sessions.get(session_id)
+        if not session:
+            raise SessionNotFoundError(
+                f"Session {session_id} not found in node {self.node.node_id}"
+            )
+
+        # Call session cleanup (stops worker, calls _on_close hook)
+        await session.close()
+
+        # Update database status to CLOSED
+        from ...model.session import Session
+
+        async with self.async_session_factory() as db_session:
+            from sqlmodel import select
+            stmt = select(Session).where(Session.session_id == session_id)
+            result = await db_session.execute(stmt)
+            db_session_obj = result.scalar_one_or_none()
+
+            if db_session_obj:
+                now = datetime.now()
+                db_session_obj.status = SessionStatus.CLOSED
+                db_session_obj.closed_at = now
+                db_session_obj.updated_at = now
+                await db_session.commit()
+
+                logger.debug(
+                    f"Updated database session status to CLOSED: session_id={session_id}"
+                )
+
+        # Unregister from session map
+        self._sessions.pop(session_id, None)
+
+        logger.info(f"Claude Code session closed: session_id={session_id}")
+
+    async def send_message(self, session_id: str, message: str) -> None:
+        """
+        Send a user message to a Claude Code session.
+
+        This is called from the API layer (WebSocket or FastAPI) when user sends a message.
+
+        Args:
+            session_id: Session identifier
+            message: User message content
+
+        Raises:
+            SessionNotFoundError: If session not found
+        """
+        session = self._sessions.get(session_id)
+        if not session:
+            raise SessionNotFoundError(
+                f"Session {session_id} not found in node {self.node.node_id}"
+            )
+
+        # Delegate to session's process_user_message method
+        await session.process_user_message(message)
+
+        logger.debug(
+            f"User message sent to session: session_id={session_id}, "
+            f"message_length={len(message)}"
+        )
+
+
+class ClaudeCodeSession(MosaicSession):
+    """
+    Claude Code session with Claude Agent SDK integration.
+
+    Key features:
+    - Integrates Claude Agent SDK for AI coding assistance
+    - Publishes events to the mesh for monitoring
+    - Persists messages to database
+    - Pushes real-time updates via WebSocket
+    - Provides MCP tools for Mosaic operations
+
+    Session lifecycle:
+    1. Creation: __init__ (runtime flags initialized)
+    2. Initialization: _on_initialize (Claude SDK setup, DB status update)
+    3. Processing: _handle_event (process incoming events)
+    4. Auto-close: _should_close_after_event (decide when to close)
+    5. Cleanup: _on_close (disconnect Claude SDK, publish session_end)
+    """
+
+    def __init__(
+        self,
+        session_id: str,
+        node: ClaudeCodeNode,
+        async_session_factory,
+        config: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Initialize Claude Code session.
+
+        Args:
+            session_id: Session identifier (UUID string)
+            node: Parent ClaudeCodeNode reference
+            async_session_factory: AsyncSession factory for database access
+            config: Session configuration
+        """
+        super().__init__(session_id, node, async_session_factory, config)
+
+        # Extract configuration
+        config = config or {}
+        self.mode = config.get("mode", SessionMode.BACKGROUND)
+        self.model = config.get("model", LLMModel.SONNET)
+        self.mcp_servers = config.get("mcp_servers", {})  # Additional MCP servers
+
+        # Claude SDK client (initialized in _on_initialize)
+        self._cc_client: Optional[ClaudeSDKClient] = None
+
+        # Statistics (in-memory, synced to DB on result)
+        self._total_cost_usd = 0.0
+        self._total_input_tokens = 0
+        self._total_output_tokens = 0
+
+        # Session state (in-memory, synced to DB)
+        self._message_count = 0
+        self._last_activity_at: Optional[datetime] = None
+
+        # Interrupt flag
+        self._is_interrupted = False
+
+        # Message sequence number (starts from 0, incremented for each message)
+        self._message_sequence = 0
+
+        logger.debug(
+            f"Initialized ClaudeCodeSession: session_id={session_id}, "
+            f"mode={self.mode}, model={self.model}"
+        )
+
+    # ========== Lifecycle Hooks ==========
+
+    async def _on_initialize(self):
+        """
+        Initialize Claude Code session resources.
+
+        Strategy:
+        1. Initialize all runtime resources (Claude SDK, system prompt, MCP servers)
+        2. Publish session_start event (all modes except PROGRAM)
+
+        Note:
+            Database session record is created in ClaudeCodeNode.create_session
+            before this method is called.
+        """
+        logger.info(
+            f"Initializing ClaudeCodeSession: session_id={self.session_id}, "
+            f"mode={self.mode}, model={self.model}"
+        )
+
+        # 1. Get system prompt from node template (fill in session_id placeholder)
+        system_prompt = self.node._system_prompt_template.format(
+            session_id=self.session_id
+        )
+
+        logger.debug(
+            f"System prompt ready for session {self.session_id}, "
+            f"length={len(system_prompt)}"
+        )
+
+        # 2. Configure MCP servers
+        mcp_servers = self.mcp_servers.copy()
+        mcp_servers["mosaic-mcp-server"] = self._create_mosaic_mcp_server()
+
+        # 3. Configure Claude SDK
+        cc_options = ClaudeAgentOptions(
+            model=self.model,
+            system_prompt={
+                "type": "preset",
+                "preset": "claude_code",
+                "append": system_prompt
+            },
+            cwd=str(self.node.node_path),
+            permission_mode="bypassPermissions",
+            hooks={
+                "PreToolUse": [
+                    HookMatcher(hooks=[self._pre_tool_use_hook])
+                ],
+            },
+            mcp_servers=mcp_servers,
+            allowed_tools=["*"],
+            setting_sources=["project"],
+            max_thinking_tokens=2000
+        )
+
+        # 4. Create and connect Claude SDK client
+        self._cc_client = ClaudeSDKClient(cc_options)
+        await self._cc_client.connect()
+
+        logger.debug(f"Claude SDK client connected: session_id={self.session_id}")
+
+        # 5. Publish session_start event (all modes except PROGRAM)
+        if self.mode != SessionMode.PROGRAM:
+            await self.node.send_event(
+                source_session_id=self.session_id,
+                event_type=EventType.SESSION_START,
+                payload={}
+                # target_node_id is None for broadcast
+            )
+
+            logger.info(
+                f"Published session_start event: session_id={self.session_id}"
+            )
+
+        logger.info(f"ClaudeCodeSession initialized: session_id={self.session_id}")
+
+    async def _handle_event(self, event: dict) -> None:
+        """
+        Handle an incoming event.
+
+        Event sources:
+        1. Internal events (USER_MESSAGE_EVENT): From process_user_message via queue
+        2. Network events: From Event Mesh via MosaicNode routing
+
+        Processing flow:
+        1. Format event to message string (via _format_event_for_claude)
+        2. Store and echo message to WebSocket (role depends on event type)
+        3. Publish user_prompt_submit event (if background mode)
+        4. Send to Claude SDK
+        5. Receive and forward Claude's response
+
+        Args:
+            event: Event data dict containing:
+                - event_type (str): Event type (required)
+                - payload (dict): Event-specific data (required)
+
+                For network events, also contains:
+                - event_id (str): Unique event identifier
+                - source_node_id (str): Source node
+                - source_session_id (str): Source session
+                - target_node_id (str): Target node (excluded from Claude message)
+                - target_session_id (str): Target session (excluded from Claude message)
+        """
+        event_type = event.get('event_type', 'UNKNOWN')
+
+        logger.debug(
+            f"Handling event: session_id={self.session_id}, event_type={event_type}"
+        )
+
+        # 1. Format event to message string
+        message = self._format_event_for_claude(event)
+
+        # 2. Determine message role and type based on event type
+        if event_type == EventType.USER_MESSAGE_EVENT:
+            # User message: role=user, type=user_message
+            role = MessageRole.USER
+            message_type = MessageType.USER_MESSAGE
+        else:
+            # Network events: role=system, type=system_message
+            role = MessageRole.SYSTEM
+            message_type = MessageType.SYSTEM_MESSAGE
+
+        # 3. Store to database and push to WebSocket
+        message_id, sequence, timestamp = await self._save_message_to_db(
+            role=role,
+            message_type=message_type,
+            payload={"message": message}
+        )
+        self._push_to_websocket(
+            role=role,
+            message_type=message_type,
+            message_id=message_id,
+            sequence=sequence,
+            timestamp=timestamp,
+            payload={"message": message}
+        )
+
+        # 4. Publish user_prompt_submit event (all modes except PROGRAM)
+        if self.mode != SessionMode.PROGRAM:
+            await self.node.send_event(
+                source_session_id=self.session_id,
+                event_type=EventType.USER_PROMPT_SUBMIT,
+                payload={"prompt": message}
+            )
+
+        # 5. Send to Claude SDK
+        logger.debug(f"Sending query to Claude: session_id={self.session_id}")
+        await self._cc_client.query(message)
+
+        # 6. Receive and forward Claude's response
+        stats = await self._receive_assistant_response()
+
+        # 7. Update session statistics
+        if stats:
+            self._total_cost_usd += stats["cost_usd"]
+            self._total_input_tokens += stats["input_tokens"]
+            self._total_output_tokens += stats["output_tokens"]
+
+            # Sync session state to database
+            await self._update_session_to_db()
+
+        # Reset interrupt flag
+        self._is_interrupted = False
+
+    async def _should_close_after_event(self, event: dict) -> bool:
+        """
+        Determine if session should close after processing an event.
+
+        Auto-close logic:
+        - CHAT/PROGRAM mode: Never auto-close (user controls lifecycle)
+        - BACKGROUND mode: Depends on connection's session_alignment strategy
+          - If no connection exists: Don't close
+          - If session_alignment is TASKING: Close after each event
+          - If session_alignment is MIRRORING: Close only when upstream session ends (SESSION_END event)
+
+        Args:
+            event: The event that was just processed
+
+        Returns:
+            True if session should close, False to continue
+        """
+        # Interactive/Program sessions don't auto-close
+        if self.mode in (SessionMode.CHAT, SessionMode.PROGRAM):
+            return False
+
+        # Background mode: Check connection configuration
+        event_type = event.get('event_type')
+
+        # Internal events (USER_MESSAGE_EVENT) don't trigger auto-close
+        if event_type == EventType.USER_MESSAGE_EVENT:
+            return False
+
+        from ...model.connection import Connection
+        from sqlmodel import select
+
+        # Get source_node_id from event
+        source_node_id = event.get('source_node_id')
+        if not source_node_id:
+            logger.warning(
+                f"Network event missing source_node_id: event_type={event_type}, "
+                f"session {self.session_id} will not auto-close"
+            )
+            return False
+
+        # Query connection from source_node to current node
+        async with self.async_session_factory() as db_session:
+            stmt = select(Connection).where(
+                Connection.mosaic_id == self.node.mosaic_instance.mosaic.id,
+                Connection.source_node_id == source_node_id,
+                Connection.target_node_id == self.node.node.node_id,
+                Connection.deleted_at.is_(None)
+            )
+            result = await db_session.execute(stmt)
+            connection = result.scalar_one_or_none()
+
+        # If no connection exists, don't auto-close
+        if not connection:
+            logger.debug(
+                f"No connection found from {source_node_id} to {self.node.node.node_id}, "
+                f"session {self.session_id} will not auto-close"
+            )
+            return False
+
+        # Check session alignment strategy
+        if connection.session_alignment == SessionAlignment.TASKING:
+            # TASKING: Close after each event (one session per task)
+            logger.info(
+                f"TASKING session {self.session_id} completed event, will auto-close"
+            )
+            return True
+
+        elif connection.session_alignment == SessionAlignment.MIRRORING:
+            # MIRRORING: Close only when upstream session ends
+            should_close = (event_type == EventType.SESSION_END)
+
+            if should_close:
+                logger.info(
+                    f"MIRRORING session {self.session_id} received SESSION_END, will auto-close"
+                )
+
+            return should_close
+
+        # Unknown alignment strategy, don't auto-close
+        logger.warning(
+            f"Unknown session_alignment {connection.session_alignment} for connection "
+            f"{source_node_id} -> {self.node.node.node_id}, session {self.session_id} will not auto-close"
+        )
+        return False
+
+    async def _on_close(self):
+        """
+        Clean up session resources.
+
+        Called after worker task is cancelled.
+        """
+        logger.info(f"Cleaning up ClaudeCodeSession: session_id={self.session_id}")
+
+        # Sync final session state to database
+        try:
+            await self._update_session_to_db()
+        except Exception as e:
+            logger.error(
+                f"Error updating session to DB during close: session_id={self.session_id}, error={e}",
+                exc_info=True
+            )
+
+        # Disconnect Claude SDK client
+        if self._cc_client:
+            try:
+                await self._cc_client.query("/exit")
+                async for _ in self._cc_client.receive_response():
+                    pass
+                await self._cc_client.disconnect()
+                logger.debug(f"Claude SDK client disconnected: session_id={self.session_id}")
+            except Exception as e:
+                logger.error(
+                    f"Error disconnecting Claude SDK: session_id={self.session_id}, error={e}",
+                    exc_info=True
+                )
+            self._cc_client = None
+
+        # Publish session_end event (all modes except PROGRAM)
+        if self.mode != SessionMode.PROGRAM:
+            try:
+                await self.node.send_event(
+                    source_session_id=self.session_id,
+                    event_type=EventType.SESSION_END,
+                    payload={}
+                )
+                logger.info(
+                    f"Published session_end event: session_id={self.session_id}"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Error publishing session_end event: {e}",
+                    exc_info=True
+                )
+
+        # Reset statistics and session state
+        self._total_cost_usd = 0.0
+        self._total_input_tokens = 0
+        self._total_output_tokens = 0
+        self._message_count = 0
+        self._last_activity_at = None
+
+        logger.info(f"ClaudeCodeSession cleanup complete: session_id={self.session_id}")
+
+    # ========== User Message Handling ==========
+
+    async def interrupt(self) -> None:
+        """
+        Interrupt current Claude operation.
+
+        This calls the Claude SDK interrupt method.
+        """
+        if self._cc_client:
+            await self._cc_client.interrupt()
+            self._is_interrupted = True
+            logger.info(f"Session {self.session_id} interrupted by user")
+        else:
+            logger.warning(
+                f"Cannot interrupt session {self.session_id}: Claude SDK not connected"
+            )
+
+    # ========== Claude SDK Processing ==========
+
+    async def process_user_message(self, message: str):
+        """
+        Enqueue a user message for processing.
+
+        This method wraps the user input into an internal event and enqueues it
+        to the session's event queue. The actual processing happens in _handle_event.
+
+        This method is called:
+        - From node.send_message (WebSocket/API entry point)
+
+        Args:
+            message: User input text
+        """
+        # Wrap message into internal event
+        event = {
+            "event_type": EventType.USER_MESSAGE_EVENT,
+            "payload": {"message": message}
+        }
+
+        # Enqueue for processing by worker loop
+        self.enqueue_event(event)
+
+        logger.debug(
+            f"User message enqueued: session_id={self.session_id}, "
+            f"message_length={len(message)}"
+        )
+
+    async def _receive_assistant_response(self) -> Optional[Dict[str, Any]]:
+        """
+        Receive Claude's response and forward to WebSocket.
+
+        Processes AssistantMessage and ResultMessage blocks:
+        - TextBlock -> assistant_text message
+        - ThinkingBlock -> assistant_thinking message
+        - ToolUseBlock -> assistant_tool_use message
+        - ResultMessage -> assistant_result message
+
+        Returns:
+            Statistics dict with cost_usd, input_tokens, output_tokens if ResultMessage received,
+            None otherwise
+        """
+        async for message in self._cc_client.receive_response():
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        message_id, sequence, timestamp = await self._save_message_to_db(
+                            role=MessageRole.ASSISTANT,
+                            message_type=MessageType.ASSISTANT_TEXT,
+                            payload={"message": block.text}
+                        )
+                        self._push_to_websocket(
+                            role=MessageRole.ASSISTANT,
+                            message_type=MessageType.ASSISTANT_TEXT,
+                            message_id=message_id,
+                            sequence=sequence,
+                            timestamp=timestamp,
+                            payload={"message": block.text}
+                        )
+
+                    elif isinstance(block, ThinkingBlock):
+                        message_id, sequence, timestamp = await self._save_message_to_db(
+                            role=MessageRole.ASSISTANT,
+                            message_type=MessageType.ASSISTANT_THINKING,
+                            payload={"message": block.thinking}
+                        )
+                        self._push_to_websocket(
+                            role=MessageRole.ASSISTANT,
+                            message_type=MessageType.ASSISTANT_THINKING,
+                            message_id=message_id,
+                            sequence=sequence,
+                            timestamp=timestamp,
+                            payload={"message": block.thinking}
+                        )
+
+                    elif isinstance(block, ToolUseBlock):
+                        message_id, sequence, timestamp = await self._save_message_to_db(
+                            role=MessageRole.ASSISTANT,
+                            message_type=MessageType.ASSISTANT_TOOL_USE,
+                            payload={
+                                "tool_name": block.name,
+                                "tool_input": block.input
+                            }
+                        )
+                        self._push_to_websocket(
+                            role=MessageRole.ASSISTANT,
+                            message_type=MessageType.ASSISTANT_TOOL_USE,
+                            message_id=message_id,
+                            sequence=sequence,
+                            timestamp=timestamp,
+                            payload={
+                                "tool_name": block.name,
+                                "tool_input": block.input
+                            }
+                        )
+
+            elif isinstance(message, ResultMessage):
+                # Collect statistics for return
+                cost_usd = message.total_cost_usd or 0.0
+                input_tokens = message.usage.get("input_tokens", 0)
+                output_tokens = message.usage.get("output_tokens", 0)
+
+                # Save result message to database and push to WebSocket
+                message_id, sequence, timestamp = await self._save_message_to_db(
+                    role=MessageRole.ASSISTANT,
+                    message_type=MessageType.ASSISTANT_RESULT,
+                    payload={
+                        "message": message.result,
+                        "total_cost_usd": self._total_cost_usd + cost_usd,
+                        "total_input_tokens": self._total_input_tokens + input_tokens,
+                        "total_output_tokens": self._total_output_tokens + output_tokens,
+                        "cost_usd": cost_usd,
+                        "usage": message.usage
+                    }
+                )
+                self._push_to_websocket(
+                    role=MessageRole.ASSISTANT,
+                    message_type=MessageType.ASSISTANT_RESULT,
+                    message_id=message_id,
+                    sequence=sequence,
+                    timestamp=timestamp,
+                    payload={
+                        "message": message.result,
+                        "total_cost_usd": self._total_cost_usd + cost_usd,
+                        "total_input_tokens": self._total_input_tokens + input_tokens,
+                        "total_output_tokens": self._total_output_tokens + output_tokens,
+                        "cost_usd": cost_usd,
+                        "usage": message.usage
+                    }
+                )
+
+                # Publish session_response event (all modes except PROGRAM, and not interrupted)
+                if self.mode != SessionMode.PROGRAM and not self._is_interrupted:
+                    await self.node.send_event(
+                        source_session_id=self.session_id,
+                        event_type=EventType.SESSION_RESPONSE,
+                        payload={"response": message.result}
+                    )
+
+                # Return statistics
+                return {
+                    "cost_usd": cost_usd,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens
+                }
+
+        # Return None if no ResultMessage received
+        return None
+
+    async def _save_message_to_db(
+        self,
+        role: MessageRole,
+        message_type: MessageType,
+        payload: dict
+    ) -> tuple[str, int, datetime]:
+        """
+        Save message to database.
+
+        This method performs:
+        1. Generate message ID and increment sequence number
+        2. Update in-memory session state (message count, last activity time)
+        3. Create message record in database
+
+        Args:
+            role: Message role enum
+            message_type: Message type enum
+            payload: Message payload dict (structure depends on message_type)
+
+        Returns:
+            Tuple of (message_id, sequence, timestamp)
+        """
+        import uuid
+        from ...model.message import Message
+
+        # 1. Generate message metadata
+        message_id = str(uuid.uuid4())
+        timestamp = datetime.now()
+
+        # 2. Increment sequence number and update session state
+        self._message_sequence += 1
+        sequence = self._message_sequence
+        self._message_count += 1
+        self._last_activity_at = timestamp
+
+        # 3. Save message to database
+        async with self.async_session_factory() as db_session:
+            db_message = Message(
+                message_id=message_id,
+                user_id=self.node.node.user_id,
+                mosaic_id=self.node.mosaic_instance.mosaic.id,
+                node_id=self.node.node.node_id,
+                session_id=self.session_id,
+                role=role,
+                message_type=message_type,
+                payload=payload,
+                sequence=sequence
+            )
+            db_session.add(db_message)
+            await db_session.commit()
+
+        logger.debug(
+            f"Message saved to database: session_id={self.session_id}, "
+            f"message_id={message_id}, type={message_type.value}, sequence={sequence}"
+        )
+
+        return message_id, sequence, timestamp
+
+    async def _update_session_to_db(self):
+        """
+        Update session record in database.
+
+        This method syncs in-memory session state to database:
+        - message_count: Total number of messages
+        - last_activity_at: Last activity timestamp
+        - total_input_tokens, total_output_tokens, total_cost_usd: Token/cost statistics
+        - updated_at: Current timestamp
+
+        This method should be called:
+        - After receiving ASSISTANT_RESULT (to update statistics)
+        - Periodically or at session close (to sync state)
+        """
+        from ...model.session import Session
+        from sqlmodel import select
+
+        async with self.async_session_factory() as db_session:
+            # Query session record
+            stmt = select(Session).where(Session.session_id == self.session_id)
+            result = await db_session.execute(stmt)
+            db_session_obj = result.scalar_one_or_none()
+
+            if db_session_obj:
+                # Update session state
+                db_session_obj.message_count = self._message_count
+                db_session_obj.last_activity_at = self._last_activity_at
+                db_session_obj.total_input_tokens = self._total_input_tokens
+                db_session_obj.total_output_tokens = self._total_output_tokens
+                db_session_obj.total_cost_usd = self._total_cost_usd
+                db_session_obj.updated_at = datetime.now()
+
+                await db_session.commit()
+
+                logger.debug(
+                    f"Session updated in database: session_id={self.session_id}, "
+                    f"message_count={self._message_count}, "
+                    f"total_cost={self._total_cost_usd:.4f}"
+                )
+            else:
+                logger.warning(
+                    f"Session record not found for update: session_id={self.session_id}"
+                )
+
+    def _push_to_websocket(
+        self,
+        role: MessageRole,
+        message_type: MessageType,
+        message_id: str,
+        sequence: int,
+        timestamp: datetime,
+        payload: dict
+    ):
+        """
+        Push message to WebSocket.
+
+        This method only handles WebSocket push, caller is responsible for:
+        - Saving message to database (_save_message_to_db)
+        - Updating session state (_update_session_to_db)
+
+        Args:
+            role: Message role enum
+            message_type: Message type enum
+            message_id: Message ID
+            sequence: Message sequence number
+            timestamp: Message timestamp
+            payload: Message payload dict
+
+        Note:
+            This method is called from worker thread (Loop B).
+            WebSocket push uses call_soon_threadsafe for thread-safe delivery.
+        """
+        ws_message = {
+            "session_id": self.session_id,
+            "role": role.value,
+            "message_type": message_type.value,
+            "message_id": message_id,
+            "sequence": sequence,
+            "timestamp": timestamp.isoformat(),
+            "payload": payload
+        }
+
+        # Get user ID and push via UserMessageBroker
+        user_id = self.node.node.user_id
+
+        from ...websocket import UserMessageBroker
+        user_message_broker = UserMessageBroker.get_instance()
+        user_message_broker.push_from_worker(user_id, ws_message)
+
+        logger.debug(
+            f"Message pushed to WebSocket: session_id={self.session_id}, "
+            f"user_id={user_id}, type={message_type.value}, sequence={sequence}"
+        )
+
+    # ========== MCP Tools and Hooks ==========
+
+    async def _pre_tool_use_hook(
+        self,
+        hook_input: Dict[str, Any],
+        tool_use_id: Optional[str],
+        context: Any
+    ):
+        """
+        Hook called before tool use.
+
+        Publishes pre_tool_use event in background mode.
+
+        Args:
+            hook_input: Tool use information
+            tool_use_id: Tool use ID
+            context: Hook context
+
+        Returns:
+            Hook response allowing tool use
+        """
+        if self.mode != SessionMode.PROGRAM:
+            await self.node.send_event(
+                source_session_id=self.session_id,
+                event_type=EventType.PRE_TOOL_USE,
+                payload={
+                    "tool_name": hook_input.get("tool_name"),
+                    "tool_input": hook_input.get("tool_input")
+                }
+            )
+
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "permissionDecisionReason": "",
+            }
+        }
+
+    def _create_mosaic_mcp_server(self):
+        """
+        Create Mosaic MCP server with tools for inter-node communication.
+
+        Provides:
+        - send_message: Send message to another node
+        - send_email: Send email via email node
+        """
+        @tool(
+            "send_message",
+            "Send a message to a node",
+            {
+                "target_node_id": str,
+                "message": str
+            }
+        )
+        async def send_message(args):
+            try:
+                target_node_id = args['target_node_id']
+                message = args['message']
+
+                await self.node.send_event(
+                    source_session_id=self.session_id,
+                    event_type=EventType.NODE_MESSAGE,
+                    payload={"message": message},
+                    target_node_id=target_node_id
+                )
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Successfully sent message to node {target_node_id}"
+                        }
+                    ]
+                }
+            except Exception as e:
+                logger.error(
+                    f"Failed to send message to node {target_node_id}: {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Failed to send message to node {target_node_id}: {str(e)}"
+                        }
+                    ]
+                }
+
+        @tool(
+            "send_email",
+            "Send email through the email node",
+            {
+                "email_node_id": str,
+                "to": str,
+                "subject": str,
+                "text": str
+            }
+        )
+        async def send_email(args):
+            try:
+                email_node_id = args['email_node_id']
+                to = args['to']
+                subject = args['subject']
+                text = args['text']
+
+                await self.node.send_event(
+                    source_session_id=self.session_id,
+                    event_type=EventType.EMAIL_MESSAGE,
+                    payload={
+                        "to": to,
+                        "subject": subject,
+                        "text": text
+                    },
+                    target_node_id=email_node_id
+                )
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Successfully sent email to {to}"
+                        }
+                    ]
+                }
+            except Exception as e:
+                logger.error(f"Failed to send email: {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Failed to send email: {str(e)}"
+                        }
+                    ]
+                }
+
+        return create_sdk_mcp_server(
+            name="mosaic-mcp-server",
+            tools=[send_message, send_email]
+        )
+
+    # ========== Helper Methods ==========
+
+    def _format_event_for_claude(self, event: dict) -> str:
+        """
+        Format an event for Claude.
+
+        For USER_MESSAGE_EVENT (internal):
+            - Extract and return the message content directly
+
+        For network events (from Event Mesh):
+            - Format as JSON following [Event Message Format] in system prompt
+            - Exclude target_node_id and target_session_id (receiver already knows)
+
+        Args:
+            event: Event dict
+
+        Returns:
+            Formatted message string
+        """
+        event_type = event.get("event_type")
+
+        # Internal event: User message (direct input)
+        if event_type == EventType.USER_MESSAGE_EVENT:
+            payload = event.get("payload", {})
+            return payload.get("message", "")
+
+        # Network events: Format as structured event
+        formatted_event = {
+            "event_id": event.get("event_id", "unknown"),
+            "event_type": event.get("event_type", "unknown"),
+            "source_node_id": event.get("source_node_id", "unknown"),
+            "source_session_id": event.get("source_session_id", "unknown"),
+            "payload": event.get("payload", {})
+        }
+
+        # Convert to formatted JSON string
+        message = f"[Event from Mosaic Event Mesh]\n{json.dumps(formatted_event, indent=2)}"
+
+        return message

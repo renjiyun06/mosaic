@@ -274,7 +274,7 @@ class MosaicSession(ABC):
                     )
 
                     # Check if session should close after this event (only when not already closing)
-                    if not self._should_close and self._should_close_after_event(event):
+                    if not self._should_close and await self._should_close_after_event(event):
                         logger.info(
                             f"Session should close after event: session_id={self.session_id}, "
                             f"event_type={event_type}"
@@ -414,7 +414,7 @@ class MosaicSession(ABC):
         pass
 
     @abstractmethod
-    def _should_close_after_event(self, event: dict) -> bool:
+    async def _should_close_after_event(self, event: dict) -> bool:
         """
         Determine if session should close after processing an event.
 
@@ -436,6 +436,8 @@ class MosaicSession(ABC):
             3. Worker loop continues (processes special events only)
 
             Actual close happens externally via command handler.
+
+            This method is async to support database queries (e.g., checking Connection table).
         """
         pass
 

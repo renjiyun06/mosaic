@@ -1,10 +1,10 @@
 """Mosaic instance runtime representation"""
 import asyncio
 import logging
-from typing import Dict, Optional, List, Any, TYPE_CHECKING
+from typing import Dict, Optional, List, Any, TYPE_CHECKING, Type
 from pathlib import Path
 
-from ..enum import MosaicStatus, NodeStatus
+from ..enum import MosaicStatus, NodeStatus, NodeType
 from ..exception import (
     MosaicAlreadyRunningError,
     MosaicNotRunningError,
@@ -30,6 +30,28 @@ if TYPE_CHECKING:
     from .mosaic_node import MosaicNode
 
 logger = logging.getLogger(__name__)
+
+
+# ========== Node Type Registry ==========
+
+def _get_node_type_registry() -> Dict[NodeType, Type['MosaicNode']]:
+    """
+    Get the node type to node class mapping.
+
+    This registry maps NodeType enum values to their corresponding
+    MosaicNode subclass implementations.
+
+    Returns:
+        Dictionary mapping NodeType to MosaicNode subclass
+
+    Note:
+        Imports are done inside the function to avoid circular dependencies.
+    """
+    from .node.claude_code import ClaudeCodeNode
+
+    return {
+        NodeType.CLAUDE_CODE: ClaudeCodeNode,
+    }
 
 
 class MosaicInstance:
@@ -521,15 +543,16 @@ class MosaicInstance:
 
         Steps:
         1. Check if node is already running (idempotent)
-        2. Create MosaicNode instance
-        3. Call mosaic_node.start()
-        4. Cache in self._nodes mapping
+        2. Lookup node class from registry based on node.node_type
+        3. Create MosaicNode subclass instance
+        4. Call mosaic_node.start()
+        5. Cache in self._nodes mapping
 
         Args:
             node: Node model object
 
         Raises:
-            RuntimeInternalError: If node startup fails
+            RuntimeInternalError: If node startup fails or node type is unknown
 
         Note:
             This method is called during mosaic startup (for auto_start nodes)
@@ -540,15 +563,28 @@ class MosaicInstance:
             logger.info(f"Node {node.node_id} already running, skipping")
             return
 
-        logger.info(f"Starting node: id={node.id}, node_id={node.node_id}")
+        logger.info(
+            f"Starting node: id={node.id}, node_id={node.node_id}, "
+            f"node_type={node.node_type}"
+        )
 
-        # 2. Create MosaicNode instance
-        from .mosaic_node import MosaicNode
+        # 2. Lookup node class from registry
+        node_type_registry = _get_node_type_registry()
+        node_class = node_type_registry.get(node.node_type)
 
+        if node_class is None:
+            raise RuntimeInternalError(
+                f"Unknown node type: {node.node_type}. "
+                f"Available types: {list(node_type_registry.keys())}"
+            )
+
+        logger.debug(f"Using node class: {node_class.__name__}")
+
+        # 3. Create MosaicNode subclass instance
         # Compute node working directory path
         node_path = self.mosaic_path / str(node.id)
 
-        mosaic_node = MosaicNode(
+        mosaic_node = node_class(
             node=node,
             node_path=node_path,
             mosaic_instance=self,
@@ -556,14 +592,14 @@ class MosaicInstance:
             config=self.config
         )
 
-        # 3. Start the node
+        # 4. Start the node
         try:
             await mosaic_node.start()
         except Exception as e:
             logger.error(f"Failed to start node {node.node_id}: {e}")
             raise RuntimeInternalError(f"Node startup failed: {e}") from e
 
-        # 4. Cache in mapping
+        # 5. Cache in mapping
         self._nodes[node.id] = mosaic_node
 
         logger.info(f"Node started: node_id={node.node_id}")

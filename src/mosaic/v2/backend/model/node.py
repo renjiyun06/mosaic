@@ -26,10 +26,10 @@ class Node(BaseModel, table=True):
     node_id: str = Field(max_length=100, index=True, description="Unique node identifier within mosaic")
     node_type: NodeType = Field(description="Node type")
     description: str | None = Field(default=None, max_length=1000, description="Node description")
-    mcp_servers: dict = Field(
+    config: dict = Field(
         default_factory=dict,
         sa_column=Column(JSON),
-        description="MCP servers configuration (JSON object)"
+        description="Node configuration (JSON object, node-type-specific)"
     )
     auto_start: bool = Field(default=False, description="Auto-start when mosaic starts")
 

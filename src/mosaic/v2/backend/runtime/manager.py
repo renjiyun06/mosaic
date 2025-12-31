@@ -712,6 +712,10 @@ class RuntimeManager:
             'model': model
         }
 
+        # Add mcp_servers from node config if present
+        if node.config and 'mcp_servers' in node.config:
+            config['mcp_servers'] = node.config['mcp_servers']
+
         # Create CreateSessionCommand
         command = CreateSessionCommand(
             node=node,
@@ -746,7 +750,7 @@ class RuntimeManager:
             This is a non-blocking operation. Use this for user message submission.
             FastAPI layer must validate node and session existence/permissions before calling.
         """
-        logger.info(
+        logger.debug(
             f"Submitting message for session: session_id={session.session_id}, "
             f"node_id={node.node_id}, message_length={len(message)}"
         )
@@ -754,11 +758,12 @@ class RuntimeManager:
         # Import command here to avoid circular import
         from .command import SendMessageCommand
 
-        # Create SendMessageCommand
+        # Create SendMessageCommand (no future needed, fire-and-forget)
         command = SendMessageCommand(
             node=node,
             session=session,
-            message=message
+            message=message,
+            future=None  # Don't wait for result
         )
 
         # Submit command without waiting (fire-and-forget)

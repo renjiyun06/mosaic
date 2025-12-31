@@ -30,10 +30,10 @@ class CreateNodeRequest(BaseModel):
         description="Node description",
         examples=["A scheduler node that triggers daily tasks"]
     )
-    mcp_servers: dict | None = Field(
+    config: dict | None = Field(
         None,
-        description="MCP servers configuration (JSON object)",
-        examples=[{"chroma": {"url": "http://localhost:8001"}}]
+        description="Node configuration (JSON object, node-type-specific)",
+        examples=[{"mcp_servers": {"chroma": {"url": "http://localhost:8001"}}}]
     )
     auto_start: bool = Field(
         False,
@@ -51,10 +51,10 @@ class UpdateNodeRequest(BaseModel):
         description="New node description",
         examples=["Updated description"]
     )
-    mcp_servers: dict | None = Field(
+    config: dict | None = Field(
         None,
-        description="New MCP servers configuration",
-        examples=[{"chroma": {"url": "http://localhost:8002"}}]
+        description="New node configuration (JSON object, node-type-specific)",
+        examples=[{"mcp_servers": {"chroma": {"url": "http://localhost:8002"}}}]
     )
     auto_start: bool | None = Field(
         None,
@@ -74,7 +74,7 @@ class NodeOut(BaseModel):
     node_id: str = Field(..., description="Unique node identifier within mosaic")
     node_type: NodeType = Field(..., description="Node type")
     description: str | None = Field(None, description="Node description")
-    mcp_servers: dict = Field(..., description="MCP servers configuration")
+    config: dict = Field(..., description="Node configuration (JSON object, node-type-specific)")
     auto_start: bool = Field(..., description="Auto-start when mosaic starts")
     status: NodeStatus = Field(..., description="Node runtime status")
     active_session_count: int = Field(..., description="Number of active sessions")
