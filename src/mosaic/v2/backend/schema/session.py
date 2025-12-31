@@ -15,14 +15,9 @@ class CreateSessionRequest(BaseModel):
 
     Note:
         - Only 'program' and 'chat' modes are allowed (background sessions are event-triggered)
-        - node_id must exist in the specified mosaic
+        - node_id is specified in the URL path parameter
         - model defaults to SONNET if not provided
     """
-    node_id: str = Field(
-        ...,
-        max_length=100,
-        description="Node ID where the session will run"
-    )
     mode: SessionMode = Field(
         ...,
         description="Session mode: 'program' (instruction/guidance) or 'chat' (interactive)"
