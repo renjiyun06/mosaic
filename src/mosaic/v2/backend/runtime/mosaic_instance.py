@@ -111,7 +111,7 @@ class MosaicInstance:
 
         logger.info(
             f"MosaicInstance initialized: id={mosaic.id}, "
-            f"mosaic_id={mosaic.mosaic_id}, path={mosaic_path}"
+            f"name={mosaic.name}, path={mosaic_path}"
         )
 
     # ========== Lifecycle Methods ==========
@@ -137,11 +137,11 @@ class MosaicInstance:
         """
         if self._status != MosaicStatus.STOPPED:
             raise MosaicAlreadyRunningError(
-                f"Mosaic {self.mosaic.mosaic_id} is already running"
+                f"Mosaic {self.mosaic.name} is already running"
             )
 
         logger.info(
-            f"Starting mosaic: id={self.mosaic.id}, mosaic_id={self.mosaic.mosaic_id}"
+            f"Starting mosaic: id={self.mosaic.id}, name={self.mosaic.name}"
         )
 
         try:
@@ -311,7 +311,7 @@ class MosaicInstance:
         if not isinstance(command, StopMosaicCommand):
             if self._status != MosaicStatus.RUNNING:
                 raise MosaicNotRunningError(
-                    f"Mosaic {self.mosaic.mosaic_id} is not running"
+                    f"Mosaic {self.mosaic.name} is not running"
                 )
 
         # Dispatch by command type
@@ -360,11 +360,11 @@ class MosaicInstance:
         """
         # 1. Check if already stopped (idempotent)
         if self._status == MosaicStatus.STOPPED:
-            logger.info(f"Mosaic {self.mosaic.mosaic_id} already stopped")
+            logger.info(f"Mosaic {self.mosaic.name} already stopped")
             return
 
         logger.info(
-            f"Stopping mosaic: id={self.mosaic.id}, mosaic_id={self.mosaic.mosaic_id}"
+            f"Stopping mosaic: id={self.mosaic.id}, name={self.mosaic.name}"
         )
 
         # 2. Set status to STOPPED (command loop will exit after this command completes)
@@ -646,7 +646,7 @@ class MosaicInstance:
         """
         if node.id not in self._nodes:
             raise NodeNotFoundError(
-                f"Node {node.node_id} is not running in mosaic {self.mosaic.mosaic_id}"
+                f"Node {node.node_id} is not running in mosaic {self.mosaic.name}"
             )
         return self._nodes[node.id]
 

@@ -132,8 +132,8 @@ class CreateSessionCommand(Command):
         session_id: Session identifier (required)
         config: Session configuration (optional, subclass-specific, e.g., mode/model for agent nodes)
     """
-    node: 'Node'
-    session_id: str
+    node: 'Node' = None
+    session_id: str = None
     config: Optional[Dict[str, Any]] = None
 
 
@@ -149,9 +149,9 @@ class SendMessageCommand(Command):
         session: Session model object (required)
         message: User message content (required)
     """
-    node: 'Node'
-    session: 'Session'
-    message: str
+    node: 'Node' = None
+    session: 'Session' = None
+    message: str = None
 
 
 @dataclass
@@ -165,8 +165,8 @@ class InterruptSessionCommand(Command):
         node: Node model object (required)
         session: Session model object (required)
     """
-    node: 'Node'
-    session: 'Session'
+    node: 'Node' = None
+    session: 'Session' = None
 
 
 @dataclass
@@ -183,5 +183,5 @@ class CloseSessionCommand(Command):
         node: Node model object (required)
         session: Session model object (required)
     """
-    node: 'Node'
-    session: 'Session'
+    node: 'Node' = None
+    session: 'Session' = None

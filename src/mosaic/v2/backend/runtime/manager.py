@@ -369,7 +369,7 @@ class RuntimeManager:
             FastAPI layer must also compute and provide mosaic_path.
         """
         logger.info(
-            f"Starting mosaic: id={mosaic.id}, mosaic_id={mosaic.mosaic_id}, "
+            f"Starting mosaic: id={mosaic.id}, name={mosaic.name}, "
             f"path={mosaic_path}"
         )
 
@@ -433,7 +433,7 @@ class RuntimeManager:
         )
 
         logger.debug(
-            f"Created MosaicInstance for mosaic_id={mosaic.mosaic_id} "
+            f"Created MosaicInstance for mosaic name={mosaic.name} "
             f"in thread={thread.name}, path={mosaic_path}"
         )
 
@@ -456,13 +456,13 @@ class RuntimeManager:
             # This will re-raise any exception from the background task
             await startup_task
             logger.info(
-                f"Mosaic started successfully: id={mosaic.id}, mosaic_id={mosaic.mosaic_id} "
+                f"Mosaic started successfully: id={mosaic.id}, name={mosaic.name} "
                 f"in thread={thread.name}"
             )
         else:
             # Timeout - task is still running in background
             logger.error(
-                f"Mosaic startup timeout: id={mosaic.id}, mosaic_id={mosaic.mosaic_id} "
+                f"Mosaic startup timeout: id={mosaic.id}, name={mosaic.name} "
                 f"after {timeout}s. Background task will continue and handle completion."
             )
             raise RuntimeTimeoutError(
@@ -492,7 +492,7 @@ class RuntimeManager:
             Session cleanup (database + WebSocket) should be done BEFORE calling this.
             FastAPI layer must validate mosaic existence and permissions before calling.
         """
-        logger.info(f"Stopping mosaic: id={mosaic.id}, mosaic_id={mosaic.mosaic_id}")
+        logger.info(f"Stopping mosaic: id={mosaic.id}, name={mosaic.name}")
 
         # Import command here to avoid circular import
         from .command import StopMosaicCommand
@@ -507,7 +507,7 @@ class RuntimeManager:
         with self._mosaic_instances_lock:
             self._mosaic_instances.pop(mosaic.id, None)
 
-        logger.info(f"Mosaic stopped successfully: id={mosaic.id}, mosaic_id={mosaic.mosaic_id}")
+        logger.info(f"Mosaic stopped successfully: id={mosaic.id}, name={mosaic.name}")
 
     async def get_mosaic_status(self, mosaic: 'Mosaic') -> MosaicStatus:
         """

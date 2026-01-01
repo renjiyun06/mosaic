@@ -479,16 +479,14 @@ async def start_mosaic(
 
     Business logic:
     1. Query mosaic and verify ownership
-    2. Validate mosaic has at least one node
-    3. Start runtime components via RuntimeManager
-    4. Return mosaic information
+    2. Start runtime components via RuntimeManager
+    3. Return mosaic information
 
     Note: This operation is idempotent (starting an already-running mosaic succeeds)
 
     Raises:
         NotFoundError: Mosaic not found or deleted
         PermissionError: Current user is not the owner
-        ValidationError: Mosaic has no nodes (cannot start empty mosaic)
     """
     logger.info(f"Starting mosaic: id={mosaic_id}, user_id={current_user.id}")
 
@@ -519,30 +517,15 @@ async def start_mosaic(
     if status == MosaicStatus.RUNNING:
         logger.info(f"Mosaic already running: id={mosaic_id}")
     else:
-        # 3. Validate mosaic has at least one node
-        node_count_stmt = select(func.count(Node.id)).where(
-            Node.mosaic_id == mosaic.id,
-            Node.deleted_at.is_(None)
-        )
-        node_count_result = await session.execute(node_count_stmt)
-        node_count = node_count_result.scalar() or 0
-
-        if node_count == 0:
-            logger.warning(f"Cannot start empty mosaic: id={mosaic_id}")
-            raise ValidationError(
-                "Cannot start mosaic with no nodes. Please add at least one node first."
-            )
-
-        # 4. Compute mosaic path
+        # 3. Compute mosaic path
         instance_path = req.app.state.instance_path
         mosaic_path = instance_path / "users" / str(current_user.id) / str(mosaic.id)
 
-        # 5. Start runtime mosaic instance
+        # 4. Start runtime mosaic instance
         await runtime_manager.start_mosaic(mosaic, mosaic_path, timeout=30.0)
         logger.info(f"Mosaic started successfully: id={mosaic_id}")
 
-    # 6. Get statistics for response
-    # Recount nodes (already done above, but for consistency)
+    # 5. Get statistics for response
     node_count_stmt = select(func.count(Node.id)).where(
         Node.mosaic_id == mosaic.id,
         Node.deleted_at.is_(None)
@@ -558,7 +541,7 @@ async def start_mosaic(
     session_count_result = await session.execute(session_count_stmt)
     active_session_count = session_count_result.scalar() or 0
 
-    # 7. Construct response
+    # 6. Construct response
     mosaic_out = MosaicOut(
         id=mosaic.id,
         user_id=mosaic.user_id,

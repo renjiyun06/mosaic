@@ -72,7 +72,7 @@ class ApiClient {
       body: data,
       auth: false,
       autoToast: {
-        success: '验证码已发送到您的邮箱',
+        success: false,
         error: true
       }
     })
@@ -88,7 +88,7 @@ class ApiClient {
       auth: false,
       context: 'auth.register',
       autoToast: {
-        success: '注册成功',
+        success: false,
         error: true
       }
     })
@@ -158,7 +158,7 @@ class ApiClient {
       method: 'POST',
       body: data,
       autoToast: {
-        success: `Mosaic "${data.name}" 创建成功`,
+        success: false,
         error: true
       }
     })
@@ -193,10 +193,10 @@ class ApiClient {
    */
   async updateMosaic(mosaicId: number, data: UpdateMosaicRequest): Promise<MosaicOut> {
     return request<MosaicOut>(`/api/mosaics/${mosaicId}`, {
-      method: 'PUT',
+      method: 'PATCH',
       body: data,
       autoToast: {
-        success: 'Mosaic 更新成功',
+        success: false,
         error: true
       }
     })
@@ -205,12 +205,12 @@ class ApiClient {
   /**
    * Delete a mosaic instance
    */
-  async deleteMosaic(mosaicId: number): Promise<{ message: string }> {
-    return request<{ message: string }>(`/api/mosaics/${mosaicId}`, {
+  async deleteMosaic(mosaicId: number): Promise<null> {
+    return request<null>(`/api/mosaics/${mosaicId}`, {
       method: 'DELETE',
       context: 'mosaic.delete',
       autoToast: {
-        success: 'Mosaic 删除成功',
+        success: false,
         error: true
       }
     })
@@ -224,7 +224,7 @@ class ApiClient {
       method: 'POST',
       context: 'mosaic.start',
       autoToast: {
-        success: 'Mosaic 启动成功',
+        success: false,
         error: true
       }
     })
@@ -238,7 +238,7 @@ class ApiClient {
       method: 'POST',
       context: 'mosaic.stop',
       autoToast: {
-        success: 'Mosaic 停止成功',
+        success: false,
         error: true
       }
     })
@@ -256,7 +256,7 @@ class ApiClient {
       method: 'POST',
       body: data,
       autoToast: {
-        success: `节点 "${data.node_id}" 创建成功`,
+        success: false,
         error: true
       }
     })
@@ -291,10 +291,10 @@ class ApiClient {
    */
   async updateNode(mosaicId: number, nodeId: string, data: UpdateNodeRequest): Promise<NodeOut> {
     return request<NodeOut>(`/api/mosaics/${mosaicId}/nodes/${nodeId}`, {
-      method: 'PUT',
+      method: 'PATCH',
       body: data,
       autoToast: {
-        success: '节点更新成功',
+        success: false,
         error: true
       }
     })
@@ -303,12 +303,12 @@ class ApiClient {
   /**
    * Delete a node
    */
-  async deleteNode(mosaicId: number, nodeId: string): Promise<{ message: string }> {
-    return request<{ message: string }>(`/api/mosaics/${mosaicId}/nodes/${nodeId}`, {
+  async deleteNode(mosaicId: number, nodeId: string): Promise<null> {
+    return request<null>(`/api/mosaics/${mosaicId}/nodes/${nodeId}`, {
       method: 'DELETE',
       context: 'node.delete',
       autoToast: {
-        success: '节点删除成功',
+        success: false,
         error: true
       }
     })
@@ -322,7 +322,7 @@ class ApiClient {
       method: 'POST',
       context: 'node.start',
       autoToast: {
-        success: '节点启动成功',
+        success: false,
         error: true
       }
     })
@@ -336,7 +336,7 @@ class ApiClient {
       method: 'POST',
       context: 'node.stop',
       autoToast: {
-        success: '节点停止成功',
+        success: false,
         error: true
       }
     })
@@ -349,7 +349,7 @@ class ApiClient {
     return request<NodeOut>(`/api/mosaics/${mosaicId}/nodes/${nodeId}/restart`, {
       method: 'POST',
       autoToast: {
-        success: '节点重启成功',
+        success: false,
         error: true
       }
     })
@@ -367,7 +367,7 @@ class ApiClient {
       method: 'POST',
       body: data,
       autoToast: {
-        success: `连接 "${data.source_node_id} -> ${data.target_node_id}" 创建成功`,
+        success: false,
         error: true
       }
     })
@@ -406,10 +406,10 @@ class ApiClient {
     data: UpdateConnectionRequest
   ): Promise<ConnectionOut> {
     return request<ConnectionOut>(`/api/mosaics/${mosaicId}/connections/${connectionId}`, {
-      method: 'PUT',
+      method: 'PATCH',
       body: data,
       autoToast: {
-        success: '连接更新成功',
+        success: false,
         error: true
       }
     })
@@ -418,11 +418,11 @@ class ApiClient {
   /**
    * Delete a connection
    */
-  async deleteConnection(mosaicId: number, connectionId: number): Promise<{ message: string }> {
-    return request<{ message: string }>(`/api/mosaics/${mosaicId}/connections/${connectionId}`, {
+  async deleteConnection(mosaicId: number, connectionId: number): Promise<null> {
+    return request<null>(`/api/mosaics/${mosaicId}/connections/${connectionId}`, {
       method: 'DELETE',
       autoToast: {
-        success: '连接删除成功',
+        success: false,
         error: true
       }
     })
@@ -440,7 +440,7 @@ class ApiClient {
       method: 'POST',
       body: data,
       autoToast: {
-        success: '订阅创建成功',
+        success: false,
         error: true
       }
     })
@@ -479,10 +479,10 @@ class ApiClient {
     data: UpdateSubscriptionRequest
   ): Promise<SubscriptionOut> {
     return request<SubscriptionOut>(`/api/mosaics/${mosaicId}/subscriptions/${subscriptionId}`, {
-      method: 'PUT',
+      method: 'PATCH',
       body: data,
       autoToast: {
-        success: '订阅更新成功',
+        success: false,
         error: true
       }
     })
@@ -491,11 +491,11 @@ class ApiClient {
   /**
    * Delete a subscription
    */
-  async deleteSubscription(mosaicId: number, subscriptionId: number): Promise<{ message: string }> {
-    return request<{ message: string }>(`/api/mosaics/${mosaicId}/subscriptions/${subscriptionId}`, {
+  async deleteSubscription(mosaicId: number, subscriptionId: number): Promise<null> {
+    return request<null>(`/api/mosaics/${mosaicId}/subscriptions/${subscriptionId}`, {
       method: 'DELETE',
       autoToast: {
-        success: '订阅删除成功',
+        success: false,
         error: true
       }
     })
@@ -514,7 +514,7 @@ class ApiClient {
       body: data,
       context: 'session.create',
       autoToast: {
-        success: '会话创建成功',
+        success: false,
         error: true
       }
     })
@@ -528,7 +528,7 @@ class ApiClient {
       method: 'POST',
       context: 'session.close',
       autoToast: {
-        success: '会话已关闭',
+        success: false,
         error: true
       }
     })
@@ -541,7 +541,7 @@ class ApiClient {
     return request<SessionOut>(`/api/mosaics/${mosaicId}/nodes/${nodeId}/sessions/${sessionId}/archive`, {
       method: 'POST',
       autoToast: {
-        success: '会话已归档',
+        success: false,
         error: true
       }
     })
