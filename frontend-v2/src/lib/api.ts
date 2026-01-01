@@ -123,11 +123,26 @@ class ApiClient {
   }
 
   /**
-   * Logout (clear token on client side)
+   * Logout current user
    */
-  logout(): void {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('auth_token')
+  async logout(): Promise<void> {
+    try {
+      // Call backend logout endpoint
+      await request<null>('/api/auth/logout', {
+        method: 'POST',
+        autoToast: {
+          success: false,
+          error: false
+        }
+      })
+    } catch (error) {
+      // Ignore logout errors - we'll clear token anyway
+      console.error('Logout error:', error)
+    } finally {
+      // Always clear token from localStorage
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('auth_token')
+      }
     }
   }
 
