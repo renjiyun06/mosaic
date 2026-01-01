@@ -61,3 +61,49 @@ class MosaicOut(BaseModel):
 
     class Config:
         from_attributes = True  # Enable ORM mode
+
+
+# ==================== Topology Schemas ====================
+
+class TopologyNodeOut(BaseModel):
+    """Simplified node data for topology visualization"""
+
+    node_id: str = Field(..., description="Unique node identifier within mosaic")
+    node_type: str = Field(..., description="Node type")
+    config: dict | None = Field(None, description="Node configuration (for display purposes)")
+
+    class Config:
+        from_attributes = True
+
+
+class TopologyConnectionOut(BaseModel):
+    """Simplified connection data for topology visualization"""
+
+    source_node_id: str = Field(..., description="Source node identifier")
+    target_node_id: str = Field(..., description="Target node identifier")
+    session_alignment: str = Field(..., description="Session alignment strategy")
+
+    class Config:
+        from_attributes = True
+
+
+class TopologySubscriptionOut(BaseModel):
+    """Simplified subscription data for topology visualization"""
+
+    source_node_id: str = Field(..., description="Source node identifier")
+    target_node_id: str = Field(..., description="Target node identifier")
+    event_type: str = Field(..., description="Event type subscribed to")
+
+    class Config:
+        from_attributes = True
+
+
+class TopologyOut(BaseModel):
+    """Complete topology data for a mosaic"""
+
+    nodes: list[TopologyNodeOut] = Field(..., description="List of nodes in the mosaic")
+    connections: list[TopologyConnectionOut] = Field(..., description="List of connections between nodes")
+    subscriptions: list[TopologySubscriptionOut] = Field(..., description="List of event subscriptions")
+
+    class Config:
+        from_attributes = True

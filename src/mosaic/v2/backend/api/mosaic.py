@@ -14,8 +14,12 @@ from ..schema.mosaic import (
     CreateMosaicRequest,
     UpdateMosaicRequest,
     MosaicOut,
+    TopologyOut,
+    TopologyNodeOut,
+    TopologyConnectionOut,
+    TopologySubscriptionOut,
 )
-from ..model import Mosaic, Node, Session
+from ..model import Mosaic, Node, Session, Connection, Subscription
 from ..dep import get_db_session, get_current_user
 from ..model.user import User
 from ..exception import ConflictError, NotFoundError, PermissionError, ValidationError, InternalError
@@ -639,3 +643,114 @@ async def stop_mosaic(
     )
 
     return SuccessResponse(data=mosaic_out)
+
+
+@router.get("/{mosaic_id}/topology", response_model=SuccessResponse[TopologyOut])
+async def get_topology(
+    mosaic_id: int,
+    session: SessionDep,
+    current_user: CurrentUserDep,
+):
+    """Get topology data for visualization
+
+    Business logic:
+    1. Verify mosaic exists and user has permission
+    2. Query all non-deleted nodes for this mosaic
+    3. Query all non-deleted connections for this mosaic
+    4. Query all non-deleted subscriptions for this mosaic
+    5. Return simplified data for frontend visualization
+
+    Raises:
+        NotFoundError: Mosaic not found or deleted
+        PermissionError: Current user is not the owner
+    """
+    logger.info(f"Getting topology: mosaic_id={mosaic_id}, user_id={current_user.id}")
+
+    # 1. Verify mosaic exists and ownership
+    stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    result = await session.execute(stmt)
+    mosaic = result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Query all nodes
+    nodes_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.deleted_at.is_(None)
+    ).order_by(Node.created_at.asc())
+
+    nodes_result = await session.execute(nodes_stmt)
+    nodes = nodes_result.scalars().all()
+
+    # 3. Query all connections
+    connections_stmt = select(Connection).where(
+        Connection.mosaic_id == mosaic_id,
+        Connection.deleted_at.is_(None)
+    ).order_by(Connection.created_at.asc())
+
+    connections_result = await session.execute(connections_stmt)
+    connections = connections_result.scalars().all()
+
+    # 4. Query all subscriptions
+    subscriptions_stmt = select(Subscription).where(
+        Subscription.mosaic_id == mosaic_id,
+        Subscription.deleted_at.is_(None)
+    ).order_by(Subscription.created_at.asc())
+
+    subscriptions_result = await session.execute(subscriptions_stmt)
+    subscriptions = subscriptions_result.scalars().all()
+
+    # 5. Build topology output
+    topology_nodes = [
+        TopologyNodeOut(
+            node_id=node.node_id,
+            node_type=node.node_type.value,  # Convert enum to string
+            config=node.config
+        )
+        for node in nodes
+    ]
+
+    topology_connections = [
+        TopologyConnectionOut(
+            source_node_id=conn.source_node_id,
+            target_node_id=conn.target_node_id,
+            session_alignment=conn.session_alignment.value  # Convert enum to string
+        )
+        for conn in connections
+    ]
+
+    topology_subscriptions = [
+        TopologySubscriptionOut(
+            source_node_id=sub.source_node_id,
+            target_node_id=sub.target_node_id,
+            event_type=sub.event_type.value  # Convert enum to string
+        )
+        for sub in subscriptions
+    ]
+
+    topology_out = TopologyOut(
+        nodes=topology_nodes,
+        connections=topology_connections,
+        subscriptions=topology_subscriptions
+    )
+
+    logger.info(
+        f"Topology retrieved: mosaic_id={mosaic_id}, "
+        f"nodes={len(topology_nodes)}, "
+        f"connections={len(topology_connections)}, "
+        f"subscriptions={len(topology_subscriptions)}"
+    )
+
+    return SuccessResponse(data=topology_out)

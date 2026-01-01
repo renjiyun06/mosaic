@@ -228,7 +228,7 @@ function HomePage() {
           ) : (
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {mosaics.map((mosaic) => (
-                <Link key={mosaic.id} href={`/mosaic/${mosaic.id}/nodes`}>
+                <Link key={mosaic.id} href={`/mosaic/${mosaic.id}/topology`}>
                   <Card className="h-full transition-all hover:shadow-lg hover:border-primary/50">
                     <CardHeader>
                       <div className="flex items-start justify-between">

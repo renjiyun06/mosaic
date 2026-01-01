@@ -21,6 +21,7 @@ import type {
   CreateMosaicRequest,
   UpdateMosaicRequest,
   MosaicOut,
+  TopologyOut,
 
   // Node types
   CreateNodeRequest,
@@ -244,6 +245,18 @@ class ApiClient {
     })
   }
 
+  /**
+   * Get topology data for visualization
+   */
+  async getTopology(mosaicId: number): Promise<TopologyOut> {
+    return request<TopologyOut>(`/api/mosaics/${mosaicId}/topology`, {
+      autoToast: {
+        success: false,
+        error: true
+      }
+    })
+  }
+
   // ========================================================================
   // Node Management API
   // ========================================================================
@@ -335,19 +348,6 @@ class ApiClient {
     return request<NodeOut>(`/api/mosaics/${mosaicId}/nodes/${nodeId}/stop`, {
       method: 'POST',
       context: 'node.stop',
-      autoToast: {
-        success: false,
-        error: true
-      }
-    })
-  }
-
-  /**
-   * Restart a node
-   */
-  async restartNode(mosaicId: number, nodeId: string): Promise<NodeOut> {
-    return request<NodeOut>(`/api/mosaics/${mosaicId}/nodes/${nodeId}/restart`, {
-      method: 'POST',
       autoToast: {
         success: false,
         error: true

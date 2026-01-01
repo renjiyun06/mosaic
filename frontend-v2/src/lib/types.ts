@@ -166,6 +166,32 @@ export interface MosaicOut {
   updated_at: string
 }
 
+// ==================== Topology Types ====================
+
+export interface TopologyNodeOut {
+  node_id: string
+  node_type: string
+  config: Record<string, any> | null
+}
+
+export interface TopologyConnectionOut {
+  source_node_id: string
+  target_node_id: string
+  session_alignment: string
+}
+
+export interface TopologySubscriptionOut {
+  source_node_id: string
+  target_node_id: string
+  event_type: string
+}
+
+export interface TopologyOut {
+  nodes: TopologyNodeOut[]
+  connections: TopologyConnectionOut[]
+  subscriptions: TopologySubscriptionOut[]
+}
+
 // ==================== Node Types ====================
 
 export interface CreateNodeRequest {
