@@ -230,9 +230,6 @@ export default function TopologyPage() {
       </div>
 
       <Card className="flex-1 flex flex-col min-h-0">
-        <CardHeader className="flex-shrink-0">
-          <CardTitle>节点拓扑图</CardTitle>
-        </CardHeader>
         <CardContent className="p-0 flex-1">
           <div className="h-full">
             <ReactFlow

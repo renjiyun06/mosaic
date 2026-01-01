@@ -523,7 +523,7 @@ export default function NodesPage() {
                 onChange={(value) =>
                   setFormData({ ...formData, config: value })
                 }
-                height="180px"
+                height="200px"
               />
             </div>
           </div>
@@ -570,7 +570,6 @@ export default function NodesPage() {
                 disabled
                 className="bg-muted"
               />
-              <p className="text-xs text-muted-foreground">节点 ID 创建后不可修改</p>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="edit_node_type">节点类型</Label>
@@ -580,7 +579,6 @@ export default function NodesPage() {
                 disabled
                 className="bg-muted"
               />
-              <p className="text-xs text-muted-foreground">节点类型创建后不可修改</p>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="edit_description">描述（可选）</Label>

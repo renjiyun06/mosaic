@@ -1,7 +1,7 @@
 """WebSocket API for session interaction"""
 
 import logging
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Request
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from sqlalchemy import select
 
 from ..model import Session
@@ -16,7 +16,6 @@ router = APIRouter(tags=["WebSocket"])
 @router.websocket("/ws/user")
 async def websocket_user_endpoint(
     websocket: WebSocket,
-    request: Request,
     token: str = Query(..., description="JWT authentication token")
 ):
     """
@@ -62,14 +61,13 @@ async def websocket_user_endpoint(
 
     Args:
         websocket: WebSocket connection
-        request: FastAPI request object
         token: JWT token from query parameter
     """
     # 1. Get dependencies from app state
-    async_session_factory = request.app.state.async_session_factory
-    user_message_broker = request.app.state.user_message_broker
-    runtime_manager = request.app.state.runtime_manager
-    jwt_config = request.app.state.config.get("jwt", {})
+    async_session_factory = websocket.app.state.async_session_factory
+    user_message_broker = websocket.app.state.user_message_broker
+    runtime_manager = websocket.app.state.runtime_manager
+    jwt_config = websocket.app.state.config.get("jwt", {})
 
     # 2. Verify token and get user
     try:
