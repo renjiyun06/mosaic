@@ -96,15 +96,16 @@ export default function TopologyPage() {
             background: "#3b82f6",
             color: "white",
             border: "1px solid #222",
-            padding: 10,
-            borderRadius: 8,
-            width: 200,
-            height: 80,
+            padding: 4,
+            borderRadius: 4,
+            width: 100,
+            height: 35,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             textAlign: "center",
             whiteSpace: "pre-line",
+            fontSize: "9px",
           },
         }))
 
@@ -139,7 +140,7 @@ export default function TopologyPage() {
               labelStyle: {
                 fill: "#3b82f6",
                 fontWeight: 600,
-                fontSize: 12,
+                fontSize: 7,
               },
               labelBgStyle: {
                 fill: "#ffffff",

@@ -144,7 +144,7 @@ export function Sidebar({ mosaicId }: SidebarProps) {
     <>
       <div className="flex h-full w-64 flex-col border-r bg-background">
         {/* Mosaic Status Card */}
-        <div className="border-b p-4">
+        <div className="border-b px-4 pt-4 pb-3">
           {loading ? (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -226,7 +226,7 @@ export function Sidebar({ mosaicId }: SidebarProps) {
         </div>
 
         {/* Navigation */}
-        <div className="flex-1 space-y-1 p-4">
+        <div className="flex-1 space-y-1 px-4 pb-4 pt-4">
           <div className="mb-2 px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             导航
           </div>

@@ -16,10 +16,14 @@ export function getLayoutedNodes(
   edges: Edge[],
   direction: 'TB' | 'LR' = 'LR'
 ): Node[] {
-  const nodeWidth = 200
-  const nodeHeight = 80
+  const nodeWidth = 100
+  const nodeHeight = 35
 
-  dagreGraph.setGraph({ rankdir: direction })
+  dagreGraph.setGraph({
+    rankdir: direction,
+    ranksep: 150,  // Horizontal spacing between ranks
+    nodesep: 100,   // Vertical spacing between nodes in same rank
+  })
 
   nodes.forEach((node) => {
     dagreGraph.setNode(node.id, { width: nodeWidth, height: nodeHeight })

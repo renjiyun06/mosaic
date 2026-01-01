@@ -13,7 +13,16 @@ from sqlalchemy.orm import sessionmaker
 from .logging import setup_logging
 from .exception import MosaicException
 from .schema.response import ErrorResponse
-from .api import auth_router, mosaic_router, node_router, session_router, message_router
+from .api import (
+    auth_router,
+    mosaic_router,
+    node_router,
+    connection_router,
+    subscription_router,
+    event_router,
+    session_router,
+    message_router,
+)
 from .api.websocket import router as websocket_router
 from .runtime.manager import RuntimeManager
 from .websocket import UserMessageBroker
@@ -231,6 +240,9 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
     app.include_router(auth_router, prefix="/api")
     app.include_router(mosaic_router, prefix="/api")
     app.include_router(node_router, prefix="/api")
+    app.include_router(connection_router, prefix="/api")
+    app.include_router(subscription_router, prefix="/api")
+    app.include_router(event_router, prefix="/api")
     app.include_router(session_router, prefix="/api")
     app.include_router(message_router, prefix="/api")
     app.include_router(websocket_router, prefix="/api")

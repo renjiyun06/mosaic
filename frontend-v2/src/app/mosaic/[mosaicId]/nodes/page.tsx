@@ -306,7 +306,7 @@ export default function NodesPage() {
       </div>
 
       {nodes.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center pt-16">
+        <div className="flex-1 flex flex-col items-center pt-16 border rounded-lg">
           <Box className="h-12 w-12 text-muted-foreground mb-4" />
           <h2 className="text-xl font-semibold mb-2">还没有创建任何节点</h2>
           <p className="text-muted-foreground text-center mb-6 max-w-lg">
@@ -442,7 +442,7 @@ export default function NodesPage() {
 
       {/* Create Node Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-scroll">
           <DialogHeader>
             <DialogTitle>创建新节点</DialogTitle>
             <DialogDescription>
@@ -461,9 +461,6 @@ export default function NodesPage() {
                 }
                 maxLength={100}
               />
-              <p className="text-xs text-muted-foreground">
-                必须以字母开头，只能包含字母、数字、下划线和连字符
-              </p>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="node_type">节点类型 *</Label>
@@ -554,7 +551,7 @@ export default function NodesPage() {
 
       {/* Edit Node Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-scroll">
           <DialogHeader>
             <DialogTitle>编辑节点</DialogTitle>
             <DialogDescription>
