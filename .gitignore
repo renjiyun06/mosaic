@@ -209,3 +209,4 @@ __marimo__/
 # Custom
 tmp/
 .VSCodeCounter
+!frontend-v2/src/lib
