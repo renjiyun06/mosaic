@@ -45,14 +45,18 @@ async def create_session(
     Business logic:
     1. Query mosaic and verify ownership
     2. Verify node exists in the specified mosaic
-    3. Call RuntimeManager.create_session() to create runtime session and get session_id
-    4. Create Session record in database with the runtime-generated session_id
+    3. Call RuntimeManager.create_session() to create runtime session (runtime layer creates DB record)
+    4. Query the database record created by runtime layer
     5. Return created session
 
     Validation Rules:
     - Mosaic must exist and belong to current user
     - Node must exist in the mosaic (node_id from path parameter)
     - Mode must be PROGRAM or CHAT (BACKGROUND not allowed, validated in schema)
+
+    Note:
+        The runtime layer automatically creates the database Session record during
+        session initialization. This API layer only queries and returns the created record.
 
     Raises:
         NotFoundError: If mosaic or node not found
@@ -99,6 +103,7 @@ async def create_session(
         raise NotFoundError(f"Node '{node_id}' not found in this mosaic")
 
     # 3. Create runtime session and get session_id
+    # Note: Runtime layer will create the database record during session initialization
     runtime_manager = req.app.state.runtime_manager
     session_id = await runtime_manager.create_session(
         node=node,
@@ -109,47 +114,34 @@ async def create_session(
 
     logger.info(f"Runtime session created: session_id={session_id}")
 
-    # 4. Create Session record in database
-    new_session = Session(
-        session_id=session_id,
-        user_id=current_user.id,
-        mosaic_id=mosaic_id,
-        node_id=node_id,
-        mode=request.mode,
-        model=request.model,
-        status=SessionStatus.ACTIVE,
-        message_count=0,
-        total_input_tokens=0,
-        total_output_tokens=0,
-        total_cost_usd=0.0,
-        last_activity_at=datetime.now()
-    )
-    session.add(new_session)
-    await session.flush()
+    # 4. Query the database record created by runtime layer
+    stmt = select(Session).where(Session.session_id == session_id)
+    result = await session.execute(stmt)
+    db_session = result.scalar_one()
 
     logger.info(
-        f"Database session created: id={new_session.id}, session_id={session_id}, "
+        f"Database session retrieved: id={db_session.id}, session_id={session_id}, "
         f"node_id={node_id}, mode={request.mode}"
     )
 
     # 5. Construct response
     session_out = SessionOut(
-        id=new_session.id,
-        session_id=new_session.session_id,
-        user_id=new_session.user_id,
-        mosaic_id=new_session.mosaic_id,
-        node_id=new_session.node_id,
-        mode=new_session.mode,
-        model=new_session.model,
-        status=new_session.status,
-        message_count=new_session.message_count,
-        total_input_tokens=new_session.total_input_tokens,
-        total_output_tokens=new_session.total_output_tokens,
-        total_cost_usd=new_session.total_cost_usd,
-        created_at=new_session.created_at,
-        updated_at=new_session.updated_at,
-        last_activity_at=new_session.last_activity_at,
-        closed_at=new_session.closed_at
+        id=db_session.id,
+        session_id=db_session.session_id,
+        user_id=db_session.user_id,
+        mosaic_id=db_session.mosaic_id,
+        node_id=db_session.node_id,
+        mode=db_session.mode,
+        model=db_session.model,
+        status=db_session.status,
+        message_count=db_session.message_count,
+        total_input_tokens=db_session.total_input_tokens,
+        total_output_tokens=db_session.total_output_tokens,
+        total_cost_usd=db_session.total_cost_usd,
+        created_at=db_session.created_at,
+        updated_at=db_session.updated_at,
+        last_activity_at=db_session.last_activity_at,
+        closed_at=db_session.closed_at
     )
 
     return SuccessResponse(data=session_out)

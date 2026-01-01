@@ -187,11 +187,11 @@ graph LR
 
 [Event Message Format]
 All events you receive follow this structure:
-{
+{% raw %}{{
   "event_id": "unique-event-id",
   "event_type": "event_type_value",
   "source_node_id": "source-node",
   "source_session_id": "source-session-uuid",
-  "payload": { /* event-specific data, see Event Definitions above */ }
-}
+  "payload": {{ /* event-specific data, see Event Definitions above */ }}
+}}{% endraw %}
 """

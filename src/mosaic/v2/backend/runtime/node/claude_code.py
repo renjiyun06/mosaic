@@ -135,8 +135,8 @@ class ClaudeCodeNode(MosaicNode):
         1. Check runtime conflict (self._sessions)
         2. Check database conflict (if session_id already exists)
         3. Create runtime session instance
-        4. Initialize session (starts worker task, connects to Claude SDK)
-        5. Register in self._sessions
+        4. Register in self._sessions
+        5. Initialize session (starts worker task, connects to Claude SDK)
         6. Create database session record (only after successful initialization)
 
         Args:
@@ -185,11 +185,11 @@ class ClaudeCodeNode(MosaicNode):
             config=config or {}
         )
 
-        # 4. Initialize session (starts worker task, connects to Claude SDK)
-        await session.initialize()
-
-        # 5. Register in session map
+        # 4. Register in session map
         self._sessions[session_id] = session
+
+        # 5. Initialize session (starts worker task, connects to Claude SDK)
+        await session.initialize()
 
         # 6. Create database session record (only after successful initialization)
         async with self.async_session_factory() as db_session:
