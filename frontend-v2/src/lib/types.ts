@@ -283,7 +283,6 @@ export interface CreateSessionRequest {
 
 export interface ListSessionsRequest {
   session_id?: string | null
-  node_id?: string | null
   status?: SessionStatus | null
   page?: number
   page_size?: number

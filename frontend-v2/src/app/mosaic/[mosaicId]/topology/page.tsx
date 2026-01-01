@@ -224,7 +224,7 @@ export default function TopologyPage() {
   }
 
   return (
-    <div className="flex flex-col h-full space-y-6">
+    <div className="flex flex-col h-full space-y-6 overflow-auto">
       <div className="flex-shrink-0">
         <h1 className="text-3xl font-bold">拓扑可视化</h1>
         <p className="text-muted-foreground mt-1">查看节点和连接关系</p>

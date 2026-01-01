@@ -220,7 +220,7 @@ export default function ConnectionsPage() {
   }
 
   return (
-    <div className="flex flex-col h-full space-y-6">
+    <div className="flex flex-col h-full space-y-6 overflow-auto">
       <div className="flex-shrink-0">
         <div className="flex items-center justify-between">
           <div>

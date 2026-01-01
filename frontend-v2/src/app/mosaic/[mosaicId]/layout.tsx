@@ -16,11 +16,11 @@ export default function MosaicLayout({
 
   return (
     <AuthGuard>
-      <div className="min-h-screen bg-background">
+      <div className="h-full bg-background flex flex-col">
         <Navbar />
-        <div className="flex h-[calc(100vh-3.5rem)]">
+        <div className="flex flex-1 overflow-hidden">
           <Sidebar mosaicId={mosaicId} />
-          <main className="flex-1 overflow-y-auto p-6">{children}</main>
+          <main className="flex-1 overflow-hidden p-6 relative">{children}</main>
         </div>
       </div>
     </AuthGuard>

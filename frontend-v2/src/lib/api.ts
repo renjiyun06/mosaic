@@ -554,7 +554,6 @@ class ApiClient {
     const queryParams = new URLSearchParams()
 
     if (params?.session_id) queryParams.append('session_id', params.session_id)
-    if (params?.node_id) queryParams.append('node_id', params.node_id)
     if (params?.status) queryParams.append('status', params.status)
     if (params?.page) queryParams.append('page', params.page.toString())
     if (params?.page_size) queryParams.append('page_size', params.page_size.toString())
