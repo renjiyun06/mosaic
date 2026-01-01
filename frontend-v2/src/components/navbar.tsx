@@ -101,7 +101,7 @@ export function Navbar() {
           {user && (
             <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                <Button variant="ghost" className="relative h-8 w-8 rounded-full hover:ring-1 hover:ring-border">
                   <Avatar className="h-8 w-8">
                     <AvatarImage src={user.avatar_url || undefined} alt={user.username} />
                     <AvatarFallback>{user.username.charAt(0).toUpperCase()}</AvatarFallback>

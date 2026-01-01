@@ -104,7 +104,7 @@ class ApiClient {
       auth: false,
       context: 'auth.login',
       autoToast: {
-        success: '登录成功',
+        success: false,
         error: true
       }
     })
