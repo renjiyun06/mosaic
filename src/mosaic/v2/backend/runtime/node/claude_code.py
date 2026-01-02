@@ -364,7 +364,7 @@ class ClaudeCodeSession(MosaicSession):
 
     # ========== Lifecycle Hooks ==========
 
-    async def _on_initialize(self):
+    async def _on_event_loop_started(self):
         """
         Initialize Claude Code session resources.
 
@@ -610,7 +610,7 @@ class ClaudeCodeSession(MosaicSession):
         )
         return False
 
-    async def _on_close(self):
+    async def _on_event_loop_exited(self):
         """
         Clean up session resources.
 
@@ -667,6 +667,12 @@ class ClaudeCodeSession(MosaicSession):
         self._last_activity_at = None
 
         logger.info(f"ClaudeCodeSession cleanup complete: session_id={self.session_id}")
+
+    async def _on_initialize(self):
+        pass
+    
+    async def _on_close(self):
+        pass
 
     # ========== User Message Handling ==========
 
