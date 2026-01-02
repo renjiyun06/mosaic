@@ -21,6 +21,7 @@ from .api import (
     subscription_router,
     event_router,
     session_router,
+    session_routing_router,
     message_router,
 )
 from .api.websocket import router as websocket_router
@@ -264,6 +265,7 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
     app.include_router(subscription_router, prefix="/api")
     app.include_router(event_router, prefix="/api")
     app.include_router(session_router, prefix="/api")
+    app.include_router(session_routing_router, prefix="/api")
     app.include_router(message_router, prefix="/api")
     app.include_router(websocket_router, prefix="/api")
 

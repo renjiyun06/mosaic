@@ -9,6 +9,7 @@ from .connection import router as connection_router
 from .subscription import router as subscription_router
 from .event import router as event_router
 from .session import router as session_router
+from .session_routing import router as session_routing_router
 from .message import router as message_router
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "subscription_router",
     "event_router",
     "session_router",
+    "session_routing_router",
     "message_router",
 ]

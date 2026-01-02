@@ -17,6 +17,7 @@ import {
   Square,
   Circle,
   Loader2,
+  Route,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "./ui/button"
@@ -58,6 +59,11 @@ const navItems = [
     title: "事件订阅",
     href: "/subscriptions",
     icon: Bell,
+  },
+  {
+    title: "会话路由",
+    href: "/session-routings",
+    icon: Route,
   },
   {
     title: "会话列表",

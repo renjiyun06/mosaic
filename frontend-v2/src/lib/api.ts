@@ -643,10 +643,32 @@ class ApiClient {
   // ========================================================================
 
   /**
-   * List session routing mappings for a node
+   * List session routing mappings with filters and pagination
    */
-  async listSessionRoutings(mosaicId: number, nodeId: string): Promise<SessionRoutingOut[]> {
-    return request<SessionRoutingOut[]>(`/api/mosaics/${mosaicId}/nodes/${nodeId}/session-routings`, {
+  async listSessionRoutings(
+    mosaicId: number,
+    options?: {
+      localNodeId?: string
+      localSessionId?: string
+      remoteNodeId?: string
+      remoteSessionId?: string
+      page?: number
+      pageSize?: number
+    }
+  ): Promise<PaginatedData<SessionRoutingOut>> {
+    const queryParams = new URLSearchParams()
+
+    if (options?.localNodeId) queryParams.append('local_node_id', options.localNodeId)
+    if (options?.localSessionId) queryParams.append('local_session_id', options.localSessionId)
+    if (options?.remoteNodeId) queryParams.append('remote_node_id', options.remoteNodeId)
+    if (options?.remoteSessionId) queryParams.append('remote_session_id', options.remoteSessionId)
+    if (options?.page) queryParams.append('page', options.page.toString())
+    if (options?.pageSize) queryParams.append('page_size', options.pageSize.toString())
+
+    const queryString = queryParams.toString()
+    const url = `/api/mosaics/${mosaicId}/session-routings${queryString ? `?${queryString}` : ''}`
+
+    return request<PaginatedData<SessionRoutingOut>>(url, {
       autoToast: {
         success: false,
         error: true
