@@ -634,7 +634,7 @@ class ClaudeCodeSession(MosaicSession):
                 async for _ in self._cc_client.receive_response():
                     pass
                 await self._cc_client.disconnect()
-                logger.debug(f"Claude SDK client disconnected: session_id={self.session_id}")
+                logger.info(f"Claude SDK client disconnected: session_id={self.session_id}")
             except Exception as e:
                 logger.error(
                     f"Error disconnecting Claude SDK: session_id={self.session_id}, error={e}",

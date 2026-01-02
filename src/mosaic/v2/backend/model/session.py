@@ -72,8 +72,8 @@ class Session(BaseModel, table=True):
     )
 
     # Additional timestamps (beyond BaseModel's created_at, updated_at, deleted_at)
-    last_activity_at: datetime = Field(
-        default_factory=datetime.now,
+    last_activity_at: Optional[datetime] = Field(
+        default=None,
         description="Last time a message was sent or received"
     )
     closed_at: Optional[datetime] = Field(

@@ -136,9 +136,12 @@ async def websocket_user_endpoint(
                         })
                         continue
 
-                    # Get node information
+                    # Get node information (exclude soft-deleted nodes)
                     from ..model.node import Node
-                    stmt = select(Node).where(Node.node_id == session.node_id)
+                    stmt = select(Node).where(
+                        Node.node_id == session.node_id,
+                        Node.deleted_at.is_(None)
+                    )
                     result = await db_session.execute(stmt)
                     node = result.scalar_one_or_none()
 
@@ -146,7 +149,7 @@ async def websocket_user_endpoint(
                         await websocket.send_json({
                             "session_id": session_id,
                             "type": "error",
-                            "message": "Node not found"
+                            "message": "Node not found or deleted"
                         })
                         continue
 

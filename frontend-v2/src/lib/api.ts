@@ -509,9 +509,12 @@ class ApiClient {
    * Create a new session for a node
    */
   async createSession(mosaicId: number, nodeId: string, data: CreateSessionRequest): Promise<SessionOut> {
-    return request<SessionOut>(`/api/mosaics/${mosaicId}/nodes/${nodeId}/sessions`, {
+    return request<SessionOut>(`/api/mosaics/${mosaicId}/sessions`, {
       method: 'POST',
-      body: data,
+      body: {
+        node_id: nodeId,
+        ...data
+      },
       context: 'session.create',
       autoToast: {
         success: false,
@@ -524,7 +527,7 @@ class ApiClient {
    * Close a session
    */
   async closeSession(mosaicId: number, nodeId: string, sessionId: string): Promise<SessionOut> {
-    return request<SessionOut>(`/api/mosaics/${mosaicId}/nodes/${nodeId}/sessions/${sessionId}/close`, {
+    return request<SessionOut>(`/api/mosaics/${mosaicId}/sessions/${sessionId}/close`, {
       method: 'POST',
       context: 'session.close',
       autoToast: {
@@ -538,7 +541,7 @@ class ApiClient {
    * Archive a session
    */
   async archiveSession(mosaicId: number, nodeId: string, sessionId: string): Promise<SessionOut> {
-    return request<SessionOut>(`/api/mosaics/${mosaicId}/nodes/${nodeId}/sessions/${sessionId}/archive`, {
+    return request<SessionOut>(`/api/mosaics/${mosaicId}/sessions/${sessionId}/archive`, {
       method: 'POST',
       autoToast: {
         success: false,
@@ -550,16 +553,17 @@ class ApiClient {
   /**
    * List sessions with filters and pagination
    */
-  async listSessions(mosaicId: number, nodeId: string, params?: ListSessionsRequest): Promise<PaginatedData<SessionOut>> {
+  async listSessions(mosaicId: number, nodeId?: string, params?: ListSessionsRequest): Promise<PaginatedData<SessionOut>> {
     const queryParams = new URLSearchParams()
 
+    if (nodeId) queryParams.append('node_id', nodeId)
     if (params?.session_id) queryParams.append('session_id', params.session_id)
     if (params?.status) queryParams.append('status', params.status)
     if (params?.page) queryParams.append('page', params.page.toString())
     if (params?.page_size) queryParams.append('page_size', params.page_size.toString())
 
     const queryString = queryParams.toString()
-    const url = `/api/mosaics/${mosaicId}/nodes/${nodeId}/sessions${queryString ? `?${queryString}` : ''}`
+    const url = `/api/mosaics/${mosaicId}/sessions${queryString ? `?${queryString}` : ''}`
 
     return request<PaginatedData<SessionOut>>(url, {
       autoToast: {

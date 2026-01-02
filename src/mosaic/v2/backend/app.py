@@ -161,6 +161,16 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
         Returns:
             JSONResponse with ErrorResponse format (HTTP 200, success=false)
         """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Log business exception
+        logger.warning(
+            f"Business exception in {request.method} {request.url.path}: "
+            f"[{exc.code}] {exc.message}"
+        )
+
         return JSONResponse(
             status_code=200,  # Business errors return 200 with success=false
             content=ErrorResponse(
@@ -183,6 +193,16 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
         Returns:
             JSONResponse with ErrorResponse format (HTTP 200, success=false)
         """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Log validation error with error details
+        logger.warning(
+            f"Validation error in {request.method} {request.url.path}: "
+            f"{exc.errors()}"
+        )
+
         return JSONResponse(
             status_code=200,  # Validation errors also return 200 with success=false
             content=ErrorResponse(

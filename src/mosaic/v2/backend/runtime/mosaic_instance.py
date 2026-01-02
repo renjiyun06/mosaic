@@ -370,19 +370,11 @@ class MosaicInstance:
         # 2. Set status to STOPPED (command loop will exit after this command completes)
         self._status = MosaicStatus.STOPPED
 
-        # 3. Stop all running nodes (parallel, with exception tolerance)
+        # 3. Stop all running nodes (sequential, to avoid cross-task resource cleanup issues)
         if self._nodes:
             logger.info(f"Stopping {len(self._nodes)} running nodes...")
-            stop_tasks = [
-                self._stop_node_internal(node)
-                for node in list(self._nodes.values())
-            ]
-            results = await asyncio.gather(*stop_tasks, return_exceptions=True)
-
-            # Log failures
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    logger.error(f"Failed to stop node: {result}")
+            for node in list(self._nodes.values()):
+                await self._stop_node_internal(node)
 
         # 4. Clear node mapping
         self._nodes.clear()
@@ -491,7 +483,7 @@ class MosaicInstance:
             NodeNotFoundError: If node is not running
         """
         mosaic_node = self._get_node(command.node)
-        await mosaic_node.send_message(command.session_id, command.message)
+        await mosaic_node.send_message(command.session.session_id, command.message)
 
     async def _handle_interrupt_session(self, command: InterruptSessionCommand) -> None:
         """

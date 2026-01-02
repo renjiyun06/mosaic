@@ -221,8 +221,8 @@ class MosaicNode(ABC):
         - start() exception handler: When startup fails
 
         Steps:
-        1. Disconnect ZMQ client (if connected)
-        2. Clean up all sessions (cancel worker tasks)
+        1. Clean up all sessions (cancel worker tasks)
+        2. Disconnect ZMQ client (if connected)
 
         Note:
             This method does NOT call _on_stop(). Subclass resource cleanup is handled separately:
@@ -232,7 +232,10 @@ class MosaicNode(ABC):
 
             This method is idempotent and safe to call multiple times.
         """
-        # 1. Disconnect ZMQ client (idempotent)
+        # 1. Clean up all sessions (idempotent)
+        await self._cleanup_all_sessions()
+
+        # 2. Disconnect ZMQ client (idempotent)
         if self._zmq_client:
             try:
                 self._zmq_client.disconnect()
@@ -240,9 +243,6 @@ class MosaicNode(ABC):
             except Exception as e:
                 logger.error(f"Error disconnecting ZMQ client: {e}")
             self._zmq_client = None
-
-        # 2. Clean up all sessions (idempotent)
-        await self._cleanup_all_sessions()
 
         logger.debug(f"Cleanup complete for node: {self.node.node_id}")
 

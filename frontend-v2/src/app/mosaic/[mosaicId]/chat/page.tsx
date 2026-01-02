@@ -189,34 +189,48 @@ export default function ChatPage() {
     try {
       // Load all nodes
       const nodesData = await apiClient.listNodes(mosaicId)
-      // Filter only Claude Code nodes
-      const ccNodes = nodesData.filter((n) => n.node_type === NodeType.CLAUDE_CODE)
+      // Filter only Claude Code nodes and sort by node_id
+      const ccNodes = nodesData
+        .filter((n) => n.node_type === NodeType.CLAUDE_CODE)
+        .sort((a, b) => a.node_id.localeCompare(b.node_id))
 
       if (ccNodes.length === 0) {
         setNodes([])
         return
       }
 
-      // Load sessions for each node
-      const nodesWithSessions: NodeWithSessions[] = await Promise.all(
-        ccNodes.map(async (node) => {
-          try {
-            const sessionsData = await apiClient.listSessions(mosaicId, node.node_id)
-            return {
-              ...node,
-              sessions: sessionsData.items,
-              expanded: true, // Default expanded
-            }
-          } catch (error) {
-            console.error(`Failed to load sessions for node ${node.node_id}:`, error)
-            return {
-              ...node,
-              sessions: [],
-              expanded: true,
-            }
-          }
-        })
+      // Load all active and closed sessions for this mosaic (exclude archived)
+      // Use a large page_size to get all sessions in one request
+      const allSessionsData = await apiClient.listSessions(mosaicId, undefined, {
+        page: 1,
+        page_size: 1000, // Large number to get all sessions
+      })
+
+      // Filter only active and closed sessions (exclude archived)
+      const activeSessions = allSessionsData.items.filter(
+        (s) => s.status === SessionStatus.ACTIVE || s.status === SessionStatus.CLOSED
       )
+
+      // Group sessions by node_id
+      const sessionsByNode = new Map<string, SessionOut[]>()
+      activeSessions.forEach((session) => {
+        if (!sessionsByNode.has(session.node_id)) {
+          sessionsByNode.set(session.node_id, [])
+        }
+        sessionsByNode.get(session.node_id)!.push(session)
+      })
+
+      // Sort sessions within each node by created_at (newest first)
+      sessionsByNode.forEach((sessions) => {
+        sessions.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      })
+
+      // Build nodes with sessions
+      const nodesWithSessions: NodeWithSessions[] = ccNodes.map((node) => ({
+        ...node,
+        sessions: sessionsByNode.get(node.node_id) || [],
+        expanded: true, // Default expanded
+      }))
 
       setNodes(nodesWithSessions)
 

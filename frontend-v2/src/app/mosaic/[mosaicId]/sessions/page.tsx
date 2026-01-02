@@ -1,0 +1,367 @@
+"use client"
+
+import { useEffect, useState } from "react"
+import { useParams } from "next/navigation"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Loader2, MessageSquare, ChevronLeft, ChevronRight } from "lucide-react"
+import { apiClient } from "@/lib/api"
+import { useAuth } from "@/contexts/auth-context"
+import { SessionStatus, type NodeOut, type SessionOut } from "@/lib/types"
+
+// Session status display configuration
+const SESSION_STATUS_CONFIG: Record<SessionStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  [SessionStatus.ACTIVE]: { label: "活跃", variant: "default" },
+  [SessionStatus.CLOSED]: { label: "已关闭", variant: "secondary" },
+  [SessionStatus.ARCHIVED]: { label: "已归档", variant: "outline" },
+}
+
+export default function SessionsPage() {
+  const params = useParams()
+  const { token } = useAuth()
+  const mosaicId = params.mosaicId as string
+
+  // Node list state
+  const [nodes, setNodes] = useState<NodeOut[]>([])
+  const [loadingNodes, setLoadingNodes] = useState(true)
+  const [selectedNodeId, setSelectedNodeId] = useState<string>("all")
+
+  // Session list state
+  const [sessions, setSessions] = useState<SessionOut[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Filter state
+  const [sessionIdFilter, setSessionIdFilter] = useState("")
+  const [statusFilter, setStatusFilter] = useState<SessionStatus | "all">("all")
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize] = useState(20)
+  const [totalPages, setTotalPages] = useState(0)
+  const [total, setTotal] = useState(0)
+
+  // Fetch nodes on mount
+  useEffect(() => {
+    if (!token) return
+
+    const fetchNodes = async () => {
+      try {
+        setLoadingNodes(true)
+        const data = await apiClient.listNodes(Number(mosaicId))
+        setNodes(data)
+      } catch (err) {
+        console.error("Failed to fetch nodes:", err)
+      } finally {
+        setLoadingNodes(false)
+      }
+    }
+
+    fetchNodes()
+  }, [mosaicId, token])
+
+  // Fetch sessions when node or filters change
+  useEffect(() => {
+    if (!token) {
+      setSessions([])
+      setTotal(0)
+      setTotalPages(0)
+      return
+    }
+
+    const fetchSessions = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+
+        const params: any = {
+          page: currentPage,
+          page_size: pageSize,
+        }
+
+        if (sessionIdFilter.trim()) {
+          params.session_id = sessionIdFilter.trim()
+        }
+
+        if (statusFilter !== "all") {
+          params.status = statusFilter
+        }
+
+        const data = await apiClient.listSessions(
+          Number(mosaicId),
+          selectedNodeId === "all" ? undefined : selectedNodeId,
+          params
+        )
+
+        setSessions(data.items)
+        setTotal(data.total)
+        setTotalPages(data.total_pages)
+      } catch (err) {
+        console.error("Failed to fetch sessions:", err)
+        setError(err instanceof Error ? err.message : "Failed to load sessions")
+        setSessions([])
+        setTotal(0)
+        setTotalPages(0)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchSessions()
+  }, [mosaicId, selectedNodeId, currentPage, pageSize, sessionIdFilter, statusFilter, token])
+
+  const handleNodeChange = (nodeId: string) => {
+    setSelectedNodeId(nodeId)
+    setCurrentPage(1) // Reset to first page when changing node
+  }
+
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1)
+    }
+  }
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1)
+    }
+  }
+
+  // Format cost for display
+  const formatCost = (cost: number): string => {
+    if (cost === 0) return "$0.00"
+    if (cost < 0.01) return `$${cost.toFixed(4)}`
+    return `$${cost.toFixed(2)}`
+  }
+
+  // Loading nodes state
+  if (loadingNodes) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  // No nodes state
+  if (nodes.length === 0) {
+    return (
+      <div className="flex flex-col h-full space-y-6 overflow-auto">
+        <div className="flex-shrink-0">
+          <h1 className="text-3xl font-bold">会话列表</h1>
+          <p className="text-muted-foreground mt-1">查看和管理节点的会话记录</p>
+        </div>
+        <div className="flex-1 flex flex-col items-center pt-16 border rounded-lg">
+          <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
+          <h2 className="text-xl font-semibold mb-2">还没有创建任何节点</h2>
+          <p className="text-muted-foreground text-center mb-6 max-w-lg">
+            请先创建节点，然后才能查看会话记录。
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col h-full space-y-6 overflow-auto">
+      {/* Header */}
+      <div className="flex-shrink-0">
+        <h1 className="text-3xl font-bold">会话列表</h1>
+        <p className="text-muted-foreground mt-1">查看和管理节点的会话记录</p>
+      </div>
+
+      {/* Filters */}
+      <div className="flex-shrink-0 grid gap-4 md:grid-cols-3">
+        {/* Node selector */}
+        <Select value={selectedNodeId} onValueChange={handleNodeChange}>
+          <SelectTrigger id="node-select">
+            <SelectValue placeholder="选择节点" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部节点</SelectItem>
+            {nodes.map((node) => (
+              <SelectItem key={node.id} value={node.node_id}>
+                {node.node_id}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {/* Session ID filter */}
+        <Input
+          id="session-id-filter"
+          placeholder="搜索会话 ID..."
+          value={sessionIdFilter}
+          onChange={(e) => {
+            setSessionIdFilter(e.target.value)
+            setCurrentPage(1)
+          }}
+        />
+
+        {/* Status filter */}
+        <Select
+          value={statusFilter}
+          onValueChange={(value) => {
+            setStatusFilter(value as SessionStatus | "all")
+            setCurrentPage(1)
+          }}
+        >
+          <SelectTrigger id="status-filter">
+            <SelectValue placeholder="全部状态" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部状态</SelectItem>
+            {Object.entries(SESSION_STATUS_CONFIG).map(([status, config]) => (
+              <SelectItem key={status} value={status}>
+                {config.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Session list */}
+      {loading ? (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : error ? (
+        <div className="flex flex-col items-center justify-center min-h-[400px]">
+          <p className="text-muted-foreground mb-4">{error}</p>
+        </div>
+      ) : sessions.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center pt-16 border rounded-lg">
+          <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
+          <h2 className="text-xl font-semibold mb-2">没有找到会话</h2>
+          <p className="text-muted-foreground text-center mb-6 max-w-lg">
+            {sessionIdFilter || statusFilter !== "all"
+              ? "当前筛选条件下没有会话记录，请尝试调整筛选条件。"
+              : "该节点还没有任何会话记录。"}
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="flex-1 flex flex-col min-h-0 border rounded-lg">
+            <div className="flex-1 overflow-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-center">会话 ID</TableHead>
+                    <TableHead className="text-center">节点 ID</TableHead>
+                    <TableHead className="text-center">模式</TableHead>
+                    <TableHead className="text-center">模型</TableHead>
+                    <TableHead className="text-center">状态</TableHead>
+                    <TableHead className="text-center">消息数</TableHead>
+                    <TableHead className="text-center">Token (输入/输出)</TableHead>
+                    <TableHead className="text-center">成本</TableHead>
+                    <TableHead className="text-center">最后活动时间</TableHead>
+                    <TableHead className="text-center">创建时间</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sessions.map((session) => (
+                    <TableRow key={session.id}>
+                      <TableCell className="text-center">
+                        <span className="font-mono text-sm">{session.session_id}</span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className="font-mono text-sm">{session.node_id}</span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="outline">{session.mode}</Badge>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="outline">{session.model || "—"}</Badge>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant={SESSION_STATUS_CONFIG[session.status].variant}>
+                          {SESSION_STATUS_CONFIG[session.status].label}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="outline">{session.message_count}</Badge>
+                      </TableCell>
+                      <TableCell className="text-center text-sm text-muted-foreground">
+                        {session.total_input_tokens.toLocaleString()} / {session.total_output_tokens.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-center text-sm font-mono">
+                        {formatCost(session.total_cost_usd)}
+                      </TableCell>
+                      <TableCell className="text-center text-sm text-muted-foreground">
+                        {new Date(session.last_activity_at).toLocaleString("zh-CN", {
+                          year: "numeric",
+                          month: "2-digit",
+                          day: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                          hour12: false
+                        })}
+                      </TableCell>
+                      <TableCell className="text-center text-sm text-muted-foreground">
+                        {new Date(session.created_at).toLocaleString("zh-CN", {
+                          year: "numeric",
+                          month: "2-digit",
+                          day: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                          hour12: false
+                        })}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex-shrink-0 flex items-center justify-between">
+              <div className="text-sm text-muted-foreground">
+                共 {total} 条记录，第 {currentPage} / {totalPages} 页
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePreviousPage}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  上一页
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleNextPage}
+                  disabled={currentPage === totalPages}
+                >
+                  下一页
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}

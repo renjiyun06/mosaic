@@ -20,7 +20,7 @@ from ..enum import SessionStatus
 logger = logging.getLogger(__name__)
 
 # Router configuration
-router = APIRouter(prefix="/mosaics/{mosaic_id}/nodes/{node_id}/sessions", tags=["Session Management"])
+router = APIRouter(prefix="/mosaics/{mosaic_id}/sessions", tags=["Session Management"])
 
 
 # ==================== Type Aliases ====================
@@ -34,7 +34,6 @@ CurrentUserDep = Annotated[User, Depends(get_current_user)]
 @router.post("", response_model=SuccessResponse[SessionOut])
 async def create_session(
     mosaic_id: int,
-    node_id: str,
     request: CreateSessionRequest,
     req: Request,
     session: SessionDep,
@@ -51,7 +50,7 @@ async def create_session(
 
     Validation Rules:
     - Mosaic must exist and belong to current user
-    - Node must exist in the mosaic (node_id from path parameter)
+    - Node must exist in the mosaic (node_id from request body)
     - Mode must be PROGRAM or CHAT (BACKGROUND not allowed, validated in schema)
 
     Note:
@@ -64,7 +63,7 @@ async def create_session(
         RuntimeException: If runtime session creation fails
     """
     logger.info(
-        f"Creating session: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"Creating session: mosaic_id={mosaic_id}, node_id={request.node_id}, "
         f"mode={request.mode}, user_id={current_user.id}"
     )
 
@@ -90,7 +89,7 @@ async def create_session(
     # 2. Verify node exists
     node_stmt = select(Node).where(
         Node.mosaic_id == mosaic_id,
-        Node.node_id == node_id,
+        Node.node_id == request.node_id,
         Node.deleted_at.is_(None)
     )
     node_result = await session.execute(node_stmt)
@@ -98,9 +97,9 @@ async def create_session(
 
     if not node:
         logger.warning(
-            f"Node not found: mosaic_id={mosaic_id}, node_id={node_id}"
+            f"Node not found: mosaic_id={mosaic_id}, node_id={request.node_id}"
         )
-        raise NotFoundError(f"Node '{node_id}' not found in this mosaic")
+        raise NotFoundError(f"Node '{request.node_id}' not found in this mosaic")
 
     # 3. Create runtime session and get session_id
     # Note: Runtime layer will create the database record during session initialization
@@ -121,7 +120,7 @@ async def create_session(
 
     logger.info(
         f"Database session retrieved: id={db_session.id}, session_id={session_id}, "
-        f"node_id={node_id}, mode={request.mode}"
+        f"node_id={request.node_id}, mode={request.mode}"
     )
 
     # 5. Construct response
@@ -150,7 +149,6 @@ async def create_session(
 @router.post("/{session_id}/close", response_model=SuccessResponse[SessionOut])
 async def close_session(
     mosaic_id: int,
-    node_id: str,
     session_id: str,
     req: Request,
     session: SessionDep,
@@ -159,7 +157,7 @@ async def close_session(
     """Close an active session
 
     Business logic:
-    1. Query session and verify ownership (including node_id match)
+    1. Query session and verify ownership
     2. Query node for runtime close operation
     3. Verify session is currently ACTIVE
     4. Update database status to CLOSED
@@ -168,7 +166,6 @@ async def close_session(
 
     Validation Rules:
     - Session must exist and belong to current user
-    - Session must belong to specified node
     - Session must be in ACTIVE status (cannot close already closed/archived session)
 
     Raises:
@@ -178,15 +175,14 @@ async def close_session(
         RuntimeException: If runtime session close fails
     """
     logger.info(
-        f"Closing session: mosaic_id={mosaic_id}, node_id={node_id}, "
-        f"session_id={session_id}, user_id={current_user.id}"
+        f"Closing session: mosaic_id={mosaic_id}, session_id={session_id}, "
+        f"user_id={current_user.id}"
     )
 
     # 1. Query session and verify ownership
     stmt = select(Session).where(
         Session.session_id == session_id,
         Session.mosaic_id == mosaic_id,
-        Session.node_id == node_id,
         Session.user_id == current_user.id,
         Session.deleted_at.is_(None)
     )
@@ -196,7 +192,7 @@ async def close_session(
     if not db_session:
         logger.warning(
             f"Session not found: session_id={session_id}, mosaic_id={mosaic_id}, "
-            f"node_id={node_id}, user_id={current_user.id}"
+            f"user_id={current_user.id}"
         )
         raise NotFoundError("Session not found")
 
@@ -270,7 +266,6 @@ async def close_session(
 @router.post("/{session_id}/archive", response_model=SuccessResponse[SessionOut])
 async def archive_session(
     mosaic_id: int,
-    node_id: str,
     session_id: str,
     session: SessionDep,
     current_user: CurrentUserDep,
@@ -278,7 +273,7 @@ async def archive_session(
     """Archive a closed session
 
     Business logic:
-    1. Query session and verify ownership (including node_id match)
+    1. Query session and verify ownership
     2. Verify session is currently CLOSED
     3. Update status to ARCHIVED
     4. Update updated_at timestamp
@@ -286,7 +281,6 @@ async def archive_session(
 
     Validation Rules:
     - Session must exist and belong to current user
-    - Session must belong to specified node
     - Session must be in CLOSED status (archiving requires session to be closed first)
 
     Raises:
@@ -295,15 +289,14 @@ async def archive_session(
         ValidationError: If session is not closed
     """
     logger.info(
-        f"Archiving session: mosaic_id={mosaic_id}, node_id={node_id}, "
-        f"session_id={session_id}, user_id={current_user.id}"
+        f"Archiving session: mosaic_id={mosaic_id}, session_id={session_id}, "
+        f"user_id={current_user.id}"
     )
 
     # 1. Query session and verify ownership
     stmt = select(Session).where(
         Session.session_id == session_id,
         Session.mosaic_id == mosaic_id,
-        Session.node_id == node_id,
         Session.user_id == current_user.id,
         Session.deleted_at.is_(None)
     )
@@ -313,7 +306,7 @@ async def archive_session(
     if not db_session:
         logger.warning(
             f"Session not found: session_id={session_id}, mosaic_id={mosaic_id}, "
-            f"node_id={node_id}, user_id={current_user.id}"
+            f"user_id={current_user.id}"
         )
         raise NotFoundError("Session not found")
 
@@ -360,21 +353,21 @@ async def archive_session(
 @router.get("", response_model=SuccessResponse[PaginatedData[SessionOut]])
 async def list_sessions(
     mosaic_id: int,
-    node_id: str,
     session: SessionDep,
     current_user: CurrentUserDep,
+    node_id: Optional[str] = Query(None, description="Filter by node ID"),
     session_id: Optional[str] = Query(None, description="Filter by session ID"),
     status: Optional[SessionStatus] = Query(None, description="Filter by status"),
     page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    page_size: int = Query(20, ge=1, le=1000, description="Items per page"),
 ):
     """List sessions with filtering and pagination
 
     Business logic:
     1. Build query with filters:
        - mosaic_id (required, from path)
-       - node_id (required, from path)
        - user_id (current user)
+       - node_id (optional, exact match)
        - session_id (optional, exact match)
        - status (optional, exact match)
        - deleted_at IS NULL
@@ -383,31 +376,33 @@ async def list_sessions(
     4. Return paginated results
 
     Query Parameters:
-    - session_id: Filter by specific session ID (exact match)
-    - status: Filter by status (active/closed/archived)
+    - node_id: Filter by specific node ID (exact match, optional)
+    - session_id: Filter by specific session ID (exact match, optional)
+    - status: Filter by status (active/closed/archived, optional)
     - page: Page number (starts from 1)
-    - page_size: Items per page (1-100, default 20)
+    - page_size: Items per page (1-1000, default 20)
 
     Returns:
-        Paginated list of sessions for specified node, ordered by last_activity_at DESC (most recent first)
+        Paginated list of sessions for specified mosaic, ordered by last_activity_at DESC (most recent first)
 
     Note: Returns empty list if no sessions found
     """
     logger.info(
-        f"Listing sessions: mosaic_id={mosaic_id}, node_id={node_id}, "
-        f"user_id={current_user.id}, filters={{session_id={session_id}, status={status}}}, "
+        f"Listing sessions: mosaic_id={mosaic_id}, "
+        f"user_id={current_user.id}, filters={{node_id={node_id}, session_id={session_id}, status={status}}}, "
         f"page={page}, page_size={page_size}"
     )
 
     # 1. Build base query with filters
     stmt = select(Session).where(
         Session.mosaic_id == mosaic_id,
-        Session.node_id == node_id,
         Session.user_id == current_user.id,
         Session.deleted_at.is_(None)
     )
 
     # Apply optional filters
+    if node_id:
+        stmt = stmt.where(Session.node_id == node_id)
     if session_id:
         stmt = stmt.where(Session.session_id == session_id)
     if status:
@@ -466,8 +461,8 @@ async def list_sessions(
     )
 
     logger.info(
-        f"Listed {len(session_list)} sessions: mosaic_id={mosaic_id}, node_id={node_id}, "
-        f"page={page}/{total_pages}, total={total}"
+        f"Listed {len(session_list)} sessions: mosaic_id={mosaic_id}, "
+        f"filters={{node_id={node_id}}}, page={page}/{total_pages}, total={total}"
     )
 
     return SuccessResponse(data=paginated_data)

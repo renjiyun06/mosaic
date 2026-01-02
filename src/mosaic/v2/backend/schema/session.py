@@ -15,9 +15,14 @@ class CreateSessionRequest(BaseModel):
 
     Note:
         - Only 'program' and 'chat' modes are allowed (background sessions are event-triggered)
-        - node_id is specified in the URL path parameter
+        - node_id specifies which node to create the session on
         - model defaults to SONNET if not provided
     """
+    node_id: str = Field(
+        ...,
+        max_length=100,
+        description="Node ID to create the session on"
+    )
     mode: SessionMode = Field(
         ...,
         description="Session mode: 'program' (instruction/guidance) or 'chat' (interactive)"
@@ -38,37 +43,6 @@ class CreateSessionRequest(BaseModel):
                 "Background sessions are created automatically by event triggers."
             )
         return value
-
-
-class ListSessionsRequest(BaseModel):
-    """Query parameters for listing sessions
-
-    Supports filtering by session_id, node_id, and status, with pagination
-    """
-    session_id: Optional[str] = Field(
-        default=None,
-        description="Filter by specific session ID (exact match)"
-    )
-    node_id: Optional[str] = Field(
-        default=None,
-        max_length=100,
-        description="Filter by node ID (exact match)"
-    )
-    status: Optional[SessionStatus] = Field(
-        default=None,
-        description="Filter by session status (active/closed/archived)"
-    )
-    page: int = Field(
-        default=1,
-        ge=1,
-        description="Page number (starts from 1)"
-    )
-    page_size: int = Field(
-        default=20,
-        ge=1,
-        le=100,
-        description="Number of items per page (1-100)"
-    )
 
 
 # ==================== Response Schemas ====================
@@ -102,7 +76,7 @@ class SessionOut(BaseModel):
     # Timestamps
     created_at: datetime = Field(..., description="When session was created")
     updated_at: datetime = Field(..., description="Last modification time")
-    last_activity_at: datetime = Field(..., description="Last message activity time")
+    last_activity_at: Optional[datetime] = Field(None, description="Last message activity time")
     closed_at: Optional[datetime] = Field(None, description="When session was closed")
 
     class Config:
