@@ -390,6 +390,9 @@ class ClaudeCodeSession(MosaicSession):
             f"System prompt ready for session {self.session_id}, "
             f"length={len(system_prompt)}"
         )
+        logger.debug(
+            f"System prompt content for session {self.session_id}:\n{system_prompt}"
+        )
 
         # 2. Configure MCP servers
         mcp_servers = self.mcp_servers.copy()

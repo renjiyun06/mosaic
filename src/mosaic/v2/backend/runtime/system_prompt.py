@@ -150,7 +150,7 @@ Node ID: {{ node_id }}
 Session ID: {{ session_id_placeholder }}
 
 [Nodes In Mesh]
-{% for node in nodes %}
+{% for node in nodes -%}
 - {{ node.node_id }} (Type: {{ node.node_type }})
 {% endfor %}
 
@@ -162,18 +162,17 @@ graph LR
 {% endfor %}
 {% for conn in connections %}
 {{ conn.source_id }} --> {{ conn.target_id }}
-{% endfor %}
-
-{% endif %}
+{% endfor -%}
+{% endif -%}
 
 [Event Definitions]
-{% for event_type, event_def in event_definitions.items() %}
+{% for event_type, event_def in event_definitions.items() -%}
 {{ event_type.value }}:
     - description: {{ event_def.description }}
-{% if event_def.payload_schema %}
+{%- if event_def.payload_schema %}
     - payload_schema:
-{% if event_def.payload_schema.properties %}
-{% for field, schema in event_def.payload_schema.properties.items() %}
+{%- if event_def.payload_schema.properties %}
+{%- for field, schema in event_def.payload_schema.properties.items() %}
         * {{ field }} ({{ schema.type }}): {{ schema.get('description', 'N/A') }}
 {% endfor %}
 {% else %}
@@ -181,9 +180,8 @@ graph LR
 {% endif %}
 {% else %}
     - payload_schema: {} (empty)
-{% endif %}
-
-{% endfor %}
+{% endif -%}
+{% endfor -%}
 
 [Event Message Format]
 All events you receive follow this structure:

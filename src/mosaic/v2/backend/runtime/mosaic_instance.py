@@ -525,7 +525,7 @@ class MosaicInstance:
             NodeNotFoundError: If node is not running
         """
         mosaic_node = self._get_node(command.node)
-        await mosaic_node.close_session(command.session_id)
+        await mosaic_node.close_session(command.session.session_id)
 
     # ========== Node Management (Internal) ==========
 

@@ -222,15 +222,7 @@ async def close_session(
             "Only active sessions can be closed."
         )
 
-    # 4. Update database status to CLOSED
-    db_session.status = SessionStatus.CLOSED
-    db_session.closed_at = datetime.now()
-    db_session.updated_at = datetime.now()
-    await session.flush()
-
-    logger.info(f"Database session status updated to CLOSED: session_id={session_id}")
-
-    # 5. Close runtime session
+    # 4. Close runtime session first (runtime layer handles its own DB updates)
     runtime_manager = req.app.state.runtime_manager
     await runtime_manager.close_session(
         node=node,
@@ -239,6 +231,14 @@ async def close_session(
     )
 
     logger.info(f"Runtime session closed successfully: session_id={session_id}")
+
+    # 5. Update database status to CLOSED (final confirmation after runtime cleanup)
+    db_session.status = SessionStatus.CLOSED
+    db_session.closed_at = datetime.now()
+    db_session.updated_at = datetime.now()
+    await session.flush()
+
+    logger.info(f"Database session status updated to CLOSED: session_id={session_id}")
 
     # 6. Construct response
     session_out = SessionOut(

@@ -612,11 +612,41 @@ class ApiClient {
   // ========================================================================
 
   /**
-   * List events in a mosaic with pagination
+   * List events in a mosaic with filters and pagination
    */
-  async listEvents(mosaicId: number, page: number = 1, pageSize: number = 50): Promise<PaginatedData<EventListOut>> {
+  async listEvents(
+    mosaicId: number,
+    params: {
+      created_at_start: string  // ISO datetime string (required)
+      created_at_end: string    // ISO datetime string (required)
+      source_node_id?: string
+      source_session_id?: string
+      target_node_id?: string
+      target_session_id?: string
+      event_type?: string
+      page?: number
+      page_size?: number
+    }
+  ): Promise<PaginatedData<EventListOut>> {
+    const queryParams = new URLSearchParams()
+
+    // Required parameters
+    queryParams.append('created_at_start', params.created_at_start)
+    queryParams.append('created_at_end', params.created_at_end)
+
+    // Optional parameters
+    if (params.source_node_id) queryParams.append('source_node_id', params.source_node_id)
+    if (params.source_session_id) queryParams.append('source_session_id', params.source_session_id)
+    if (params.target_node_id) queryParams.append('target_node_id', params.target_node_id)
+    if (params.target_session_id) queryParams.append('target_session_id', params.target_session_id)
+    if (params.event_type) queryParams.append('event_type', params.event_type)
+
+    // Pagination parameters
+    queryParams.append('page', String(params.page || 1))
+    queryParams.append('page_size', String(params.page_size || 100))
+
     return request<PaginatedData<EventListOut>>(
-      `/api/mosaics/${mosaicId}/events?page=${page}&page_size=${pageSize}`,
+      `/api/mosaics/${mosaicId}/events?${queryParams.toString()}`,
       {
         autoToast: {
           success: false,

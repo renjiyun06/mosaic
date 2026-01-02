@@ -103,6 +103,11 @@ export default function ChatPage() {
   const [sessionModel, setSessionModel] = useState<LLMModel>(LLMModel.SONNET)
   const [creating, setCreating] = useState(false)
 
+  // Close session confirmation dialog state
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false)
+  const [closingSession, setClosingSession] = useState<{ sessionId: string; nodeId: string } | null>(null)
+  const [closing, setClosing] = useState(false)
+
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -332,6 +337,13 @@ export default function ChatPage() {
     textarea.style.height = `${newHeight}px`
   }, [input])
 
+  // Auto-focus textarea when loading finishes
+  useEffect(() => {
+    if (!loading && activeSessionId && isConnected && textareaRef.current) {
+      textareaRef.current.focus()
+    }
+  }, [loading, activeSessionId, isConnected])
+
   const handleInterrupt = () => {
     if (!activeSessionId || !isConnected || !loading) return
 
@@ -419,25 +431,38 @@ export default function ChatPage() {
     }
   }
 
-  const handleCloseSession = async (sessionId: string, nodeId: string) => {
-    if (!confirm("确定要关闭这个会话吗？关闭后无法再发送消息，且无法重新开启。")) {
-      return
-    }
+  const openCloseDialog = (sessionId: string, nodeId: string) => {
+    setClosingSession({ sessionId, nodeId })
+    setCloseDialogOpen(true)
+  }
+
+  const handleCloseSession = async () => {
+    if (!closingSession) return
 
     try {
-      const updatedSession = await apiClient.closeSession(mosaicId, nodeId, sessionId)
+      setClosing(true)
+      const updatedSession = await apiClient.closeSession(
+        mosaicId,
+        closingSession.nodeId,
+        closingSession.sessionId
+      )
 
       // Update session status in local state
       setNodes((prev) =>
         prev.map((node) => ({
           ...node,
           sessions: node.sessions.map((s) =>
-            s.session_id === sessionId ? { ...s, status: updatedSession.status } : s
+            s.session_id === closingSession.sessionId ? { ...s, status: updatedSession.status } : s
           ),
         }))
       )
+
+      setCloseDialogOpen(false)
+      setClosingSession(null)
     } catch (error) {
       console.error("Failed to close session:", error)
+    } finally {
+      setClosing(false)
     }
   }
 
@@ -766,7 +791,7 @@ export default function ChatPage() {
                                   className="h-6 w-6 p-0"
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    handleCloseSession(session.session_id, node.node_id)
+                                    openCloseDialog(session.session_id, node.node_id)
                                   }}
                                   title="关闭会话"
                                 >
@@ -865,6 +890,46 @@ export default function ChatPage() {
             <Button onClick={handleCreateSession} disabled={creating}>
               {creating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               创建
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Close Session Confirmation Dialog */}
+      <Dialog open={closeDialogOpen} onOpenChange={setCloseDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认关闭会话？</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 py-4">
+            <p className="text-sm text-muted-foreground">
+              确定要关闭会话 <span className="font-semibold text-foreground font-mono">{closingSession?.sessionId.slice(0, 8)}</span> 吗？
+            </p>
+            <p className="text-sm text-amber-600 font-medium">
+              ⚠️ 警告：关闭后无法再发送消息，且无法重新开启。
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setCloseDialogOpen(false)}
+              disabled={closing}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleCloseSession}
+              disabled={closing}
+            >
+              {closing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  关闭中...
+                </>
+              ) : (
+                "确认关闭"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
