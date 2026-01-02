@@ -578,24 +578,33 @@ class ApiClient {
   // ========================================================================
 
   /**
-   * List messages in a session with pagination
+   * List messages in a mosaic with optional filters and pagination
    */
   async listMessages(
     mosaicId: number,
-    nodeId: string,
-    sessionId: string,
-    page: number = 1,
-    pageSize: number = 50
+    options?: {
+      nodeId?: string
+      sessionId?: string
+      page?: number
+      pageSize?: number
+    }
   ): Promise<PaginatedData<MessageOut>> {
-    return request<PaginatedData<MessageOut>>(
-      `/api/mosaics/${mosaicId}/nodes/${nodeId}/sessions/${sessionId}/messages?page=${page}&page_size=${pageSize}`,
-      {
-        autoToast: {
-          success: false,
-          error: true
-        }
+    const queryParams = new URLSearchParams()
+
+    if (options?.nodeId) queryParams.append('node_id', options.nodeId)
+    if (options?.sessionId) queryParams.append('session_id', options.sessionId)
+    if (options?.page) queryParams.append('page', options.page.toString())
+    if (options?.pageSize) queryParams.append('page_size', options.pageSize.toString())
+
+    const queryString = queryParams.toString()
+    const url = `/api/mosaics/${mosaicId}/messages${queryString ? `?${queryString}` : ''}`
+
+    return request<PaginatedData<MessageOut>>(url, {
+      autoToast: {
+        success: false,
+        error: true
       }
-    )
+    })
   }
 
   // ========================================================================

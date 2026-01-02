@@ -6,11 +6,11 @@ from math import ceil
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from typing import Annotated
+from typing import Annotated, Optional
 
 from ..schema.response import SuccessResponse, PaginatedData
 from ..schema.message import MessageOut
-from ..model import Message, Session
+from ..model import Message, Session, Mosaic
 from ..dep import get_db_session, get_current_user
 from ..model.user import User
 from ..exception import NotFoundError
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Router configuration
 router = APIRouter(
-    prefix="/mosaics/{mosaic_id}/nodes/{node_id}/sessions/{session_id}/messages",
+    prefix="/mosaics/{mosaic_id}/messages",
     tags=["Message Management"]
 )
 
@@ -35,21 +35,21 @@ CurrentUserDep = Annotated[User, Depends(get_current_user)]
 @router.get("", response_model=SuccessResponse[PaginatedData[MessageOut]])
 async def list_messages(
     mosaic_id: int,
-    session_id: str,
-    node_id: str,
     session: SessionDep,
     current_user: CurrentUserDep,
+    session_id: Optional[str] = Query(None, description="Filter by session ID"),
+    node_id: Optional[str] = Query(None, description="Filter by node ID"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
 ):
-    """List messages in a session
+    """List messages in a mosaic
 
     Business logic:
-    1. Verify session exists and belongs to current user
+    1. Verify mosaic exists and belongs to current user
     2. Build query with filters:
-       - mosaic_id (from path)
-       - session_id (from path)
-       - node_id (from path)
+       - mosaic_id (from path, required)
+       - session_id (query param, optional)
+       - node_id (query param, optional)
        - user_id (current user)
        - deleted_at IS NULL
     3. Count total matching records
@@ -57,6 +57,8 @@ async def list_messages(
     5. Return paginated results
 
     Query Parameters:
+    - session_id: Filter by session ID (optional)
+    - node_id: Filter by node ID (optional)
     - page: Page number (starts from 1)
     - page_size: Items per page (1-100, default 20)
 
@@ -64,7 +66,7 @@ async def list_messages(
         Paginated list of messages, ordered by sequence ASC (chronological order)
 
     Raises:
-        NotFoundError: If session not found or doesn't belong to user
+        NotFoundError: If mosaic not found or doesn't belong to user
 
     Note:
         Messages are ordered by sequence (1, 2, 3, ...) for chronological display
@@ -74,32 +76,33 @@ async def list_messages(
         f"node_id={node_id}, user_id={current_user.id}, page={page}, page_size={page_size}"
     )
 
-    # 1. Verify session exists and belongs to current user
-    session_stmt = select(Session).where(
-        Session.mosaic_id == mosaic_id,
-        Session.session_id == session_id,
-        Session.node_id == node_id,
-        Session.user_id == current_user.id,
-        Session.deleted_at.is_(None)
+    # 1. Verify mosaic exists and belongs to current user
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.user_id == current_user.id,
+        Mosaic.deleted_at.is_(None)
     )
-    session_result = await session.execute(session_stmt)
-    db_session = session_result.scalar_one_or_none()
+    mosaic_result = await session.execute(mosaic_stmt)
+    db_mosaic = mosaic_result.scalar_one_or_none()
 
-    if not db_session:
+    if not db_mosaic:
         logger.warning(
-            f"Session not found: mosaic_id={mosaic_id}, session_id={session_id}, "
-            f"node_id={node_id}, user_id={current_user.id}"
+            f"Mosaic not found: mosaic_id={mosaic_id}, user_id={current_user.id}"
         )
-        raise NotFoundError("Session not found")
+        raise NotFoundError("Mosaic not found")
 
     # 2. Build base query with filters
     stmt = select(Message).where(
         Message.mosaic_id == mosaic_id,
-        Message.session_id == session_id,
-        Message.node_id == node_id,
         Message.user_id == current_user.id,
         Message.deleted_at.is_(None)
     )
+
+    # Apply optional filters
+    if session_id is not None:
+        stmt = stmt.where(Message.session_id == session_id)
+    if node_id is not None:
+        stmt = stmt.where(Message.node_id == node_id)
 
     # 3. Count total records
     count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -149,8 +152,8 @@ async def list_messages(
     )
 
     logger.info(
-        f"Listed {len(message_list)} messages: session_id={session_id}, "
-        f"page={page}/{total_pages}, total={total}"
+        f"Listed {len(message_list)} messages: mosaic_id={mosaic_id}, "
+        f"session_id={session_id}, node_id={node_id}, page={page}/{total_pages}, total={total}"
     )
 
     return SuccessResponse(data=paginated_data)

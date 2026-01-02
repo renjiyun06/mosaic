@@ -681,17 +681,15 @@ export default function NodesPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>确认停止节点？</DialogTitle>
-            <DialogDescription>
-              <div className="space-y-2">
-                <p>
-                  确定要停止节点 <span className="font-semibold text-foreground">{stoppingNode?.node_id}</span> 吗？
-                </p>
-                <p className="text-amber-600 font-medium">
-                  ⚠️ 警告：该节点下的所有活动会话将被无条件关闭。
-                </p>
-              </div>
-            </DialogDescription>
           </DialogHeader>
+          <div className="space-y-2 py-4">
+            <p className="text-sm text-muted-foreground">
+              确定要停止节点 <span className="font-semibold text-foreground">{stoppingNode?.node_id}</span> 吗？
+            </p>
+            <p className="text-sm text-amber-600 font-medium">
+              ⚠️ 警告：该节点下的所有活动会话将被无条件关闭。
+            </p>
+          </div>
           <DialogFooter>
             <Button
               variant="outline"

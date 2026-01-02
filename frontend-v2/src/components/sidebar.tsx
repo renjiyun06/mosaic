@@ -9,6 +9,7 @@ import {
   Bell,
   MessageSquare,
   MessagesSquare,
+  Mail,
   GitBranch,
   Activity,
   Settings,
@@ -62,6 +63,11 @@ const navItems = [
     title: "会话列表",
     href: "/sessions",
     icon: MessageSquare,
+  },
+  {
+    title: "会话消息",
+    href: "/messages",
+    icon: Mail,
   },
   {
     title: "实时对话",

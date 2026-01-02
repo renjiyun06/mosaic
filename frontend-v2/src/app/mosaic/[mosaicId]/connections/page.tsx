@@ -541,26 +541,24 @@ export default function ConnectionsPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>确认删除连接？</DialogTitle>
-            <DialogDescription>
-              <div className="space-y-2">
-                <p>
-                  确定要删除从{" "}
-                  <span className="font-semibold text-foreground font-mono">
-                    {deletingConnection?.source_node_id}
-                  </span>{" "}
-                  到{" "}
-                  <span className="font-semibold text-foreground font-mono">
-                    {deletingConnection?.target_node_id}
-                  </span>{" "}
-                  的连接吗？
-                </p>
-                <p className="text-amber-600 font-medium">
-                  ⚠️ 警告：删除连接前必须先删除该连接上的所有订阅。
-                </p>
-                <p>此操作不可撤销。</p>
-              </div>
-            </DialogDescription>
           </DialogHeader>
+          <div className="space-y-2 py-4">
+            <p className="text-sm text-muted-foreground">
+              确定要删除从{" "}
+              <span className="font-semibold text-foreground font-mono">
+                {deletingConnection?.source_node_id}
+              </span>{" "}
+              到{" "}
+              <span className="font-semibold text-foreground font-mono">
+                {deletingConnection?.target_node_id}
+              </span>{" "}
+              的连接吗？
+            </p>
+            <p className="text-sm text-amber-600 font-medium">
+              ⚠️ 警告：删除连接前必须先删除该连接上的所有订阅。
+            </p>
+            <p className="text-sm text-muted-foreground">此操作不可撤销。</p>
+          </div>
           <DialogFooter>
             <Button
               variant="outline"

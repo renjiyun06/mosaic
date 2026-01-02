@@ -267,7 +267,10 @@ export default function ChatPage() {
         return
       }
 
-      const data = await apiClient.listMessages(mosaicId, nodeId, sessionId)
+      const data = await apiClient.listMessages(mosaicId, {
+        nodeId,
+        sessionId
+      })
       const parsed = data.items.map((msg) => ({
         ...msg,
         contentParsed: typeof msg.payload === "string" ? JSON.parse(msg.payload) : msg.payload,

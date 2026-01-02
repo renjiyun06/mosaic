@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Loader2, MessageSquare, ChevronLeft, ChevronRight } from "lucide-react"
+import { Loader2, MessageSquare, ChevronLeft, ChevronRight, Copy, Check, X } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
 import { SessionStatus, type NodeOut, type SessionOut } from "@/lib/types"
@@ -56,6 +56,9 @@ export default function SessionsPage() {
   const [pageSize] = useState(20)
   const [totalPages, setTotalPages] = useState(0)
   const [total, setTotal] = useState(0)
+
+  // Copy state
+  const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null)
 
   // Fetch nodes on mount
   useEffect(() => {
@@ -150,6 +153,46 @@ export default function SessionsPage() {
     return `$${cost.toFixed(2)}`
   }
 
+  // Handle copy session ID
+  const handleCopySessionId = async (sessionId: string) => {
+    try {
+      // Try modern clipboard API first
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(sessionId)
+        setCopiedSessionId(sessionId)
+        setTimeout(() => setCopiedSessionId(null), 1000)
+      } else {
+        // Fallback for older browsers or non-secure contexts
+        const textArea = document.createElement("textarea")
+        textArea.value = sessionId
+        textArea.style.position = "fixed"
+        textArea.style.left = "-999999px"
+        textArea.style.top = "-999999px"
+        document.body.appendChild(textArea)
+        textArea.focus()
+        textArea.select()
+
+        const successful = document.execCommand('copy')
+        document.body.removeChild(textArea)
+
+        if (successful) {
+          setCopiedSessionId(sessionId)
+          setTimeout(() => setCopiedSessionId(null), 1000)
+        } else {
+          throw new Error("Copy command failed")
+        }
+      }
+    } catch (error) {
+      console.error("Copy failed:", error)
+    }
+  }
+
+  // Truncate session ID for display
+  const truncateSessionId = (sessionId: string): string => {
+    if (sessionId.length <= 16) return sessionId
+    return `${sessionId.substring(0, 8)}...${sessionId.substring(sessionId.length - 8)}`
+  }
+
   // Loading nodes state
   if (loadingNodes) {
     return (
@@ -204,15 +247,29 @@ export default function SessionsPage() {
         </Select>
 
         {/* Session ID filter */}
-        <Input
-          id="session-id-filter"
-          placeholder="搜索会话 ID..."
-          value={sessionIdFilter}
-          onChange={(e) => {
-            setSessionIdFilter(e.target.value)
-            setCurrentPage(1)
-          }}
-        />
+        <div className="relative">
+          <Input
+            id="session-id-filter"
+            placeholder="搜索会话 ID..."
+            value={sessionIdFilter}
+            onChange={(e) => {
+              setSessionIdFilter(e.target.value)
+              setCurrentPage(1)
+            }}
+            className="pr-8 focus-visible:ring-0 focus-visible:ring-offset-0"
+          />
+          {sessionIdFilter && (
+            <button
+              onClick={() => {
+                setSessionIdFilter("")
+                setCurrentPage(1)
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
 
         {/* Status filter */}
         <Select
@@ -278,7 +335,19 @@ export default function SessionsPage() {
                   {sessions.map((session) => (
                     <TableRow key={session.id}>
                       <TableCell className="text-center">
-                        <span className="font-mono text-sm">{session.session_id}</span>
+                        <div className="flex items-center justify-center gap-2">
+                          <span className="font-mono text-sm">{truncateSessionId(session.session_id)}</span>
+                          <button
+                            onClick={() => handleCopySessionId(session.session_id)}
+                            className="text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            {copiedSessionId === session.session_id ? (
+                              <Check className="h-3.5 w-3.5 text-green-500" />
+                            ) : (
+                              <Copy className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        </div>
                       </TableCell>
                       <TableCell className="text-center">
                         <span className="font-mono text-sm">{session.node_id}</span>
