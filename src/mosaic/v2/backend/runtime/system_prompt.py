@@ -45,8 +45,8 @@ async def generate_system_prompt_template(
         nodes = result.scalars().all()
 
         # Build node ID mapping for O(1) lookup
-        node_map = {n.id: n for n in nodes}
-        node_db_ids = [n.id for n in nodes]
+        node_map = {n.node_id: n for n in nodes}
+        node_db_ids = [n.node_id for n in nodes]
 
         logger.debug(f"Found {len(nodes)} nodes in mosaic")
 
@@ -152,18 +152,18 @@ Session ID: {{ session_id_placeholder }}
 [Nodes In Mesh]
 {% for node in nodes -%}
 - {{ node.node_id }} (Type: {{ node.node_type }})
-{% endfor %}
+{% endfor -%}
 
-{% if subscriptions or connections %}
+{%- if subscriptions or connections %}
 [Network Topology]
 graph LR
-{% for sub in subscriptions %}
+{%- for sub in subscriptions %}
 {{ sub.source_id }} --> |{{ sub.event_type }}| {{ sub.target_id }}
-{% endfor %}
-{% for conn in connections %}
+{% endfor -%}
+{%- for conn in connections %}
 {{ conn.source_id }} --> {{ conn.target_id }}
 {% endfor -%}
-{% endif -%}
+{%- endif %}
 
 [Event Definitions]
 {% for event_type, event_def in event_definitions.items() -%}
@@ -174,14 +174,14 @@ graph LR
 {%- if event_def.payload_schema.properties %}
 {%- for field, schema in event_def.payload_schema.properties.items() %}
         * {{ field }} ({{ schema.type }}): {{ schema.get('description', 'N/A') }}
-{% endfor %}
+{% endfor -%}
 {% else %}
         (complex schema)
 {% endif %}
 {% else %}
     - payload_schema: {} (empty)
 {% endif -%}
-{% endfor -%}
+{% endfor %}
 
 [Event Message Format]
 All events you receive follow this structure:

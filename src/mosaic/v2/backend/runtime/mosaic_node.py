@@ -434,6 +434,7 @@ class MosaicNode(ABC):
         if target_node_id:
             # Unicast mode: Verify connection exists
             from ..model.connection import Connection
+            from ..model.session_routing import SessionRouting
 
             async with self.async_session_factory() as db_session:
                 stmt = select(Connection).where(
@@ -445,7 +446,17 @@ class MosaicNode(ABC):
                 result = await db_session.execute(stmt)
                 connection = result.scalar_one_or_none()
 
-            if not connection:
+                stmt = select(SessionRouting).where(
+                    SessionRouting.mosaic_id == self.mosaic_instance.mosaic.id,
+                    SessionRouting.local_node_id == self.node.node_id,
+                    SessionRouting.local_session_id == source_session_id,
+                    SessionRouting.remote_node_id == target_node_id,
+                    SessionRouting.deleted_at.is_(None)
+                )
+                result = await db_session.execute(stmt)
+                session_routing = result.scalar_one_or_none()
+
+            if not connection and not session_routing:
                 logger.warning(
                     f"No connection found from {self.node.node_id} to {target_node_id}, "
                     f"event will not be sent: event_type={event_type}, source_session={source_session_id}"
