@@ -348,7 +348,9 @@ export default function ChatPage() {
 
       const data = await apiClient.listMessages(mosaicId, {
         nodeId,
-        sessionId
+        sessionId,
+        page: 1,
+        pageSize: 9999
       })
       const parsed = data.items.map((msg) => ({
         ...msg,
