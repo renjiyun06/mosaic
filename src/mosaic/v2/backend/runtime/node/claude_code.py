@@ -30,6 +30,7 @@ from ...enum import (
     MessageRole,
     MessageType
 )
+from ...websocket import UserMessageBroker
 from ...exception import SessionNotFoundError, SessionConflictError
 
 if TYPE_CHECKING:
@@ -440,6 +441,17 @@ class ClaudeCodeSession(MosaicSession):
 
         logger.info(f"ClaudeCodeSession initialized: session_id={self.session_id}")
 
+        user_message_broker = UserMessageBroker.get_instance()
+        user_message_broker.push_from_worker(self.node.node.user_id, {
+            "role": MessageRole.NOTIFICATION,
+            "message_type": MessageType.SESSION_STARTED,
+            "session_id": self.session_id,
+            "payload": {
+                "session_id": self.session_id
+            }
+        })
+        logger.info(f"Pushed session_started notification to WebSocket: session_id={self.session_id}")
+
     async def _handle_event(self, event: dict) -> None:
         """
         Handle an incoming event.
@@ -670,6 +682,16 @@ class ClaudeCodeSession(MosaicSession):
         self._last_activity_at = None
 
         logger.info(f"ClaudeCodeSession cleanup complete: session_id={self.session_id}")
+
+        UserMessageBroker.get_instance().push_from_worker(self.node.node.user_id, {
+            "role": MessageRole.NOTIFICATION,
+            "message_type": MessageType.SESSION_ENDED,
+            "session_id": self.session_id,
+            "payload": {
+                "session_id": self.session_id
+            }
+        })
+        logger.info(f"Pushed session_ended notification to WebSocket: session_id={self.session_id}")
 
     async def _on_initialize(self):
         pass
@@ -987,7 +1009,6 @@ class ClaudeCodeSession(MosaicSession):
         # Get user ID and push via UserMessageBroker
         user_id = self.node.node.user_id
 
-        from ...websocket import UserMessageBroker
         user_message_broker = UserMessageBroker.get_instance()
         user_message_broker.push_from_worker(user_id, ws_message)
 

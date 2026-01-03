@@ -93,8 +93,8 @@ export default function ChatPage() {
     total_output_tokens?: number
   } | null>(null)
 
-  // Collapsed thinking messages (by message_id)
-  const [collapsedThinking, setCollapsedThinking] = useState<Set<string>>(new Set())
+  // Collapsed messages (thinking, system, and tool use messages, by message_id)
+  const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set())
 
   // Create session dialog state
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -112,11 +112,77 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const maxSequenceRef = useRef<number>(0) // Track max sequence number for gap detection
 
+  // Load nodes and sessions function
+  const loadNodesAndSessions = useCallback(async () => {
+    try {
+      // Load all nodes
+      const nodesData = await apiClient.listNodes(mosaicId)
+      // Filter only Claude Code nodes and sort by node_id
+      const ccNodes = nodesData
+        .filter((n) => n.node_type === NodeType.CLAUDE_CODE)
+        .sort((a, b) => a.node_id.localeCompare(b.node_id))
+
+      if (ccNodes.length === 0) {
+        setNodes([])
+        return
+      }
+
+      // Load all active and closed sessions for this mosaic (exclude archived)
+      // Use a large page_size to get all sessions in one request
+      const allSessionsData = await apiClient.listSessions(mosaicId, undefined, {
+        page: 1,
+        page_size: 1000, // Large number to get all sessions
+      })
+
+      // Filter only active and closed sessions (exclude archived)
+      const activeSessions = allSessionsData.items.filter(
+        (s) => s.status === SessionStatus.ACTIVE || s.status === SessionStatus.CLOSED
+      )
+
+      // Group sessions by node_id
+      const sessionsByNode = new Map<string, SessionOut[]>()
+      activeSessions.forEach((session) => {
+        if (!sessionsByNode.has(session.node_id)) {
+          sessionsByNode.set(session.node_id, [])
+        }
+        sessionsByNode.get(session.node_id)!.push(session)
+      })
+
+      // Sort sessions within each node by created_at (newest first)
+      sessionsByNode.forEach((sessions) => {
+        sessions.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      })
+
+      // Build nodes with sessions
+      const nodesWithSessions: NodeWithSessions[] = ccNodes.map((node) => ({
+        ...node,
+        sessions: sessionsByNode.get(node.node_id) || [],
+        expanded: true, // Default expanded
+      }))
+
+      setNodes(nodesWithSessions)
+
+      // Auto-select first active session
+      if (!activeSessionId) {
+        const allSessions = nodesWithSessions.flatMap((n) => n.sessions)
+        const activeSession = allSessions.find((s) => s.status === SessionStatus.ACTIVE)
+        if (activeSession) {
+          setActiveSessionId(activeSession.session_id)
+        } else if (allSessions.length > 0) {
+          // If no active session, select first one (to view history)
+          setActiveSessionId(allSessions[0].session_id)
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load nodes and sessions:", error)
+    }
+  }, [mosaicId, activeSessionId])
+
   // Load nodes and sessions on mount
   useEffect(() => {
     if (!token) return
     loadNodesAndSessions()
-  }, [mosaicId, token])
+  }, [token, loadNodesAndSessions])
 
   // Listen for mosaic status changes and refresh node/session list
   useEffect(() => {
@@ -134,7 +200,36 @@ export default function ChatPage() {
     return () => {
       window.removeEventListener('mosaic-status-changed', handleMosaicStatusChange)
     }
-  }, [mosaicId, token])
+  }, [mosaicId, loadNodesAndSessions])
+
+  // Subscribe to global WebSocket notifications (session lifecycle events)
+  useEffect(() => {
+    const unsubscribe = subscribe('*', (message) => {
+      // Check if it's an error message
+      if ("type" in message && message.type === "error") {
+        return
+      }
+
+      const wsMessage = message as import("@/contexts/websocket-context").WSMessage
+
+      // Handle notification messages (session lifecycle events)
+      if (wsMessage.role === "notification") {
+        console.log("[Chat] Received global notification:", wsMessage.message_type)
+        if (wsMessage.message_type === "session_started") {
+          console.log("[Chat] Session started, refreshing session list")
+          loadNodesAndSessions()
+        }
+        if (wsMessage.message_type === "session_ended") {
+          console.log("[Chat] Session ended, refreshing session list")
+          loadNodesAndSessions()
+        }
+      }
+    })
+
+    return () => {
+      unsubscribe()
+    }
+  }, [subscribe, loadNodesAndSessions])
 
   // Subscribe to WebSocket messages for active session
   useEffect(() => {
@@ -143,9 +238,9 @@ export default function ChatPage() {
     // Load message history from database
     loadMessages(activeSessionId)
 
-    // Reset session stats and collapsed thinking when switching sessions
+    // Reset session stats and collapsed messages when switching sessions
     setSessionStats(null)
-    setCollapsedThinking(new Set())
+    setCollapsedMessages(new Set())
 
     // Reset sequence tracking
     maxSequenceRef.current = 0
@@ -212,9 +307,9 @@ export default function ChatPage() {
 
       setMessages((prev) => [...prev, newMessage])
 
-      // Collapse thinking messages by default
-      if (wsMessage.message_type === "assistant_thinking") {
-        setCollapsedThinking((prev) => new Set(prev).add(wsMessage.message_id))
+      // Collapse thinking, system, and tool use messages by default
+      if (wsMessage.message_type === "assistant_thinking" || wsMessage.message_type === "system_message" || wsMessage.message_type === "assistant_tool_use") {
+        setCollapsedMessages((prev) => new Set(prev).add(wsMessage.message_id))
       }
 
       // Stop loading on result
@@ -233,71 +328,6 @@ export default function ChatPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
-
-  const loadNodesAndSessions = async () => {
-    try {
-      // Load all nodes
-      const nodesData = await apiClient.listNodes(mosaicId)
-      // Filter only Claude Code nodes and sort by node_id
-      const ccNodes = nodesData
-        .filter((n) => n.node_type === NodeType.CLAUDE_CODE)
-        .sort((a, b) => a.node_id.localeCompare(b.node_id))
-
-      if (ccNodes.length === 0) {
-        setNodes([])
-        return
-      }
-
-      // Load all active and closed sessions for this mosaic (exclude archived)
-      // Use a large page_size to get all sessions in one request
-      const allSessionsData = await apiClient.listSessions(mosaicId, undefined, {
-        page: 1,
-        page_size: 1000, // Large number to get all sessions
-      })
-
-      // Filter only active and closed sessions (exclude archived)
-      const activeSessions = allSessionsData.items.filter(
-        (s) => s.status === SessionStatus.ACTIVE || s.status === SessionStatus.CLOSED
-      )
-
-      // Group sessions by node_id
-      const sessionsByNode = new Map<string, SessionOut[]>()
-      activeSessions.forEach((session) => {
-        if (!sessionsByNode.has(session.node_id)) {
-          sessionsByNode.set(session.node_id, [])
-        }
-        sessionsByNode.get(session.node_id)!.push(session)
-      })
-
-      // Sort sessions within each node by created_at (newest first)
-      sessionsByNode.forEach((sessions) => {
-        sessions.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      })
-
-      // Build nodes with sessions
-      const nodesWithSessions: NodeWithSessions[] = ccNodes.map((node) => ({
-        ...node,
-        sessions: sessionsByNode.get(node.node_id) || [],
-        expanded: true, // Default expanded
-      }))
-
-      setNodes(nodesWithSessions)
-
-      // Auto-select first active session
-      if (!activeSessionId) {
-        const allSessions = nodesWithSessions.flatMap((n) => n.sessions)
-        const activeSession = allSessions.find((s) => s.status === SessionStatus.ACTIVE)
-        if (activeSession) {
-          setActiveSessionId(activeSession.session_id)
-        } else if (allSessions.length > 0) {
-          // If no active session, select first one (to view history)
-          setActiveSessionId(allSessions[0].session_id)
-        }
-      }
-    } catch (error) {
-      console.error("Failed to load nodes and sessions:", error)
-    }
-  }
 
   const loadMessages = async (sessionId: string) => {
     try {
@@ -335,11 +365,11 @@ export default function ChatPage() {
         maxSequenceRef.current = 0
       }
 
-      // Collapse all thinking messages by default
-      const thinkingIds = parsed
-        .filter((msg) => msg.message_type === MessageType.ASSISTANT_THINKING)
+      // Collapse all thinking, system, and tool use messages by default
+      const collapsibleIds = parsed
+        .filter((msg) => msg.message_type === MessageType.ASSISTANT_THINKING || msg.message_type === MessageType.SYSTEM_MESSAGE || msg.message_type === MessageType.ASSISTANT_TOOL_USE)
         .map((msg) => msg.message_id)
-      setCollapsedThinking(new Set(thinkingIds))
+      setCollapsedMessages(new Set(collapsibleIds))
 
       // Extract session stats from the last assistant_result message
       const lastResult = [...parsed].reverse().find((msg) => msg.message_type === MessageType.ASSISTANT_RESULT)
@@ -460,10 +490,6 @@ export default function ChatPage() {
   }
 
   const handleArchiveSession = async (sessionId: string, nodeId: string) => {
-    if (!confirm("确定要归档这个会话吗？归档后可以在历史记录中查看。")) {
-      return
-    }
-
     try {
       await apiClient.archiveSession(mosaicId, nodeId, sessionId)
 
@@ -538,7 +564,7 @@ export default function ChatPage() {
     currentSessionInfo.session.status === SessionStatus.ACTIVE
 
   const toggleThinkingCollapse = (messageId: string) => {
-    setCollapsedThinking((prev) => {
+    setCollapsedMessages((prev) => {
       const newSet = new Set(prev)
       if (newSet.has(messageId)) {
         newSet.delete(messageId)
@@ -557,7 +583,10 @@ export default function ChatPage() {
 
     const isUser = msg.role === MessageRole.USER
     const isThinking = msg.message_type === MessageType.ASSISTANT_THINKING
-    const isCollapsed = isThinking && collapsedThinking.has(msg.message_id)
+    const isSystemMessage = msg.message_type === MessageType.SYSTEM_MESSAGE
+    const isToolUse = msg.message_type === MessageType.ASSISTANT_TOOL_USE
+    const isCollapsible = isThinking || isSystemMessage || isToolUse
+    const isCollapsed = isCollapsible && collapsedMessages.has(msg.message_id)
 
     return (
       <div
@@ -567,7 +596,7 @@ export default function ChatPage() {
         <div
           className={`max-w-[70%] rounded-lg ${
             isUser ? "bg-primary text-primary-foreground" : "bg-muted"
-          } ${isThinking ? "px-2 py-1" : "px-4 py-2"}`}
+          } ${isCollapsible ? "px-2 py-1" : "px-4 py-2"}`}
         >
           {isThinking ? (
             <div>
@@ -588,18 +617,48 @@ export default function ChatPage() {
                 </div>
               )}
             </div>
-          ) : (
-            <>
-              {msg.message_type === MessageType.ASSISTANT_TOOL_USE && (
-                <div className="text-xs opacity-70 mb-1">
-                  🔧 {msg.contentParsed.tool_name}
+          ) : isSystemMessage ? (
+            <div>
+              <div
+                className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
+                onClick={() => toggleThinkingCollapse(msg.message_id)}
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="h-3 w-3 opacity-70" />
+                ) : (
+                  <ChevronDown className="h-3 w-3 opacity-70" />
+                )}
+                <span className="text-xs opacity-70">🔔 系统消息</span>
+              </div>
+              {!isCollapsed && (
+                <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0">
+                  {msg.contentParsed.message}
                 </div>
               )}
-              <div className="text-sm whitespace-pre-wrap break-words">
-                {msg.contentParsed.message ||
-                  JSON.stringify(msg.contentParsed.tool_input, null, 2)}
+            </div>
+          ) : isToolUse ? (
+            <div>
+              <div
+                className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
+                onClick={() => toggleThinkingCollapse(msg.message_id)}
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="h-3 w-3 opacity-70" />
+                ) : (
+                  <ChevronDown className="h-3 w-3 opacity-70" />
+                )}
+                <span className="text-xs opacity-70">🔧 {msg.contentParsed.tool_name}</span>
               </div>
-            </>
+              {!isCollapsed && (
+                <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0">
+                  {JSON.stringify(msg.contentParsed.tool_input, null, 2)}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-sm whitespace-pre-wrap break-words">
+              {msg.contentParsed.message}
+            </div>
           )}
         </div>
       </div>
@@ -696,8 +755,8 @@ export default function ChatPage() {
             </div>
 
             {/* Input Area */}
-            <div className="p-4 border-t bg-background">
-              <div className="border rounded-md bg-background overflow-hidden">
+            <div className="border-t bg-background">
+              <div className="bg-background overflow-hidden">
                 <Textarea
                   ref={textareaRef}
                   value={input}

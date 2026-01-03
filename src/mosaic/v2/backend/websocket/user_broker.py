@@ -282,6 +282,7 @@ class UserMessageBroker:
         """
         # Schedule message delivery in main loop (thread-safe)
         # All checks and dictionary access happen in main thread
+        logger.debug(f"Pushing message to WebSocket: user_id={user_id}, message={message}")
         if self._main_loop:
             self._main_loop.call_soon_threadsafe(
                 self._push_message_internal, user_id, message

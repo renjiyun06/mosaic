@@ -129,6 +129,7 @@ class MessageRole(str, Enum):
     SYSTEM = "system"
     ASSISTANT = "assistant"
     USER = "user"
+    NOTIFICATION = "notification"
 
 
 class MessageType(str, Enum):
@@ -142,3 +143,5 @@ class MessageType(str, Enum):
     ASSISTANT_TOOL_USE = "assistant_tool_use"
     ASSISTANT_RESULT = "assistant_result"
     SYSTEM_MESSAGE = "system_message"
+    SESSION_STARTED = "session_started"
+    SESSION_ENDED = "session_ended"

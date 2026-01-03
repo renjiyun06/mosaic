@@ -504,7 +504,7 @@ class MosaicInstance:
             NodeNotFoundError: If node is not running
         """
         mosaic_node = self._get_node(command.node)
-        await mosaic_node.interrupt_session(command.session_id)
+        await mosaic_node.interrupt_session(command.session.session_id)
 
     async def _handle_close_session(self, command: CloseSessionCommand) -> None:
         """
