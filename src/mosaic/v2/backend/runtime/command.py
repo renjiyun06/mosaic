@@ -181,7 +181,7 @@ class CloseSessionCommand(Command):
 
     Attributes:
         node: Node model object (required)
-        session: Session model object (required)
+        session_id: Session identifier (required)
     """
     node: 'Node' = None
-    session: 'Session' = None
+    session_id: str = None

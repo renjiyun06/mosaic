@@ -851,7 +851,7 @@ class RuntimeManager:
         # Create CloseSessionCommand
         command = CloseSessionCommand(
             node=node,
-            session=session
+            session_id=session.session_id
         )
 
         # Submit command and wait for completion
