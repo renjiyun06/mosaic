@@ -126,6 +126,11 @@ export function Sidebar({ mosaicId }: SidebarProps) {
       setOperating(true)
       const updated = await apiClient.startMosaic(mosaic.id)
       setMosaic(updated)
+
+      // Dispatch custom event to notify other components
+      window.dispatchEvent(new CustomEvent('mosaic-status-changed', {
+        detail: { status: updated.status, mosaicId: mosaic.id }
+      }))
     } catch (error) {
       console.error("Failed to start mosaic:", error)
     } finally {
@@ -145,6 +150,11 @@ export function Sidebar({ mosaicId }: SidebarProps) {
       const updated = await apiClient.stopMosaic(mosaic.id)
       setMosaic(updated)
       setStopConfirmOpen(false)
+
+      // Dispatch custom event to notify other components
+      window.dispatchEvent(new CustomEvent('mosaic-status-changed', {
+        detail: { status: updated.status, mosaicId: mosaic.id }
+      }))
     } catch (error) {
       console.error("Failed to stop mosaic:", error)
     } finally {

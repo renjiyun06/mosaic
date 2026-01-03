@@ -1173,6 +1173,6 @@ class ClaudeCodeSession(MosaicSession):
         }
 
         # Convert to formatted JSON string
-        message = f"[Event from Mosaic Event Mesh]\n{json.dumps(formatted_event, indent=2)}"
+        message = f"{json.dumps(formatted_event, indent=2, ensure_ascii=False)}"
 
         return message

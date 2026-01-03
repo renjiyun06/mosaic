@@ -110,6 +110,7 @@ export default function ChatPage() {
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const maxSequenceRef = useRef<number>(0) // Track max sequence number for gap detection
 
   // Load nodes and sessions on mount
   useEffect(() => {
@@ -117,16 +118,37 @@ export default function ChatPage() {
     loadNodesAndSessions()
   }, [mosaicId, token])
 
+  // Listen for mosaic status changes and refresh node/session list
+  useEffect(() => {
+    const handleMosaicStatusChange = (event: Event) => {
+      const customEvent = event as CustomEvent<{ status: string; mosaicId: number }>
+      // Only refresh if it's the current mosaic
+      if (customEvent.detail.mosaicId === mosaicId) {
+        console.log("[Chat] Mosaic status changed, refreshing nodes and sessions...")
+        loadNodesAndSessions()
+      }
+    }
+
+    window.addEventListener('mosaic-status-changed', handleMosaicStatusChange)
+
+    return () => {
+      window.removeEventListener('mosaic-status-changed', handleMosaicStatusChange)
+    }
+  }, [mosaicId, token])
+
   // Subscribe to WebSocket messages for active session
   useEffect(() => {
     if (!activeSessionId) return
 
-    // Load message history
+    // Load message history from database
     loadMessages(activeSessionId)
 
     // Reset session stats and collapsed thinking when switching sessions
     setSessionStats(null)
     setCollapsedThinking(new Set())
+
+    // Reset sequence tracking
+    maxSequenceRef.current = 0
 
     // Subscribe to messages for this session
     const unsubscribe = subscribe(activeSessionId, (message) => {
@@ -140,6 +162,28 @@ export default function ChatPage() {
 
       // Type assertion: we've checked it's not an error, so it must be WSMessage
       const wsMessage = message as import("@/contexts/websocket-context").WSMessage
+
+      // Verify session_id matches (double-check even though context already filters)
+      if (wsMessage.session_id !== activeSessionId) {
+        console.warn("[Chat] Ignoring message from different session:", wsMessage.session_id)
+        return
+      }
+
+      // Check for sequence gap (message loss detection)
+      if (maxSequenceRef.current > 0) {
+        const expectedSequence = maxSequenceRef.current + 1
+        if (wsMessage.sequence > expectedSequence) {
+          console.warn(
+            `[Chat] Sequence gap detected! Expected ${expectedSequence}, got ${wsMessage.sequence}. Reloading messages...`
+          )
+          // Reload all messages from database to fill the gap
+          loadMessages(activeSessionId)
+          return
+        }
+      }
+
+      // Update max sequence number
+      maxSequenceRef.current = Math.max(maxSequenceRef.current, wsMessage.sequence)
 
       // Update session statistics if this is a result message
       if (wsMessage.message_type === "assistant_result" && wsMessage.payload) {
@@ -281,6 +325,15 @@ export default function ChatPage() {
         contentParsed: typeof msg.payload === "string" ? JSON.parse(msg.payload) : msg.payload,
       }))
       setMessages(parsed)
+
+      // Update max sequence number from loaded messages
+      if (parsed.length > 0) {
+        const maxSeq = Math.max(...parsed.map((msg) => msg.sequence))
+        maxSequenceRef.current = maxSeq
+        console.log("[Chat] Loaded messages, max sequence:", maxSeq)
+      } else {
+        maxSequenceRef.current = 0
+      }
 
       // Collapse all thinking messages by default
       const thinkingIds = parsed

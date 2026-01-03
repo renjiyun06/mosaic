@@ -106,6 +106,27 @@ export default function NodesPage() {
     fetchNodes()
   }, [mosaicId, token])
 
+  // Listen for mosaic status changes and refresh node list
+  useEffect(() => {
+    const handleMosaicStatusChange = (event: Event) => {
+      const customEvent = event as CustomEvent<{ status: string; mosaicId: number }>
+      // Only refresh if it's the current mosaic
+      if (customEvent.detail.mosaicId === Number(mosaicId)) {
+        console.log("[Nodes] Mosaic status changed, refreshing node list...")
+        // Refresh node list
+        apiClient.listNodes(Number(mosaicId))
+          .then(data => setNodes(data))
+          .catch(err => console.error("Failed to refresh nodes:", err))
+      }
+    }
+
+    window.addEventListener('mosaic-status-changed', handleMosaicStatusChange)
+
+    return () => {
+      window.removeEventListener('mosaic-status-changed', handleMosaicStatusChange)
+    }
+  }, [mosaicId])
+
   const handleCreateNode = async () => {
     if (!token) return
     if (!formData.node_id.trim()) return
