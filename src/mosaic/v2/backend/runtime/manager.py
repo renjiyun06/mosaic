@@ -648,7 +648,7 @@ class RuntimeManager:
 
         # Submit command and wait for result (with short timeout for query)
         status = await self._submit_command_and_wait(
-            node.mosaic_id, command, timeout=5.0
+            node.mosaic_id, command, timeout=30.0
         )
         return status
 

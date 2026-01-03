@@ -12,9 +12,9 @@ import { API_BASE_URL } from '@/lib/types'
 // WebSocket message types from backend
 export interface WSMessage {
   session_id: string
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'notification'
   message_type: string
-  message_id: string
+  message_id?: string  // Optional: notification messages may not have message_id
   sequence: number
   timestamp: string
   payload: any

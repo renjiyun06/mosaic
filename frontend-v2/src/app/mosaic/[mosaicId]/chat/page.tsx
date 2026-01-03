@@ -11,7 +11,7 @@
  * - Session creation, close, and archive
  */
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, Fragment } from "react"
 import { useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -111,6 +111,7 @@ export default function ChatPage() {
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const maxSequenceRef = useRef<number>(0) // Track max sequence number for gap detection
+  const sessionStartedResolvers = useRef<Map<string, (value: boolean) => void>>(new Map())
 
   // Load nodes and sessions function
   const loadNodesAndSessions = useCallback(async () => {
@@ -217,7 +218,19 @@ export default function ChatPage() {
         console.log("[Chat] Received global notification:", wsMessage.message_type)
         if (wsMessage.message_type === "session_started") {
           console.log("[Chat] Session started, refreshing session list")
-          loadNodesAndSessions()
+
+          // Refresh session list first, then resolve waiter
+          loadNodesAndSessions().then(() => {
+            // Resolve any pending session creation waiter
+            if (wsMessage.payload?.session_id) {
+              const resolver = sessionStartedResolvers.current.get(wsMessage.payload.session_id)
+              if (resolver) {
+                console.log("[Chat] Resolving session_started promise for", wsMessage.payload.session_id)
+                resolver(true)
+                sessionStartedResolvers.current.delete(wsMessage.payload.session_id)
+              }
+            }
+          })
         }
         if (wsMessage.message_type === "session_ended") {
           console.log("[Chat] Session ended, refreshing session list")
@@ -280,6 +293,12 @@ export default function ChatPage() {
       // Update max sequence number
       maxSequenceRef.current = Math.max(maxSequenceRef.current, wsMessage.sequence)
 
+      // Skip notification messages (they are for logic only, not for display)
+      if (wsMessage.role === 'notification') {
+        console.log("[Chat] Skipping notification message (not for display):", wsMessage)
+        return
+      }
+
       // Update session statistics if this is a result message
       if (wsMessage.message_type === "assistant_result" && wsMessage.payload) {
         setSessionStats({
@@ -287,6 +306,12 @@ export default function ChatPage() {
           total_input_tokens: wsMessage.payload.total_input_tokens,
           total_output_tokens: wsMessage.payload.total_output_tokens,
         })
+      }
+
+      // All non-notification messages should have message_id
+      if (!wsMessage.message_id) {
+        console.error("[Chat] Non-notification message missing message_id:", wsMessage)
+        return
       }
 
       // Add message to list
@@ -309,7 +334,7 @@ export default function ChatPage() {
 
       // Collapse thinking, system, and tool use messages by default
       if (wsMessage.message_type === "assistant_thinking" || wsMessage.message_type === "system_message" || wsMessage.message_type === "assistant_tool_use") {
-        setCollapsedMessages((prev) => new Set(prev).add(wsMessage.message_id))
+        setCollapsedMessages((prev) => new Set(prev).add(wsMessage.message_id!)) // message_id is guaranteed to exist (checked above)
       }
 
       // Stop loading on result
@@ -326,8 +351,19 @@ export default function ChatPage() {
 
   // Auto-scroll to bottom
   useEffect(() => {
+    console.log("[Chat] Messages changed, count:", messages.length)
+    if (messages.length > 0) {
+      console.log("[Chat] Message IDs in state:", messages.map(m => `${m.message_id.slice(0, 8)} (seq: ${m.sequence})`))
+    }
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
+
+  // Cleanup pending session_started resolvers on unmount
+  useEffect(() => {
+    return () => {
+      sessionStartedResolvers.current.clear()
+    }
+  }, [])
 
   const loadMessages = async (sessionId: string) => {
     try {
@@ -458,19 +494,33 @@ export default function ChatPage() {
         model: sessionModel,
       })
 
-      // Update nodes with new session
-      setNodes((prev) =>
-        prev.map((node) => {
-          if (node.node_id === selectedNodeId) {
-            return {
-              ...node,
-              sessions: [newSession, ...node.sessions],
-            }
-          }
-          return node
-        })
-      )
+      console.log("[Chat] Session created via API, waiting for session_started notification for", newSession.session_id)
 
+      // Wait for session_started notification before updating UI
+      const started = await Promise.race([
+        // Wait for session_started notification
+        new Promise<boolean>((resolve) => {
+          sessionStartedResolvers.current.set(newSession.session_id, resolve)
+        }),
+        // Timeout after 10 seconds
+        new Promise<boolean>((resolve) =>
+          setTimeout(() => {
+            console.warn("[Chat] Timeout waiting for session_started notification")
+            sessionStartedResolvers.current.delete(newSession.session_id)
+            resolve(false)
+          }, 10000)
+        ),
+      ])
+
+      if (started) {
+        console.log("[Chat] Session started successfully")
+      } else {
+        console.warn("[Chat] Session created but did not receive session_started notification in time")
+        // Refresh session list even on timeout (in case notification was lost)
+        await loadNodesAndSessions()
+      }
+
+      // Activate the new session and close dialog
       setActiveSessionId(newSession.session_id)
       setCreateDialogOpen(false)
     } catch (error) {
@@ -520,6 +570,8 @@ export default function ChatPage() {
   const handleCloseSession = async () => {
     if (!closingSession) return
 
+    console.log("[Chat] Closing session:", closingSession.sessionId)
+
     try {
       setClosing(true)
       const updatedSession = await apiClient.closeSession(
@@ -527,6 +579,8 @@ export default function ChatPage() {
         closingSession.nodeId,
         closingSession.sessionId
       )
+
+      console.log("[Chat] Session closed successfully, updating local state")
 
       // Update session status in local state
       setNodes((prev) =>
@@ -537,6 +591,8 @@ export default function ChatPage() {
           ),
         }))
       )
+
+      console.log("[Chat] Local state updated, messages count:", messages.length)
 
       setCloseDialogOpen(false)
       setClosingSession(null)
@@ -578,8 +634,16 @@ export default function ChatPage() {
   }
 
   const renderMessage = (msg: ParsedMessage) => {
+    console.log("[Chat] renderMessage called for:", {
+      message_id: msg.message_id,
+      message_type: msg.message_type,
+      role: msg.role,
+      sequence: msg.sequence
+    })
+
     // Don't render assistant_result messages (stats shown in header)
     if (msg.message_type === MessageType.ASSISTANT_RESULT) {
+      console.log("[Chat] Skipping ASSISTANT_RESULT message:", msg.message_id)
       return null
     }
 
@@ -592,7 +656,6 @@ export default function ChatPage() {
 
     return (
       <div
-        key={msg.message_id}
         className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}
       >
         <div
@@ -713,30 +776,44 @@ export default function ChatPage() {
                 )}
               </div>
 
-              {/* Right: Usage statistics */}
-              {sessionStats && (
-                <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                  {sessionStats.total_cost_usd !== undefined && (
-                    <div className="flex items-center gap-1">
-                      <span>💰</span>
-                      <span className="font-mono">
-                        ${sessionStats.total_cost_usd.toFixed(4)}
-                      </span>
-                    </div>
-                  )}
-                  {(sessionStats.total_input_tokens !== undefined ||
-                    sessionStats.total_output_tokens !== undefined) && (
-                    <div className="flex items-center gap-1">
-                      <span>📊</span>
-                      <span className="font-mono">
-                        {sessionStats.total_input_tokens?.toLocaleString() || 0}↑
-                        <span className="mx-0.5">/</span>
-                        {sessionStats.total_output_tokens?.toLocaleString() || 0}↓
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
+              {/* Right: WebSocket status indicator and usage statistics */}
+              <div className="flex items-center gap-4">
+                {/* WebSocket connection status (only for active sessions) */}
+                {currentSessionInfo?.session.status === SessionStatus.ACTIVE && (
+                  <div className="flex items-center">
+                    <div
+                      className={`h-2 w-2 rounded-full ${
+                        isConnected ? "bg-green-500" : "bg-red-500"
+                      }`}
+                    />
+                  </div>
+                )}
+
+                {/* Usage statistics */}
+                {sessionStats && (
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    {sessionStats.total_cost_usd !== undefined && (
+                      <div className="flex items-center gap-1">
+                        <span>💰</span>
+                        <span className="font-mono">
+                          ${sessionStats.total_cost_usd.toFixed(4)}
+                        </span>
+                      </div>
+                    )}
+                    {(sessionStats.total_input_tokens !== undefined ||
+                      sessionStats.total_output_tokens !== undefined) && (
+                      <div className="flex items-center gap-1">
+                        <span>📊</span>
+                        <span className="font-mono">
+                          {sessionStats.total_input_tokens?.toLocaleString() || 0}↑
+                          <span className="mx-0.5">/</span>
+                          {sessionStats.total_output_tokens?.toLocaleString() || 0}↓
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Messages Area */}
@@ -750,7 +827,27 @@ export default function ChatPage() {
                 </div>
               ) : (
                 <>
-                  {messages.map(renderMessage)}
+                  {(() => {
+                    console.log("[Chat] Rendering messages, total count:", messages.length)
+                    console.log("[Chat] Message IDs:", messages.map(m => m.message_id))
+
+                    // Check for duplicate message_ids
+                    const ids = messages.map(m => m.message_id)
+                    const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index)
+                    if (duplicates.length > 0) {
+                      console.error("[Chat] DUPLICATE message_ids found:", duplicates)
+                    }
+
+                    return messages.map((msg) => {
+                      console.log("[Chat] Mapping message:", msg.message_id)
+                      // Use message_id as key since it's guaranteed to exist and be unique
+                      return (
+                        <Fragment key={msg.message_id}>
+                          {renderMessage(msg)}
+                        </Fragment>
+                      )
+                    })
+                  })()}
                   <div ref={messagesEndRef} />
                 </>
               )}
@@ -849,16 +946,20 @@ export default function ChatPage() {
                     variant="outline"
                     className="w-full h-7"
                     onClick={() => openCreateDialog(node.node_id)}
-                    disabled={node.status !== NodeStatus.RUNNING}
+                    disabled={node.status !== NodeStatus.RUNNING || !isConnected}
                   >
                     <Plus className="h-3 w-3 mr-1" />
                     新建会话
                   </Button>
-                  {node.status !== NodeStatus.RUNNING && (
+                  {node.status !== NodeStatus.RUNNING ? (
                     <div className="mt-1 text-xs text-muted-foreground text-center">
                       节点未运行，请先启动节点
                     </div>
-                  )}
+                  ) : !isConnected ? (
+                    <div className="mt-1 text-xs text-muted-foreground text-center">
+                      WebSocket 连接中...
+                    </div>
+                  ) : null}
                 </div>
 
                 {/* Sessions under this node */}
