@@ -383,9 +383,7 @@ class ClaudeCodeSession(MosaicSession):
         )
 
         # 1. Get system prompt from node template (fill in session_id placeholder)
-        system_prompt = self.node._system_prompt_template.format(
-            session_id=self.session_id
-        )
+        system_prompt = self.node._system_prompt_template.replace("###session_id###", self.session_id)
 
         logger.debug(
             f"System prompt ready for session {self.session_id}, "

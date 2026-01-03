@@ -239,10 +239,9 @@ class MosaicSession(ABC):
 
             CancelledError is caught and not re-raised (cancellation is normal).
         """
-        await self._on_event_loop_started()
-        logger.info(f"Session worker loop started: {self.session_id}")
-
         try:
+            await self._on_event_loop_started()
+            logger.info(f"Session worker loop started: {self.session_id}")
             while True:
                 # Fetch next event (blocking)
                 event = await self._queue.get()
@@ -302,7 +301,13 @@ class MosaicSession(ABC):
 
         except asyncio.CancelledError:
             logger.info(f"Session worker cancelled: {self.session_id}")
-
+        except Exception as e:
+            logger.error(
+                f"Error in session worker loop: session_id={self.session_id}, "
+                f"error={e}",
+                exc_info=True
+            )
+            raise
         finally:
             await self._on_event_loop_exited()
             logger.info(f"Session worker exited: {self.session_id}")

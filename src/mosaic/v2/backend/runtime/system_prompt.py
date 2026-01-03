@@ -147,7 +147,7 @@ You are now a node operating within the Mosaic Event Mesh system.
 Node ID: {{ node_id }}
 
 [Current Session]
-Session ID: {{ session_id_placeholder }}
+Session ID: ###session_id###
 
 [Nodes In Mesh]
 {% for node in nodes -%}
