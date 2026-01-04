@@ -23,7 +23,7 @@ Architecture:
 
 import asyncio
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
@@ -50,16 +50,17 @@ class UserMessageBroker:
     _instance: Optional['UserMessageBroker'] = None
 
     def __init__(self):
-        # User WebSocket connections: {user_id → WebSocket}
-        self._user_websockets: Dict[int, WebSocket] = {}
+        # User WebSocket connections: {user_id → Set[WebSocket]}
+        # Each user can have multiple connections (e.g., multiple browser tabs)
+        self._user_websockets: Dict[int, Set[WebSocket]] = {}
 
-        # Message queues for each user: {user_id → asyncio.Queue}
-        # Messages from worker threads are enqueued here
-        self._user_queues: Dict[int, asyncio.Queue] = {}
+        # Message queues for each connection: {user_id → {WebSocket → asyncio.Queue}}
+        # Each connection has its own queue for independent message delivery
+        self._user_queues: Dict[int, Dict[WebSocket, asyncio.Queue]] = {}
 
-        # Message forwarding tasks: {user_id → asyncio.Task}
-        # Keep reference to tasks so we can cancel them on disconnect
-        self._user_tasks: Dict[int, asyncio.Task] = {}
+        # Message forwarding tasks: {user_id → {WebSocket → asyncio.Task}}
+        # Each connection has its own forwarding task
+        self._user_tasks: Dict[int, Dict[WebSocket, asyncio.Task]] = {}
 
         # Main event loop reference (set on startup)
         self._main_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -118,149 +119,220 @@ class UserMessageBroker:
         Register user WebSocket connection.
 
         Called from main event loop when user connects.
-        If user already has a connection, the old one will be closed.
+        Supports multiple concurrent connections per user (e.g., multiple browser tabs).
 
         Args:
             user_id: User database ID
             websocket: WebSocket connection
         """
-        # Close old connection if exists
-        if user_id in self._user_websockets:
-            old_ws = self._user_websockets[user_id]
+        # Initialize user's connection set if first connection
+        if user_id not in self._user_websockets:
+            logger.debug(f"Initializing connection set for user {user_id}")
+            self._user_websockets[user_id] = set()
+            self._user_queues[user_id] = {}
+            self._user_tasks[user_id] = {}
 
-            # Check if it's the same WebSocket object
-            if old_ws is websocket:
-                logger.warning(f"User {user_id} WebSocket already registered, skipping")
-                return
+        # Check if this WebSocket is already registered
+        if websocket in self._user_websockets[user_id]:
+            logger.warning(
+                f"User {user_id} WebSocket already registered (ws_id={id(websocket)}), skipping"
+            )
+            return
 
-            logger.warning(f"User {user_id} reconnecting, closing old connection")
-            await self.disconnect_user(user_id)
+        # Add connection to set
+        self._user_websockets[user_id].add(websocket)
 
-            # Give time for old connection to fully clean up
-            await asyncio.sleep(0.1)
+        # Create independent queue for this connection
+        self._user_queues[user_id][websocket] = asyncio.Queue()
 
-        # Register connection
-        self._user_websockets[user_id] = websocket
-        self._user_queues[user_id] = asyncio.Queue()
-
-        # Start message forwarding task
-        task = asyncio.create_task(self._forward_messages(user_id))
-        self._user_tasks[user_id] = task  # Keep reference for cancellation
+        # Start independent message forwarding task for this connection
+        task = asyncio.create_task(self._forward_messages(user_id, websocket))
+        self._user_tasks[user_id][websocket] = task
 
         # Add callback to catch task exceptions
         def task_done_callback(t: asyncio.Task):
             try:
-                if not t.cancelled():  # Check if task was cancelled
-                    exc = t.exception()  # Use exception() instead of result()
+                if not t.cancelled():
+                    exc = t.exception()
                     if exc:
                         logger.error(
-                            f"Background task failed for user {user_id}: {exc}",
+                            f"Forwarding task failed for user {user_id} "
+                            f"(ws_id={id(websocket)}): {exc}",
                             exc_info=(type(exc), exc, exc.__traceback__)
                         )
             except Exception as e:
-                logger.error(f"Error in task callback for user {user_id}: {e}")
+                logger.error(
+                    f"Error in task callback for user {user_id} "
+                    f"(ws_id={id(websocket)}): {e}"
+                )
 
         task.add_done_callback(task_done_callback)
 
-        logger.info(f"User {user_id} WebSocket connected")
+        connection_count = len(self._user_websockets[user_id])
+        logger.info(
+            f"User {user_id} WebSocket connected (ws_id={id(websocket)}), "
+            f"total_connections={connection_count}"
+        )
 
     async def disconnect_user(self, user_id: int, websocket: Optional[WebSocket] = None):
         """
-        Disconnect user WebSocket.
+        Disconnect user WebSocket connection.
 
         Args:
             user_id: User database ID
-            websocket: Optional WebSocket object to verify before disconnecting.
-                      If provided, only disconnect if it matches the registered one.
+            websocket: Optional WebSocket object to disconnect.
+                      If None, all connections for the user will be disconnected.
+                      If provided, only that specific connection will be disconnected.
         """
-        if user_id in self._user_websockets:
-            registered_ws = self._user_websockets[user_id]
+        if user_id not in self._user_websockets:
+            logger.debug(f"User {user_id} has no connections to disconnect")
+            return
 
-            # If websocket is provided, only disconnect if it matches
-            if websocket is not None and registered_ws is not websocket:
+        # If websocket specified, disconnect only that connection
+        if websocket is not None:
+            if websocket not in self._user_websockets[user_id]:
                 logger.debug(
-                    f"User {user_id} WebSocket mismatch, skipping disconnect "
-                    f"(probably already reconnected)"
+                    f"User {user_id} WebSocket not found (ws_id={id(websocket)}), "
+                    f"probably already disconnected"
                 )
                 return
 
-            # Cancel message forwarding task first
-            if user_id in self._user_tasks:
-                task = self._user_tasks[user_id]
+            logger.debug(
+                f"Disconnecting specific WebSocket for user {user_id} (ws_id={id(websocket)})"
+            )
+
+            # Cancel message forwarding task for this connection
+            if websocket in self._user_tasks[user_id]:
+                task = self._user_tasks[user_id][websocket]
                 if not task.done():
                     task.cancel()
                     try:
-                        # Wait for task cancellation with timeout
                         await asyncio.wait_for(task, timeout=1.0)
                     except asyncio.CancelledError:
-                        logger.debug(f"Message forwarding task cancelled for user {user_id}")
+                        logger.debug(
+                            f"Forwarding task cancelled for user {user_id} (ws_id={id(websocket)})"
+                        )
                     except asyncio.TimeoutError:
-                        logger.warning(f"Task cancellation timed out for user {user_id}")
+                        logger.warning(
+                            f"Task cancellation timed out for user {user_id} (ws_id={id(websocket)})"
+                        )
                     except Exception as e:
-                        logger.debug(f"Task cancellation error for user {user_id}: {e}")
+                        logger.debug(
+                            f"Task cancellation error for user {user_id} (ws_id={id(websocket)}): {e}"
+                        )
 
+                del self._user_tasks[user_id][websocket]
+
+            # Close WebSocket
+            try:
+                await websocket.close()
+            except Exception as e:
+                logger.debug(
+                    f"Error closing WebSocket for user {user_id} (ws_id={id(websocket)}): {e}"
+                )
+
+            # Remove from connection set
+            self._user_websockets[user_id].discard(websocket)
+
+            # Remove queue
+            if websocket in self._user_queues[user_id]:
+                del self._user_queues[user_id][websocket]
+
+            remaining_connections = len(self._user_websockets[user_id])
+
+            # Clean up user entry if no more connections
+            if remaining_connections == 0:
+                logger.debug(f"User {user_id} has no more connections, cleaning up user entry")
+                del self._user_websockets[user_id]
+                del self._user_queues[user_id]
                 del self._user_tasks[user_id]
 
-            try:
-                await registered_ws.close()
-            except Exception as e:
-                logger.debug(f"Error closing WebSocket for user {user_id}: {e}")
+            logger.info(
+                f"User {user_id} WebSocket disconnected (ws_id={id(websocket)}), "
+                f"remaining_connections={remaining_connections}"
+            )
 
-            del self._user_websockets[user_id]
-            del self._user_queues[user_id]
+        # If no websocket specified, disconnect all connections
+        else:
+            logger.debug(f"Disconnecting all WebSockets for user {user_id}")
+            websockets = list(self._user_websockets[user_id])
 
-            logger.info(f"User {user_id} WebSocket disconnected")
+            for ws in websockets:
+                await self.disconnect_user(user_id, ws)
 
-    async def _forward_messages(self, user_id: int):
+            logger.info(
+                f"All WebSocket connections disconnected for user {user_id} "
+                f"(count={len(websockets)})"
+            )
+
+    async def _forward_messages(self, user_id: int, websocket: WebSocket):
         """
-        Forward messages from queue to WebSocket.
+        Forward messages from connection-specific queue to WebSocket.
 
         Runs in main event loop (Loop A).
-        Consumes messages from user queue and sends to WebSocket.
+        Each connection has its own independent forwarding task.
 
         Args:
             user_id: User database ID
+            websocket: Specific WebSocket connection
         """
-        logger.info(f"Message forwarding task started for user {user_id}")
+        ws_id = id(websocket)
+        logger.info(
+            f"Message forwarding task started for user {user_id} (ws_id={ws_id})"
+        )
 
-        # Get queue reference (defensive check)
-        queue = self._user_queues.get(user_id)
-        if not queue:
-            logger.error(f"Queue not found for user {user_id}, task exiting")
+        # Get connection-specific queue (defensive check)
+        if user_id not in self._user_queues or websocket not in self._user_queues[user_id]:
+            logger.error(
+                f"Queue not found for user {user_id} (ws_id={ws_id}), task exiting"
+            )
             return
 
+        queue = self._user_queues[user_id][websocket]
+
         try:
-            while user_id in self._user_websockets:
+            while user_id in self._user_websockets and websocket in self._user_websockets[user_id]:
                 try:
                     # Wait for message from worker threads
                     message = await queue.get()
 
-                    ws = self._user_websockets.get(user_id)
-                    if ws:
-                        await ws.send_json(message)
+                    # Double-check connection still exists before sending
+                    if user_id in self._user_websockets and websocket in self._user_websockets[user_id]:
+                        await websocket.send_json(message)
                         logger.debug(
-                            f"Sent to user {user_id}: "
+                            f"Sent to user {user_id} (ws_id={ws_id}): "
                             f"type={message.get('message_type')}, "
                             f"session={message.get('session_id')}"
                         )
                     else:
-                        logger.warning(f"WebSocket for user {user_id} no longer available")
+                        logger.warning(
+                            f"WebSocket for user {user_id} (ws_id={ws_id}) no longer available"
+                        )
                         break
 
                 except asyncio.CancelledError:
                     # Task was cancelled (normal during disconnect)
-                    logger.debug(f"Message forwarding task cancelled for user {user_id}")
+                    logger.debug(
+                        f"Message forwarding task cancelled for user {user_id} (ws_id={ws_id})"
+                    )
                     raise  # Re-raise to properly cancel the task
 
                 except Exception as e:
-                    logger.error(f"Error forwarding message to user {user_id}: {e}", exc_info=True)
+                    logger.error(
+                        f"Error forwarding message to user {user_id} (ws_id={ws_id}): {e}",
+                        exc_info=True
+                    )
                     break
 
         except asyncio.CancelledError:
             # Task cancellation (normal during disconnect)
-            logger.debug(f"Message forwarding task cancelled for user {user_id}")
+            logger.debug(
+                f"Message forwarding task cancelled for user {user_id} (ws_id={ws_id})"
+            )
         finally:
-            logger.info(f"Message forwarding task ended for user {user_id}")
+            logger.info(
+                f"Message forwarding task ended for user {user_id} (ws_id={ws_id})"
+            )
 
     def push_from_worker(self, user_id: int, message: dict):
         """
@@ -292,8 +364,8 @@ class UserMessageBroker:
         """
         Internal method to push message (runs in main loop).
 
-        This method performs the actual dictionary access and message queuing
-        in the main event loop, ensuring thread safety.
+        Broadcasts the message to all active connections for the user.
+        Each connection has its own queue, ensuring independent delivery.
 
         Args:
             user_id: Target user ID
@@ -304,40 +376,66 @@ class UserMessageBroker:
             logger.error("Main loop not set in UserMessageBroker")
             return
 
-        queue = self._user_queues.get(user_id)
-        if queue:
+        # Get all queues for this user
+        user_queues = self._user_queues.get(user_id)
+        if not user_queues:
+            logger.debug(f"No WebSocket connections for user {user_id}, message dropped")
+            return
+
+        # Broadcast to all connections
+        success_count = 0
+        failed_count = 0
+
+        for websocket, queue in user_queues.items():
             try:
                 queue.put_nowait(message)
+                success_count += 1
                 logger.debug(
-                    f"Message queued for user {user_id}: "
+                    f"Message queued for user {user_id} (ws_id={id(websocket)}): "
                     f"type={message.get('message_type')}"
                 )
             except Exception as e:
-                logger.error(f"Failed to queue message for user {user_id}: {e}")
-        else:
-            logger.debug(f"No WebSocket connection for user {user_id}, message dropped")
+                failed_count += 1
+                logger.error(
+                    f"Failed to queue message for user {user_id} (ws_id={id(websocket)}): {e}"
+                )
+
+        total_connections = len(user_queues)
+        logger.debug(
+            f"Message broadcast for user {user_id}: "
+            f"success={success_count}, failed={failed_count}, total={total_connections}"
+        )
 
     def is_user_connected(self, user_id: int) -> bool:
         """
-        Check if user has active WebSocket connection.
+        Check if user has any active WebSocket connections.
 
         Args:
             user_id: User database ID
 
         Returns:
-            True if user is connected, False otherwise
+            True if user has at least one active connection, False otherwise
         """
-        return user_id in self._user_websockets
+        return user_id in self._user_websockets and len(self._user_websockets[user_id]) > 0
 
     async def disconnect_all_users(self):
         """
         Disconnect all user WebSocket connections.
 
         Called during application shutdown.
+        Iterates through all users and disconnects all their connections.
         """
         user_ids = list(self._user_websockets.keys())
+        total_connections = sum(len(connections) for connections in self._user_websockets.values())
+
+        logger.info(
+            f"Disconnecting all users: {len(user_ids)} users, {total_connections} connections"
+        )
 
         for user_id in user_ids:
+            # disconnect_user with no websocket parameter will disconnect all connections
             await self.disconnect_user(user_id)
 
-        logger.info(f"Disconnected all users ({len(user_ids)} connections)")
+        logger.info(
+            f"Disconnected all users: {len(user_ids)} users, {total_connections} connections"
+        )

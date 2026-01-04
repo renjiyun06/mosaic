@@ -1,5 +1,6 @@
 """FastAPI application factory and configuration"""
 
+import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -28,6 +29,7 @@ from .api.websocket import router as websocket_router
 from .runtime.manager import RuntimeManager
 from .websocket import UserMessageBroker
 
+logger = logging.getLogger(__name__)
 
 def create_app(instance_path: Path, config: dict) -> FastAPI:
     """Create and configure FastAPI application instance
@@ -123,6 +125,7 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
         raise ValueError("Missing required configuration: [cors]")
 
     allow_origins = cors_config.get('allow_origins')
+    logger.info(f"Allow origins: {allow_origins}")
     allow_credentials = cors_config.get('allow_credentials')
     allow_methods = cors_config.get('allow_methods')
     allow_headers = cors_config.get('allow_headers')
