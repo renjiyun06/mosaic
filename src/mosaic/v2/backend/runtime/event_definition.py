@@ -237,4 +237,12 @@ EVENT_DEFINITIONS = {
             }
         }
     ),
+
+    # Internal events (not published to Event Mesh, session-local only)
+    EventType.TASK_COMPLETE_EVENT: EventDefinition(
+        event_type=EventType.TASK_COMPLETE_EVENT,
+        description="Task completion signal from agent (internal event)",
+        payload_schema=None,  # Empty payload
+        always_show=False  # Internal event, not shown in system prompts
+    ),
 }

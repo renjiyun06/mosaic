@@ -37,9 +37,14 @@ class SessionAlignment(str, Enum):
     TASKING: One-to-many session mapping. Downstream creates a new session for each event.
              Each event triggers a new downstream session that closes immediately after processing.
              Upstream session lifetime is independent of downstream sessions.
+
+    AGENT_DRIVEN: Agent-controlled session lifecycle. Session closes only when agent calls task_complete() tool.
+                  Enables recursive task decomposition where parent sessions can wait for child sessions.
+                  Session remains active even after event processing, until agent signals completion.
     """
     MIRRORING = "mirroring"
     TASKING = "tasking"
+    AGENT_DRIVEN = "agent_driven"
 
 
 class EventType(str, Enum):
@@ -66,6 +71,7 @@ class EventType(str, Enum):
 
     # Internal session events (not published to Event Mesh)
     USER_MESSAGE_EVENT = "user_message_event"
+    TASK_COMPLETE_EVENT = "task_complete_event"  # Agent signals task completion
 
 
 class SessionStatus(str, Enum):

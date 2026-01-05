@@ -139,6 +139,7 @@ async def websocket_user_endpoint(
                     # Get node information (exclude soft-deleted nodes)
                     from ..model.node import Node
                     stmt = select(Node).where(
+                        Node.mosaic_id == session.mosaic_id,
                         Node.node_id == session.node_id,
                         Node.deleted_at.is_(None)
                     )
