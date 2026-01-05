@@ -457,9 +457,9 @@ class MosaicNode(ABC):
                     SessionRouting.deleted_at.is_(None)
                 )
                 result = await db_session.execute(stmt)
-                session_routing = result.scalar_one_or_none()
+                session_routings = result.scalars().all()
 
-            if not connection and not session_routing:
+            if not connection and not session_routings:
                 logger.warning(
                     f"No connection found from {self.node.node_id} to {target_node_id}, "
                     f"event will not be sent: event_type={event_type}, source_session={source_session_id}"
@@ -522,22 +522,35 @@ class MosaicNode(ABC):
                     # Get connection alignment for this target node
                     session_alignment = connection_alignment_map.get(target_node, SessionAlignment.MIRRORING)
 
+                    stmt = select(SessionRouting).where(
+                        SessionRouting.mosaic_id == self.mosaic_instance.mosaic.id,
+                        SessionRouting.local_node_id == self.node.node_id,
+                        SessionRouting.local_session_id == source_session_id,
+                        SessionRouting.remote_node_id == target_node,
+                        SessionRouting.deleted_at.is_(None)
+                    )
+                    result = await db_session.execute(stmt)
+                    routings = result.scalars().all()
                     routing = None
-                    # For MIRRORING mode: try to reuse existing routing
-                    # For TASKING and AGENT_DRIVEN mode: always create new routing
-                    if session_alignment == SessionAlignment.MIRRORING:
+                    if routings and len(routings) == 1:
+                        routing = routings[0]
+                    
+                    if routing and session_alignment != SessionAlignment.MIRRORING:
                         stmt = select(SessionRouting).where(
                             SessionRouting.mosaic_id == self.mosaic_instance.mosaic.id,
-                            SessionRouting.local_node_id == self.node.node_id,
-                            SessionRouting.local_session_id == source_session_id,
-                            SessionRouting.remote_node_id == target_node,
+                            SessionRouting.local_node_id == target_node,
+                            SessionRouting.local_session_id == routing.remote_session_id,
+                            SessionRouting.remote_node_id == self.node.node_id,
+                            SessionRouting.remote_session_id == source_session_id,
                             SessionRouting.deleted_at.is_(None)
                         )
                         result = await db_session.execute(stmt)
-                        routing = result.scalar_one_or_none()
-
+                        routing_backward = result.scalar_one_or_none()
+                        if routing.id < routing_backward.id:
+                            routing = None
+                        
                     if routing:
-                        # Use existing routing (MIRRORING mode only)
+                        # Use existing routing
                         target_session_id = routing.remote_session_id
                         logger.debug(
                             f"Using existing session routing ({session_alignment.value}): "
@@ -546,8 +559,6 @@ class MosaicNode(ABC):
                         )
                     else:
                         # Create new routing (bidirectional)
-                        # For TASKING and AGENT_DRIVEN mode: always create new routing
-                        # For MIRRORING mode: create new routing if not found
                         target_session_id = str(uuid.uuid4())
                         now = datetime.now(timezone.utc)
 

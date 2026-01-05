@@ -577,8 +577,13 @@ class ClaudeCodeSession(MosaicSession):
             return False
 
         if event_type == EventType.TASK_COMPLETE_EVENT:
+            # This event has already been validated by the task_complete MCP tool
+            # (verified SessionRouting exists and Connection is AGENT_DRIVEN)
+            upstream_session_id = event.get('payload', {}).get('upstream_session_id', 'UNKNOWN')
+            upstream_node_id = event.get('payload', {}).get('upstream_node_id', 'UNKNOWN')
             logger.info(
-                f"AGENT_DRIVEN session {self.session_id} received task_complete signal, "
+                f"AGENT_DRIVEN session {self.session_id} received validated task_complete signal "
+                f"from upstream_session={upstream_session_id}, upstream_node={upstream_node_id}, "
                 f"will auto-close"
             )
             return True
@@ -1171,37 +1176,153 @@ class ClaudeCodeSession(MosaicSession):
         @tool(
             "task_complete",
             "Signal that the current task has been completed.",
-            {}
+            {
+                "type": "object",
+                "properties": {
+                    "upstream_session_id": {
+                        "type": "string",
+                        "description": (
+                            "The session ID that assigned this task to you. "
+                            "When you receive an event, look for the 'source_session_id' field - "
+                            "use that value here to signal you've completed that session's task."
+                        )
+                    }
+                },
+                "required": ["upstream_session_id"]
+            }
         )
         async def task_complete(args):
             """
             Signal task completion for AGENT_DRIVEN sessions.
 
-            When called, this triggers a TASK_COMPLETE_EVENT that the session
-            worker will process, allowing the agent to explicitly control when
-            the session should close.
+            When called, this validates that:
+            1. There is a SessionRouting between upstream_session and current session
+            2. The Connection has session_alignment = AGENT_DRIVEN
 
-            This is only meaningful for sessions with AGENT_DRIVEN alignment.
-            For other alignment modes, this tool call has no effect.
+            If validation passes, enqueues TASK_COMPLETE_EVENT which triggers session closure.
             """
             try:
-                # Enqueue internal task completion event
+                upstream_session_id = args.get('upstream_session_id')
+
+                if not upstream_session_id:
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Error: upstream_session_id is required"
+                            }
+                        ]
+                    }
+
+                # === Validation: Check SessionRouting and Connection ===
+                from ...model.session_routing import SessionRouting
+                from ...model.connection import Connection
+                from ...enum import SessionAlignment
+                from sqlmodel import select
+
+                async with self.async_session_factory() as db_session:
+                    # 1. Query SessionRouting: Find upstream node via routing table
+                    stmt = select(SessionRouting).where(
+                        SessionRouting.mosaic_id == self.node.mosaic_instance.mosaic.id,
+                        SessionRouting.local_node_id == self.node.node.node_id,
+                        SessionRouting.local_session_id == self.session_id,
+                        SessionRouting.remote_session_id == upstream_session_id,
+                        SessionRouting.deleted_at.is_(None)
+                    )
+                    result = await db_session.execute(stmt)
+                    routing = result.scalar_one_or_none()
+
+                    if not routing:
+                        logger.warning(
+                            f"Invalid task_complete call: No routing found for "
+                            f"upstream_session={upstream_session_id}, current_session={self.session_id}"
+                        )
+                        return {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        f"Invalid task_complete call: No routing relationship found with "
+                                        f"upstream session {upstream_session_id}. Make sure you received an "
+                                        f"event from that session."
+                                    )
+                                }
+                            ]
+                        }
+
+                    # 2. Check Connection: Validate session_alignment is AGENT_DRIVEN
+                    upstream_node_id = routing.remote_node_id
+
+                    stmt = select(Connection).where(
+                        Connection.mosaic_id == self.node.mosaic_instance.mosaic.id,
+                        Connection.source_node_id == upstream_node_id,
+                        Connection.target_node_id == self.node.node.node_id,
+                        Connection.deleted_at.is_(None)
+                    )
+                    result = await db_session.execute(stmt)
+                    connection = result.scalar_one_or_none()
+
+                    if not connection:
+                        logger.warning(
+                            f"Invalid task_complete call: No connection found from "
+                            f"upstream_node={upstream_node_id} to current_node={self.node.node.node_id}"
+                        )
+                        return {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        f"Invalid task_complete call: No connection found from upstream node. "
+                                        f"This tool can only be used when there is a valid connection."
+                                    )
+                                }
+                            ]
+                        }
+
+                    if connection.session_alignment != SessionAlignment.AGENT_DRIVEN:
+                        # Not an error - just a no-op for non-AGENT_DRIVEN connections
+                        logger.info(
+                            f"task_complete called on non-AGENT_DRIVEN connection "
+                            f"(session_alignment={connection.session_alignment.value}), "
+                            f"treating as no-op: session_id={self.session_id}, "
+                            f"upstream_session={upstream_session_id}"
+                        )
+                        return {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        f"Task completion acknowledged for upstream session {upstream_session_id}. "
+                                        f"Session lifecycle is managed by the upstream session."
+                                    )
+                                }
+                            ]
+                        }
+
+                # === Validation passed: Enqueue task completion event ===
                 event = {
                     "event_type": EventType.TASK_COMPLETE_EVENT,
-                    "payload": {}
+                    "payload": {
+                        "upstream_session_id": upstream_session_id,
+                        "upstream_node_id": upstream_node_id
+                    }
                 }
 
                 self.enqueue_event(event)
 
                 logger.info(
-                    f"Task completion signal sent: session_id={self.session_id}"
+                    f"Task completion signal sent: session_id={self.session_id}, "
+                    f"upstream_session={upstream_session_id}, upstream_node={upstream_node_id}"
                 )
 
                 return {
                     "content": [
                         {
                             "type": "text",
-                            "text": "Task marked as complete. Session will close after current processing."
+                            "text": (
+                                f"Task marked as complete for upstream session {upstream_session_id}. "
+                                f"Session will close after current processing."
+                            )
                         }
                     ]
                 }
