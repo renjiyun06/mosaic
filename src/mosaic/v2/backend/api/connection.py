@@ -48,22 +48,21 @@ async def create_connection(
     1. Query mosaic and verify ownership
     2. Verify mosaic is stopped (cannot modify running mosaic)
     3. Verify both source_node and target_node exist in the specified mosaic
-    4. Verify source_node_id != target_node_id (prevent self-loop)
-    5. Check if connection already exists between these two nodes (prevent duplicate)
-    6. Create Connection record
-    7. Return created connection
+    4. Check if connection already exists between these two nodes (prevent duplicate)
+    5. Create Connection record
+    6. Return created connection
 
     Validation Rules:
     - Mosaic must exist and belong to current user
     - Mosaic must be stopped (cannot modify running mosaic)
     - source_node_id and target_node_id must exist in the mosaic
-    - source_node_id != target_node_id
+    - Self-loops are allowed (node can connect to itself)
     - Unique constraint: (mosaic_id, source_node_id, target_node_id) for non-deleted records
 
     Raises:
         NotFoundError: If mosaic or nodes not found
         PermissionError: If mosaic doesn't belong to current user
-        ValidationError: If mosaic is running or validation fails (self-loop)
+        ValidationError: If mosaic is running
         ConflictError: If connection already exists
     """
     logger.info(
@@ -98,14 +97,7 @@ async def create_connection(
         logger.warning(f"Cannot modify running mosaic: id={mosaic_id}")
         raise ValidationError("Cannot create connection in running mosaic. Please stop it first.")
 
-    # 3. Verify source_node_id != target_node_id
-    if request.source_node_id == request.target_node_id:
-        logger.warning(
-            f"Cannot create self-loop connection: node_id={request.source_node_id}"
-        )
-        raise ValidationError("Cannot connect a node to itself (self-loop not allowed)")
-
-    # 4. Query both nodes in one statement
+    # 3. Query both nodes in one statement
     stmt = select(Node).where(
         Node.mosaic_id == mosaic_id,
         Node.node_id.in_([request.source_node_id, request.target_node_id]),
