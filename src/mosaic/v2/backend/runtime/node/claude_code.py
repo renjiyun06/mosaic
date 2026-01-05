@@ -483,6 +483,15 @@ class ClaudeCodeSession(MosaicSession):
             f"Handling event: session_id={self.session_id}, event_type={event_type}"
         )
 
+        # Special handling for TASK_COMPLETE_EVENT (internal event)
+        if event_type == EventType.TASK_COMPLETE_EVENT:
+            logger.info(
+                f"Received task completion signal: session_id={self.session_id}"
+            )
+            # No business logic processing needed - just return
+            # _should_close_after_event will handle the close decision
+            return
+
         # 1. Format event to message string
         message = self._format_event_for_claude(event)
 
@@ -548,6 +557,7 @@ class ClaudeCodeSession(MosaicSession):
           - If no connection exists: Don't close
           - If session_alignment is TASKING: Close after each event
           - If session_alignment is MIRRORING: Close only when upstream session ends (SESSION_END event)
+          - If session_alignment is AGENT_DRIVEN: Close only when agent sends task_complete signal
 
         Args:
             event: The event that was just processed
@@ -565,6 +575,13 @@ class ClaudeCodeSession(MosaicSession):
         # Internal events (USER_MESSAGE_EVENT) don't trigger auto-close
         if event_type == EventType.USER_MESSAGE_EVENT:
             return False
+
+        if event_type == EventType.TASK_COMPLETE_EVENT:
+            logger.info(
+                f"AGENT_DRIVEN session {self.session_id} received task_complete signal, "
+                f"will auto-close"
+            )
+            return True
 
         from ...model.connection import Connection
         from sqlmodel import select
@@ -1151,9 +1168,60 @@ class ClaudeCodeSession(MosaicSession):
                     ]
                 }
 
+        @tool(
+            "task_complete",
+            "Signal that the current task has been completed.",
+            {}
+        )
+        async def task_complete(args):
+            """
+            Signal task completion for AGENT_DRIVEN sessions.
+
+            When called, this triggers a TASK_COMPLETE_EVENT that the session
+            worker will process, allowing the agent to explicitly control when
+            the session should close.
+
+            This is only meaningful for sessions with AGENT_DRIVEN alignment.
+            For other alignment modes, this tool call has no effect.
+            """
+            try:
+                # Enqueue internal task completion event
+                event = {
+                    "event_type": EventType.TASK_COMPLETE_EVENT,
+                    "payload": {}
+                }
+
+                self.enqueue_event(event)
+
+                logger.info(
+                    f"Task completion signal sent: session_id={self.session_id}"
+                )
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Task marked as complete. Session will close after current processing."
+                        }
+                    ]
+                }
+            except Exception as e:
+                logger.error(
+                    f"Failed to signal task completion: session_id={self.session_id}, error={e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Failed to signal task completion: {str(e)}"
+                        }
+                    ]
+                }
+
         return create_sdk_mcp_server(
             name="mosaic-mcp-server",
-            tools=[send_message, send_email]
+            tools=[send_message, send_email, task_complete]
         )
 
     # ========== Helper Methods ==========

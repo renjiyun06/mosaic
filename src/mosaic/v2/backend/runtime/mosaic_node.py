@@ -524,6 +524,7 @@ class MosaicNode(ABC):
 
                     routing = None
                     # For MIRRORING mode: try to reuse existing routing
+                    # For TASKING and AGENT_DRIVEN mode: always create new routing
                     if session_alignment == SessionAlignment.MIRRORING:
                         stmt = select(SessionRouting).where(
                             SessionRouting.mosaic_id == self.mosaic_instance.mosaic.id,
@@ -539,12 +540,13 @@ class MosaicNode(ABC):
                         # Use existing routing (MIRRORING mode only)
                         target_session_id = routing.remote_session_id
                         logger.debug(
-                            f"Using existing session routing (MIRRORING): {self.node.node_id}/{source_session_id} -> "
+                            f"Using existing session routing ({session_alignment.value}): "
+                            f"{self.node.node_id}/{source_session_id} -> "
                             f"{target_node}/{target_session_id}"
                         )
                     else:
                         # Create new routing (bidirectional)
-                        # For TASKING mode: always create new routing
+                        # For TASKING and AGENT_DRIVEN mode: always create new routing
                         # For MIRRORING mode: create new routing if not found
                         target_session_id = str(uuid.uuid4())
                         now = datetime.now(timezone.utc)

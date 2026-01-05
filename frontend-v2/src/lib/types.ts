@@ -59,7 +59,8 @@ export enum NodeStatus {
 
 export enum SessionAlignment {
   MIRRORING = 'mirroring',
-  TASKING = 'tasking'
+  TASKING = 'tasking',
+  AGENT_DRIVEN = 'agent_driven'
 }
 
 export enum EventType {

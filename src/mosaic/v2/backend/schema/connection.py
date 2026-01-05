@@ -27,8 +27,8 @@ class CreateConnectionRequest(BaseModel):
     )
     session_alignment: SessionAlignment = Field(
         ...,
-        description="Session alignment strategy (mirroring or tasking)",
-        examples=[SessionAlignment.MIRRORING, SessionAlignment.TASKING]
+        description="Session alignment strategy (mirroring, tasking, or agent_driven)",
+        examples=[SessionAlignment.MIRRORING, SessionAlignment.TASKING, SessionAlignment.AGENT_DRIVEN]
     )
     description: str | None = Field(
         None,
@@ -44,7 +44,7 @@ class UpdateConnectionRequest(BaseModel):
     session_alignment: SessionAlignment | None = Field(
         None,
         description="New session alignment strategy",
-        examples=[SessionAlignment.MIRRORING, SessionAlignment.TASKING]
+        examples=[SessionAlignment.MIRRORING, SessionAlignment.TASKING, SessionAlignment.AGENT_DRIVEN]
     )
     description: str | None = Field(
         None,

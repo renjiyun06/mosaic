@@ -43,6 +43,10 @@ const SESSION_ALIGNMENT_CONFIG: Record<SessionAlignment, { label: string; descri
   [SessionAlignment.TASKING]: {
     label: "任务模式",
     description: "目标节点为每个事件独立创建新会话，适用于任务分发场景"
+  },
+  [SessionAlignment.AGENT_DRIVEN]: {
+    label: "智能体驱动模式",
+    description: "由智能体主动调用 task_complete 工具决定会话何时关闭，支持递归任务处理"
   }
 }
 
