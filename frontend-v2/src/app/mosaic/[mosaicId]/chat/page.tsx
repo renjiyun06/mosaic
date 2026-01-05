@@ -926,7 +926,7 @@ export default function ChatPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-6 w-6 p-0"
+                      className="h-6 w-6 p-0 shrink-0"
                       onClick={() => toggleNode(node.node_id)}
                     >
                       {node.expanded ? (
@@ -935,9 +935,14 @@ export default function ChatPage() {
                         <ChevronRight className="h-4 w-4" />
                       )}
                     </Button>
-                    <Bot className="h-4 w-4" />
-                    <span className="font-medium text-sm">{node.node_id}</span>
-                    <Badge variant="outline" className="ml-auto text-xs">
+                    <Bot className="h-4 w-4 shrink-0" />
+                    <span
+                      className="font-medium text-sm truncate min-w-0"
+                      title={node.node_id}
+                    >
+                      {node.node_id}
+                    </span>
+                    <Badge variant="outline" className="ml-auto text-xs shrink-0">
                       {node.sessions.length} 会话
                     </Badge>
                   </div>
