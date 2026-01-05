@@ -229,7 +229,7 @@ export default function ConnectionsPage() {
           </div>
           <Button
             onClick={() => setCreateDialogOpen(true)}
-            disabled={nodes.length < 2}
+            disabled={nodes.length < 1}
           >
             <Plus className="mr-2 h-4 w-4" />
             新建连接
@@ -238,13 +238,13 @@ export default function ConnectionsPage() {
       </div>
 
       {connections.length === 0 ? (
-        nodes.length < 2 ? (
+        nodes.length < 1 ? (
           <div className="flex-1 flex flex-col items-center pt-16 border rounded-lg">
             <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
-            <h2 className="text-xl font-semibold mb-2">至少需要 2 个节点才能创建连接</h2>
+            <h2 className="text-xl font-semibold mb-2">至少需要 1 个节点才能创建连接</h2>
             <p className="text-muted-foreground text-center mb-6 max-w-lg">
               连接用于定义节点之间的通信关系。<br />
-              请先在节点管理页面创建至少两个节点，然后再创建连接。
+              请先在节点管理页面创建至少一个节点。节点可以连接到自己（自环连接）或连接到其他节点。
             </p>
           </div>
         ) : (
@@ -340,7 +340,7 @@ export default function ConnectionsPage() {
           <DialogHeader>
             <DialogTitle>创建新连接</DialogTitle>
             <DialogDescription>
-              在两个节点之间创建连接关系
+              在节点之间创建连接关系（支持自环连接）
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
@@ -387,7 +387,7 @@ export default function ConnectionsPage() {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                连接的终点，事件将发送到这个节点
+                连接的终点，事件将发送到这个节点（可以与源节点相同）
               </p>
             </div>
             <div className="grid gap-2">
