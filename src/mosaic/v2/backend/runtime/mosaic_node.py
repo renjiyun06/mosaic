@@ -431,6 +431,9 @@ class MosaicNode(ABC):
 
         # 3. Determine target node list
         target_nodes: List[str] = []
+        # Store connection alignment info for each target node (for single-cast mode)
+        connection_alignment_map: dict = {}
+
         if target_node_id:
             # Unicast mode: Verify connection exists
             from ..model.connection import Connection
@@ -463,10 +466,15 @@ class MosaicNode(ABC):
                 )
                 return
 
+            # Store connection alignment for this target node
+            if connection:
+                connection_alignment_map[target_node_id] = connection.session_alignment
+
             target_nodes = [target_node_id]
         else:
-            # Broadcast mode: query subscriptions
+            # Broadcast mode: query subscriptions and get connection alignments
             from ..model.subscription import Subscription
+            from ..model.connection import Connection
 
             async with self.async_session_factory() as db_session:
                 stmt = select(Subscription.target_node_id).where(
@@ -477,6 +485,19 @@ class MosaicNode(ABC):
                 ).distinct()
                 result = await db_session.execute(stmt)
                 target_nodes = list(result.scalars().all())
+
+                # Query connection alignment for each target node
+                for target_node in target_nodes:
+                    stmt = select(Connection).where(
+                        Connection.mosaic_id == self.mosaic_instance.mosaic.id,
+                        Connection.source_node_id == self.node.node_id,
+                        Connection.target_node_id == target_node,
+                        Connection.deleted_at.is_(None)
+                    )
+                    result = await db_session.execute(stmt)
+                    connection = result.scalar_one_or_none()
+                    if connection:
+                        connection_alignment_map[target_node] = connection.session_alignment
 
             if not target_nodes:
                 logger.debug(
@@ -492,31 +513,39 @@ class MosaicNode(ABC):
 
         # 4. For each target node, resolve target_session_id and send event
         from ..model.session_routing import SessionRouting
+        from ..enum import SessionAlignment
 
         for target_node in target_nodes:
             try:
                 # 4.1 Query SessionRouting to find or create target_session_id
                 async with self.async_session_factory() as db_session:
-                    # Query existing routing
-                    stmt = select(SessionRouting).where(
-                        SessionRouting.mosaic_id == self.mosaic_instance.mosaic.id,
-                        SessionRouting.local_node_id == self.node.node_id,
-                        SessionRouting.local_session_id == source_session_id,
-                        SessionRouting.remote_node_id == target_node,
-                        SessionRouting.deleted_at.is_(None)
-                    )
-                    result = await db_session.execute(stmt)
-                    routing = result.scalar_one_or_none()
+                    # Get connection alignment for this target node
+                    session_alignment = connection_alignment_map.get(target_node, SessionAlignment.MIRRORING)
+
+                    routing = None
+                    # For MIRRORING mode: try to reuse existing routing
+                    if session_alignment == SessionAlignment.MIRRORING:
+                        stmt = select(SessionRouting).where(
+                            SessionRouting.mosaic_id == self.mosaic_instance.mosaic.id,
+                            SessionRouting.local_node_id == self.node.node_id,
+                            SessionRouting.local_session_id == source_session_id,
+                            SessionRouting.remote_node_id == target_node,
+                            SessionRouting.deleted_at.is_(None)
+                        )
+                        result = await db_session.execute(stmt)
+                        routing = result.scalar_one_or_none()
 
                     if routing:
-                        # Use existing routing
+                        # Use existing routing (MIRRORING mode only)
                         target_session_id = routing.remote_session_id
                         logger.debug(
-                            f"Using existing session routing: {self.node.node_id}/{source_session_id} -> "
+                            f"Using existing session routing (MIRRORING): {self.node.node_id}/{source_session_id} -> "
                             f"{target_node}/{target_session_id}"
                         )
                     else:
                         # Create new routing (bidirectional)
+                        # For TASKING mode: always create new routing
+                        # For MIRRORING mode: create new routing if not found
                         target_session_id = str(uuid.uuid4())
                         now = datetime.now(timezone.utc)
 
@@ -547,7 +576,8 @@ class MosaicNode(ABC):
                         await db_session.commit()
 
                         logger.info(
-                            f"Created bidirectional session routing: {self.node.node_id}/{source_session_id} <-> "
+                            f"Created bidirectional session routing ({session_alignment.value}): "
+                            f"{self.node.node_id}/{source_session_id} <-> "
                             f"{target_node}/{target_session_id}"
                         )
 

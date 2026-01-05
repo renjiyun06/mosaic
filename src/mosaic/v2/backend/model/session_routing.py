@@ -21,12 +21,11 @@ class SessionRouting(BaseModel, table=True):
     __tablename__ = "session_routings"
     __table_args__ = (
         Index(
-            "idx_session_routing_unique",
+            "idx_session_routing_lookup",
             "mosaic_id",
             "local_node_id",
             "local_session_id",
             "remote_node_id",
-            unique=True,
             sqlite_where=text("deleted_at IS NULL"),
             postgresql_where=text("deleted_at IS NULL"),
         ),
