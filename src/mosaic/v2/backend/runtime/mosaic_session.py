@@ -275,18 +275,27 @@ class MosaicSession(ABC):
 
                     # Check if session should close after this event (only when not already closing)
                     if not self._should_close and await self._should_close_after_event(event):
-                        logger.info(
-                            f"Session should close after event: session_id={self.session_id}, "
-                            f"event_type={event_type}"
-                        )
+                        # Check if auto_close is enabled in node config (default to True for backwards compatibility)
+                        auto_close = self.config.get('auto_close', True)
 
-                        # Mark should close flag
-                        self._should_close = True
+                        if auto_close:
+                            logger.info(
+                                f"Session should close after event: session_id={self.session_id}, "
+                                f"event_type={event_type}"
+                            )
 
-                        # Submit close command immediately
-                        self._submit_close_command()
+                            # Mark should close flag
+                            self._should_close = True
 
-                        # Do NOT break - continue loop to process special events
+                            # Submit close command immediately
+                            self._submit_close_command()
+
+                            # Do NOT break - continue loop to process special events
+                        else:
+                            logger.debug(
+                                f"Auto-close disabled for session: session_id={self.session_id}, "
+                                f"event_type={event_type}, skipping close command"
+                            )
 
                 except Exception as e:
                     logger.error(
