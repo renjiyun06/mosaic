@@ -48,9 +48,11 @@ def _get_node_type_registry() -> Dict[NodeType, Type['MosaicNode']]:
         Imports are done inside the function to avoid circular dependencies.
     """
     from .node.claude_code import ClaudeCodeNode
+    from .node.scheduler import SchedulerNode
 
     return {
         NodeType.CLAUDE_CODE: ClaudeCodeNode,
+        NodeType.SCHEDULER: SchedulerNode,
     }
 
 

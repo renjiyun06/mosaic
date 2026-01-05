@@ -8,6 +8,7 @@ class NodeType(str, Enum):
     Defines the types of nodes that can be created in a Mosaic instance.
     """
     CLAUDE_CODE = "claude_code"
+    SCHEDULER = "scheduler"
 
 
 class MosaicStatus(str, Enum):
