@@ -90,7 +90,34 @@ export default function TopologyPage() {
           id: node.node_id,
           type: "default",
           data: {
-            label: `${node.node_id}\n${getNodeTypeLabel(node.node_type)}`
+            label: (
+              <div
+                style={{
+                  overflow: 'hidden',
+                  maxWidth: '180px',
+                  width: '100%'
+                }}
+                title={`${node.node_id} (${getNodeTypeLabel(node.node_type)})`}
+              >
+                <div style={{
+                  fontWeight: 600,
+                  fontSize: '11px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}>
+                  {node.node_id}
+                </div>
+                <div style={{
+                  fontSize: '9px',
+                  opacity: 0.8,
+                  marginTop: '2px',
+                  whiteSpace: 'nowrap'
+                }}>
+                  {getNodeTypeLabel(node.node_type)}
+                </div>
+              </div>
+            )
           },
           position: { x: 0, y: 0 }, // Will be calculated by dagre
           draggable: true,
@@ -98,16 +125,15 @@ export default function TopologyPage() {
             background: "#3b82f6",
             color: "white",
             border: "1px solid #222",
-            padding: 4,
+            padding: 8,
             borderRadius: 4,
-            width: 100,
-            height: 35,
+            minWidth: 100,
+            maxWidth: 200,
+            height: 'auto',
+            minHeight: 45,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            textAlign: "center",
-            whiteSpace: "pre-line",
-            fontSize: "9px",
           },
         }))
 
