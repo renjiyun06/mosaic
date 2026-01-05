@@ -42,6 +42,41 @@ export default function CustomEdge({
       ? targetNode.position.y + (targetNode.measured?.height || 35) / 2
       : targetY
 
+    // Handle self-loop (node connecting to itself)
+    if (source === target) {
+      const nodeWidth = sourceNode?.measured?.width || 100
+      const nodeHeight = sourceNode?.measured?.height || 35
+
+      // Loop size based on offset (allows multiple self-loops with different sizes)
+      const loopSize = 60 + Math.abs(offset) * 20
+
+      // Start point: right edge center
+      const startX = sourceCenterX + nodeWidth / 2
+      const startY = sourceCenterY
+
+      // Control point 1: extend far to the right and slightly up
+      const cp1X = sourceCenterX + nodeWidth / 2 + loopSize * 1.2
+      const cp1Y = sourceCenterY - loopSize * 0.3
+
+      // Control point 2: extend far upward and slightly right
+      const cp2X = sourceCenterX + loopSize * 0.3
+      const cp2Y = sourceCenterY - nodeHeight / 2 - loopSize * 1.2
+
+      // End point: top edge center
+      const endX = sourceCenterX
+      const endY = sourceCenterY - nodeHeight / 2
+
+      // Create cubic bezier path for self-loop
+      const customPath = `M ${startX},${startY} C ${cp1X},${cp1Y} ${cp2X},${cp2Y} ${endX},${endY}`
+
+      // Label position: visual center of the loop
+      const labelX = sourceCenterX + loopSize * 0.6
+      const labelY = sourceCenterY - loopSize * 0.6
+
+      return { customPath, labelX, labelY }
+    }
+
+    // Normal edge (different source and target nodes)
     // Vector from source to target
     const dx = targetCenterX - sourceCenterX
     const dy = targetCenterY - sourceCenterY
@@ -72,7 +107,7 @@ export default function CustomEdge({
     const labelY = 0.25 * sourceCenterY + 0.5 * controlY + 0.25 * targetCenterY
 
     return { customPath, labelX, labelY }
-  }, [sourceNode, targetNode, sourceX, sourceY, targetX, targetY, offset])
+  }, [source, target, sourceNode, targetNode, sourceX, sourceY, targetX, targetY, offset])
 
   return (
     <>
