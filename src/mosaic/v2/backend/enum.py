@@ -9,6 +9,7 @@ class NodeType(str, Enum):
     """
     CLAUDE_CODE = "claude_code"
     SCHEDULER = "scheduler"
+    EMAIL = "email"
 
 
 class MosaicStatus(str, Enum):

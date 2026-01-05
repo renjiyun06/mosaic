@@ -49,10 +49,12 @@ def _get_node_type_registry() -> Dict[NodeType, Type['MosaicNode']]:
     """
     from .node.claude_code import ClaudeCodeNode
     from .node.scheduler import SchedulerNode
+    from .node.email import EmailNode
 
     return {
         NodeType.CLAUDE_CODE: ClaudeCodeNode,
         NodeType.SCHEDULER: SchedulerNode,
+        NodeType.EMAIL: EmailNode,
     }
 
 

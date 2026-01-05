@@ -42,7 +42,8 @@ export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.2
 
 export enum NodeType {
   CLAUDE_CODE = 'claude_code',
-  SCHEDULER = 'scheduler'
+  SCHEDULER = 'scheduler',
+  EMAIL = 'email'
 }
 
 export enum MosaicStatus {

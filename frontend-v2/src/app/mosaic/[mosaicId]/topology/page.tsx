@@ -31,7 +31,8 @@ const edgeTypes: EdgeTypes = {
 const getNodeTypeLabel = (nodeType: string): string => {
   const labels: Record<string, string> = {
     'claude_code': 'Claude Code',
-    'scheduler': 'Scheduler'
+    'scheduler': 'Scheduler',
+    'email': 'Email'
   }
   return labels[nodeType] || nodeType
 }

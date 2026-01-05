@@ -40,7 +40,8 @@ import { JsonEditor } from "@/components/ui/json-editor"
 // Node type display configuration
 const NODE_TYPE_LABELS: Record<NodeType, string> = {
   [NodeType.CLAUDE_CODE]: 'Claude Code',
-  [NodeType.SCHEDULER]: 'Scheduler'
+  [NodeType.SCHEDULER]: 'Scheduler',
+  [NodeType.EMAIL]: 'Email'
 }
 
 export default function NodesPage() {
