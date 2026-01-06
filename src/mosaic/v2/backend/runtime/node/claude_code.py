@@ -1241,9 +1241,9 @@ class ClaudeCodeSession(MosaicSession):
                     # 1. Query SessionRouting: Find upstream node via routing table
                     stmt = select(SessionRouting).where(
                         SessionRouting.mosaic_id == self.node.mosaic_instance.mosaic.id,
-                        SessionRouting.local_node_id == self.node.node.node_id,
-                        SessionRouting.local_session_id == self.session_id,
-                        SessionRouting.remote_session_id == upstream_session_id,
+                        SessionRouting.local_session_id == upstream_session_id,
+                        SessionRouting.remote_node_id == self.node.node.node_id,
+                        SessionRouting.remote_session_id == self.session_id,
                         SessionRouting.deleted_at.is_(None)
                     )
                     result = await db_session.execute(stmt)
@@ -1268,7 +1268,7 @@ class ClaudeCodeSession(MosaicSession):
                         }
 
                     # 2. Check Connection: Validate session_alignment is AGENT_DRIVEN
-                    upstream_node_id = routing.remote_node_id
+                    upstream_node_id = routing.local_node_id
 
                     stmt = select(Connection).where(
                         Connection.mosaic_id == self.node.mosaic_instance.mosaic.id,
