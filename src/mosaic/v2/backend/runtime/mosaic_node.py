@@ -350,12 +350,319 @@ class MosaicNode(ABC):
             )
             # Don't re-raise - prevent crashing the ZmqClient's receive loop
 
+    async def _resolve_broadcast_targets(
+        self,
+        source_session_id: str,
+        event_type: EventType
+    ) -> List[tuple[str, str]]:
+        """
+        Resolve target nodes and sessions for broadcast mode.
+
+        Returns:
+            List of (target_node_id, target_session_id) tuples
+
+        Logic:
+            1. Query Subscription table to find all subscribers
+            2. For each subscriber, verify Connection exists
+            3. Determine target_session_id based on session_alignment:
+               - mirroring: Query existing SessionRouting or create new
+               - tasking/agent_driven: Always create new SessionRouting
+        """
+        from ..model.subscription import Subscription
+        from ..model.connection import Connection
+        from ..model.session_routing import SessionRouting
+        from ..enum import SessionAlignment
+
+        targets = []
+
+        async with self.async_session_factory() as db_session:
+            # 1. Query all subscribers for this event type
+            stmt = select(Subscription.target_node_id).where(
+                Subscription.mosaic_id == self.mosaic_instance.mosaic.id,
+                Subscription.source_node_id == self.node.node_id,
+                Subscription.event_type == event_type,
+                Subscription.deleted_at.is_(None)
+            ).distinct()
+            result = await db_session.execute(stmt)
+            subscriber_nodes = list(result.scalars().all())
+
+            if not subscriber_nodes:
+                logger.debug(
+                    f"No subscribers found for broadcast: event_type={event_type}, "
+                    f"source_node={self.node.node_id}"
+                )
+                return []
+
+            logger.info(
+                f"Broadcasting event to {len(subscriber_nodes)} subscribers: "
+                f"event_type={event_type}, targets={subscriber_nodes}"
+            )
+
+            # 2. For each subscriber, resolve target_session_id
+            for target_node_id in subscriber_nodes:
+                # 2.1 Verify connection exists
+                stmt = select(Connection).where(
+                    Connection.mosaic_id == self.mosaic_instance.mosaic.id,
+                    Connection.source_node_id == self.node.node_id,
+                    Connection.target_node_id == target_node_id,
+                    Connection.deleted_at.is_(None)
+                )
+                result = await db_session.execute(stmt)
+                connection = result.scalar_one_or_none()
+
+                if not connection:
+                    logger.warning(
+                        f"No connection from {self.node.node_id} to {target_node_id}, "
+                        f"skipping subscriber for event_type={event_type}"
+                    )
+                    continue
+
+                # 2.2 Determine target_session_id based on session_alignment
+                session_alignment = connection.session_alignment
+
+                if session_alignment in (SessionAlignment.TASKING, SessionAlignment.AGENT_DRIVEN):
+                    # Always create new routing
+                    target_session_id = str(uuid.uuid4())
+
+                    routing = SessionRouting(
+                        user_id=self.mosaic_instance.mosaic.user_id,
+                        mosaic_id=self.mosaic_instance.mosaic.id,
+                        local_node_id=self.node.node_id,
+                        local_session_id=source_session_id,
+                        remote_node_id=target_node_id,
+                        remote_session_id=target_session_id
+                    )
+                    db_session.add(routing)
+
+                    logger.info(
+                        f"Created new session routing ({session_alignment.value}): "
+                        f"{self.node.node_id}/{source_session_id} -> "
+                        f"{target_node_id}/{target_session_id}"
+                    )
+
+                else:  # SessionAlignment.MIRRORING
+                    # Query existing routing or create new
+                    stmt = select(SessionRouting).where(
+                        SessionRouting.mosaic_id == self.mosaic_instance.mosaic.id,
+                        SessionRouting.local_node_id == self.node.node_id,
+                        SessionRouting.local_session_id == source_session_id,
+                        SessionRouting.remote_node_id == target_node_id,
+                        SessionRouting.deleted_at.is_(None)
+                    )
+                    result = await db_session.execute(stmt)
+                    routing = result.scalar_one_or_none()
+
+                    if routing:
+                        target_session_id = routing.remote_session_id
+                        logger.debug(
+                            f"Using existing session routing (mirroring): "
+                            f"{self.node.node_id}/{source_session_id} -> "
+                            f"{target_node_id}/{target_session_id}"
+                        )
+                    else:
+                        # Create new routing
+                        target_session_id = str(uuid.uuid4())
+
+                        routing = SessionRouting(
+                            user_id=self.mosaic_instance.mosaic.user_id,
+                            mosaic_id=self.mosaic_instance.mosaic.id,
+                            local_node_id=self.node.node_id,
+                            local_session_id=source_session_id,
+                            remote_node_id=target_node_id,
+                            remote_session_id=target_session_id
+                        )
+                        db_session.add(routing)
+
+                        logger.info(
+                            f"Created new session routing (mirroring): "
+                            f"{self.node.node_id}/{source_session_id} -> "
+                            f"{target_node_id}/{target_session_id}"
+                        )
+
+                targets.append((target_node_id, target_session_id))
+
+            # Commit all routing changes
+            await db_session.commit()
+
+        return targets
+
+    async def _resolve_unicast_target(
+        self,
+        source_session_id: str,
+        target_node_id: str,
+        target_session_id: Optional[str]
+    ) -> str:
+        """
+        Resolve target_session_id for unicast mode.
+
+        Args:
+            source_session_id: Source session ID
+            target_node_id: Target node ID
+            target_session_id: Optional target session ID (if provided, returned directly)
+
+        Returns:
+            target_session_id: Resolved target session ID
+
+        Raises:
+            RuntimeInternalError: If connection validation fails
+
+        Logic:
+            1. If target_session_id provided: return directly (no routing needed)
+            2. Otherwise:
+               a. Check forward connection (source=self, target=target_node_id)
+               b. Check reverse connection (source=target_node_id, target=self)
+               c. If neither exists: error (communication not allowed)
+               d. If only reverse exists: error (must provide target_session_id)
+               e. If forward exists: determine based on session_alignment
+                  - mirroring: Query existing or create new
+                  - tasking/agent_driven: Always create new
+        """
+        from ..model.connection import Connection
+        from ..model.session_routing import SessionRouting
+        from ..enum import SessionAlignment
+
+        # If target_session_id already provided, validate and use it
+        if target_session_id:
+            from ..model.session import Session
+            from ..enum import SessionStatus
+
+            async with self.async_session_factory() as db_session:
+                # Validate that target session exists and is active
+                stmt = select(Session).where(
+                    Session.session_id == target_session_id,
+                    Session.mosaic_id == self.mosaic_instance.mosaic.id,
+                    Session.node_id == target_node_id,
+                    Session.deleted_at.is_(None)
+                )
+                result = await db_session.execute(stmt)
+                target_session = result.scalar_one_or_none()
+
+                if not target_session:
+                    raise RuntimeInternalError(
+                        f"Target session not found: session_id={target_session_id}, "
+                        f"node_id={target_node_id}, mosaic_id={self.mosaic_instance.mosaic.id}"
+                    )
+
+                if target_session.status != SessionStatus.ACTIVE:
+                    raise RuntimeInternalError(
+                        f"Target session is not active: session_id={target_session_id}, "
+                        f"status={target_session.status}"
+                    )
+
+            logger.debug(
+                f"Using provided target_session_id: {target_node_id}/{target_session_id}"
+            )
+            return target_session_id
+
+        # Query forward and reverse connections
+        async with self.async_session_factory() as db_session:
+            # Forward connection
+            stmt = select(Connection).where(
+                Connection.mosaic_id == self.mosaic_instance.mosaic.id,
+                Connection.source_node_id == self.node.node_id,
+                Connection.target_node_id == target_node_id,
+                Connection.deleted_at.is_(None)
+            )
+            result = await db_session.execute(stmt)
+            forward_connection = result.scalar_one_or_none()
+
+            # Reverse connection
+            stmt = select(Connection).where(
+                Connection.mosaic_id == self.mosaic_instance.mosaic.id,
+                Connection.source_node_id == target_node_id,
+                Connection.target_node_id == self.node.node_id,
+                Connection.deleted_at.is_(None)
+            )
+            result = await db_session.execute(stmt)
+            reverse_connection = result.scalar_one_or_none()
+
+            # Validate connections
+            if not forward_connection and not reverse_connection:
+                raise RuntimeInternalError(
+                    f"No connection exists between {self.node.node_id} and {target_node_id}. "
+                    f"Communication is not allowed."
+                )
+
+            if not forward_connection and reverse_connection:
+                raise RuntimeInternalError(
+                    f"No forward connection from {self.node.node_id} to {target_node_id}. "
+                    f"A reverse connection exists. To send events, you must explicitly provide "
+                    f"target_session_id (usually obtained from incoming events from that node)."
+                )
+
+            # Forward connection exists - resolve based on session_alignment
+            session_alignment = forward_connection.session_alignment
+
+            if session_alignment in (SessionAlignment.TASKING, SessionAlignment.AGENT_DRIVEN):
+                # Always create new routing
+                target_session_id = str(uuid.uuid4())
+
+                routing = SessionRouting(
+                    user_id=self.mosaic_instance.mosaic.user_id,
+                    mosaic_id=self.mosaic_instance.mosaic.id,
+                    local_node_id=self.node.node_id,
+                    local_session_id=source_session_id,
+                    remote_node_id=target_node_id,
+                    remote_session_id=target_session_id
+                )
+                db_session.add(routing)
+                await db_session.commit()
+
+                logger.info(
+                    f"Created new session routing ({session_alignment.value}): "
+                    f"{self.node.node_id}/{source_session_id} -> "
+                    f"{target_node_id}/{target_session_id}"
+                )
+
+            else:  # SessionAlignment.MIRRORING
+                # Query existing routing or create new
+                stmt = select(SessionRouting).where(
+                    SessionRouting.mosaic_id == self.mosaic_instance.mosaic.id,
+                    SessionRouting.local_node_id == self.node.node_id,
+                    SessionRouting.local_session_id == source_session_id,
+                    SessionRouting.remote_node_id == target_node_id,
+                    SessionRouting.deleted_at.is_(None)
+                )
+                result = await db_session.execute(stmt)
+                routing = result.scalar_one_or_none()
+
+                if routing:
+                    target_session_id = routing.remote_session_id
+                    logger.debug(
+                        f"Using existing session routing (mirroring): "
+                        f"{self.node.node_id}/{source_session_id} -> "
+                        f"{target_node_id}/{target_session_id}"
+                    )
+                else:
+                    # Create new routing
+                    target_session_id = str(uuid.uuid4())
+
+                    routing = SessionRouting(
+                        user_id=self.mosaic_instance.mosaic.user_id,
+                        mosaic_id=self.mosaic_instance.mosaic.id,
+                        local_node_id=self.node.node_id,
+                        local_session_id=source_session_id,
+                        remote_node_id=target_node_id,
+                        remote_session_id=target_session_id
+                    )
+                    db_session.add(routing)
+                    await db_session.commit()
+
+                    logger.info(
+                        f"Created new session routing (mirroring): "
+                        f"{self.node.node_id}/{source_session_id} -> "
+                        f"{target_node_id}/{target_session_id}"
+                    )
+
+        return target_session_id
+
     async def send_event(
         self,
         source_session_id: str,
         event_type: EventType,
         payload: Optional[Dict[str, Any]] = None,
-        target_node_id: Optional[str] = None
+        target_node_id: Optional[str] = None,
+        target_session_id: Optional[str] = None
     ) -> None:
         """
         Send an event from a session to target node(s).
@@ -364,53 +671,40 @@ class MosaicNode(ABC):
         All events in the system are generated by sessions and consumed by sessions.
 
         Event Routing:
-            1. Unicast mode (target_node_id provided):
-               - Validates that a Connection exists from this node to target_node_id
-               - If no connection found, the event is dropped (logged as WARNING)
-               - Uses SessionRouting table to determine target_session_id
-               - If no routing exists, generates new target_session_id and creates bidirectional routing
-
-            2. Broadcast mode (target_node_id is None):
+            1. Broadcast mode (target_node_id is None):
                - Queries Subscription table to find all subscribers for this event_type
-               - Sends event to each subscribed node
-               - For each target, uses SessionRouting to determine target_session_id
+               - For each subscriber, verifies Connection exists
+               - Determines target_session_id based on session_alignment:
+                 * mirroring: Reuses existing SessionRouting if available
+                 * tasking/agent_driven: Always creates new SessionRouting
 
-        SessionRouting lookup and creation:
-            - Query: (local_node_id=self.node.node_id, local_session_id=source_session_id, remote_node_id=target_node_id)
-            - Returns: remote_session_id (target_session_id)
-            - If not found:
-              * Generates new target_session_id (UUID)
-              * Inserts TWO SessionRouting records (bidirectional binding):
-                - (local=A, session=S1, remote=B, session=S2)
-                - (local=B, session=S2, remote=A, session=S1)
-              * This creates a persistent session pair for bidirectional communication
+            2. Unicast mode (target_node_id provided):
+               - If target_session_id also provided: Uses directly without routing
+               - If target_session_id not provided:
+                 * Validates forward Connection exists
+                 * Determines target_session_id based on session_alignment
+                 * Creates SessionRouting if needed (unidirectional)
 
-        Target session creation:
-            - SessionRouting insertion does NOT create the actual session instance
-            - Target session is auto-created when target node receives the event (_on_event_received)
-            - This separates routing (logical mapping) from runtime (actual session instance)
+        SessionRouting:
+            - Only stores unidirectional mappings (source → target)
+            - Return communication doesn't need routing (uses event source fields)
+            - Created on-demand based on session_alignment strategy
 
         Args:
             source_session_id: Session ID that is emitting this event
             event_type: Event type identifier (from EventType enum)
             payload: Optional event-specific data (JSON-serializable dict)
             target_node_id: Optional target node ID. If None, broadcast to all subscribers.
+            target_session_id: Optional target session ID. If provided, routing is bypassed.
 
         Raises:
-            RuntimeInternalError: If ZMQ client is not connected
+            RuntimeInternalError: If ZMQ client is not connected or connection validation fails
             SessionNotFoundError: If source_session_id is not found in this node
 
-        Business Logic:
-            - Only events within the same mosaic_id are allowed (no cross-mosaic events)
-            - Unicast mode requires an active Connection (no connection = no send, logged as WARNING)
-            - Broadcast mode uses Subscriptions to find targets (no subscribers = no send, logged as DEBUG)
-            - Event persistence is handled by ZmqServer (events are logged to database)
-            - SessionRouting is created bidirectionally for session pair binding
-
         Database Models Used:
-            - Connection: Validates node-to-node connections (unicast mode)
+            - Connection: Validates node-to-node connections and provides session_alignment
             - Subscription: Defines which nodes subscribe to which event types (broadcast mode)
-            - SessionRouting: Maps session pairs between nodes
+            - SessionRouting: Maps source sessions to target sessions (unidirectional)
         """
         # 1. Validate ZMQ client is connected
         if not self._zmq_client:
@@ -426,175 +720,32 @@ class MosaicNode(ABC):
 
         logger.debug(
             f"Sending event: source_node={self.node.node_id}, source_session={source_session_id}, "
-            f"event_type={event_type}, target_node={target_node_id or 'BROADCAST'}"
+            f"event_type={event_type}, target_node={target_node_id or 'BROADCAST'}, "
+            f"target_session={target_session_id or 'AUTO'}"
         )
 
-        # 3. Determine target node list
-        target_nodes: List[str] = []
-        # Store connection alignment info for each target node (for single-cast mode)
-        connection_alignment_map: dict = {}
+        # 3. Resolve targets based on mode
+        targets: List[tuple[str, str]] = []
 
         if target_node_id:
-            # Unicast mode: Verify connection exists
-            from ..model.connection import Connection
-            from ..model.session_routing import SessionRouting
-
-            async with self.async_session_factory() as db_session:
-                stmt = select(Connection).where(
-                    Connection.mosaic_id == self.mosaic_instance.mosaic.id,
-                    Connection.source_node_id == self.node.node_id,
-                    Connection.target_node_id == target_node_id,
-                    Connection.deleted_at.is_(None)
-                )
-                result = await db_session.execute(stmt)
-                connection = result.scalar_one_or_none()
-
-                stmt = select(SessionRouting).where(
-                    SessionRouting.mosaic_id == self.mosaic_instance.mosaic.id,
-                    SessionRouting.local_node_id == self.node.node_id,
-                    SessionRouting.local_session_id == source_session_id,
-                    SessionRouting.remote_node_id == target_node_id,
-                    SessionRouting.deleted_at.is_(None)
-                )
-                result = await db_session.execute(stmt)
-                session_routings = result.scalars().all()
-
-            if not connection and not session_routings:
-                logger.warning(
-                    f"No connection found from {self.node.node_id} to {target_node_id}, "
-                    f"event will not be sent: event_type={event_type}, source_session={source_session_id}"
-                )
-                return
-
-            # Store connection alignment for this target node
-            if connection:
-                connection_alignment_map[target_node_id] = connection.session_alignment
-
-            target_nodes = [target_node_id]
+            # Unicast mode
+            resolved_target_session_id = await self._resolve_unicast_target(
+                source_session_id=source_session_id,
+                target_node_id=target_node_id,
+                target_session_id=target_session_id
+            )
+            targets = [(target_node_id, resolved_target_session_id)]
         else:
-            # Broadcast mode: query subscriptions and get connection alignments
-            from ..model.subscription import Subscription
-            from ..model.connection import Connection
-
-            async with self.async_session_factory() as db_session:
-                stmt = select(Subscription.target_node_id).where(
-                    Subscription.mosaic_id == self.mosaic_instance.mosaic.id,
-                    Subscription.source_node_id == self.node.node_id,
-                    Subscription.event_type == event_type,
-                    Subscription.deleted_at.is_(None)
-                ).distinct()
-                result = await db_session.execute(stmt)
-                target_nodes = list(result.scalars().all())
-
-                # Query connection alignment for each target node
-                for target_node in target_nodes:
-                    stmt = select(Connection).where(
-                        Connection.mosaic_id == self.mosaic_instance.mosaic.id,
-                        Connection.source_node_id == self.node.node_id,
-                        Connection.target_node_id == target_node,
-                        Connection.deleted_at.is_(None)
-                    )
-                    result = await db_session.execute(stmt)
-                    connection = result.scalar_one_or_none()
-                    if connection:
-                        connection_alignment_map[target_node] = connection.session_alignment
-
-            if not target_nodes:
-                logger.debug(
-                    f"No subscribers found for broadcast: event_type={event_type}, "
-                    f"source_node={self.node.node_id}"
-                )
-                return
-
-            logger.info(
-                f"Broadcasting event to {len(target_nodes)} subscribers: "
-                f"event_type={event_type}, targets={target_nodes}"
+            # Broadcast mode
+            targets = await self._resolve_broadcast_targets(
+                source_session_id=source_session_id,
+                event_type=event_type
             )
 
-        # 4. For each target node, resolve target_session_id and send event
-        from ..model.session_routing import SessionRouting
-        from ..enum import SessionAlignment
-
-        for target_node in target_nodes:
+        # 4. Send events to all targets
+        for target_node, target_session in targets:
             try:
-                # 4.1 Query SessionRouting to find or create target_session_id
-                async with self.async_session_factory() as db_session:
-                    # Get connection alignment for this target node
-                    session_alignment = connection_alignment_map.get(target_node, SessionAlignment.MIRRORING)
-
-                    stmt = select(SessionRouting).where(
-                        SessionRouting.mosaic_id == self.mosaic_instance.mosaic.id,
-                        SessionRouting.local_node_id == self.node.node_id,
-                        SessionRouting.local_session_id == source_session_id,
-                        SessionRouting.remote_node_id == target_node,
-                        SessionRouting.deleted_at.is_(None)
-                    )
-                    result = await db_session.execute(stmt)
-                    routings = result.scalars().all()
-                    routing = None
-                    if routings and len(routings) == 1:
-                        routing = routings[0]
-                    
-                    if routing and session_alignment != SessionAlignment.MIRRORING:
-                        stmt = select(SessionRouting).where(
-                            SessionRouting.mosaic_id == self.mosaic_instance.mosaic.id,
-                            SessionRouting.local_node_id == target_node,
-                            SessionRouting.local_session_id == routing.remote_session_id,
-                            SessionRouting.remote_node_id == self.node.node_id,
-                            SessionRouting.remote_session_id == source_session_id,
-                            SessionRouting.deleted_at.is_(None)
-                        )
-                        result = await db_session.execute(stmt)
-                        routing_backward = result.scalar_one_or_none()
-                        if routing.id < routing_backward.id:
-                            routing = None
-                        
-                    if routing:
-                        # Use existing routing
-                        target_session_id = routing.remote_session_id
-                        logger.debug(
-                            f"Using existing session routing ({session_alignment.value}): "
-                            f"{self.node.node_id}/{source_session_id} -> "
-                            f"{target_node}/{target_session_id}"
-                        )
-                    else:
-                        # Create new routing (bidirectional)
-                        target_session_id = str(uuid.uuid4())
-                        now = datetime.now(timezone.utc)
-
-                        # Create both directions of the routing
-                        routing_forward = SessionRouting(
-                            user_id=self.mosaic_instance.mosaic.user_id,
-                            mosaic_id=self.mosaic_instance.mosaic.id,
-                            local_node_id=self.node.node_id,
-                            local_session_id=source_session_id,
-                            remote_node_id=target_node,
-                            remote_session_id=target_session_id,
-                            created_at=now,
-                            updated_at=now
-                        )
-                        routing_backward = SessionRouting(
-                            user_id=self.mosaic_instance.mosaic.user_id,
-                            mosaic_id=self.mosaic_instance.mosaic.id,
-                            local_node_id=target_node,
-                            local_session_id=target_session_id,
-                            remote_node_id=self.node.node_id,
-                            remote_session_id=source_session_id,
-                            created_at=now,
-                            updated_at=now
-                        )
-
-                        db_session.add(routing_forward)
-                        db_session.add(routing_backward)
-                        await db_session.commit()
-
-                        logger.info(
-                            f"Created bidirectional session routing ({session_alignment.value}): "
-                            f"{self.node.node_id}/{source_session_id} <-> "
-                            f"{target_node}/{target_session_id}"
-                        )
-
-                # 4.2 Construct event dict
+                # 4.1 Construct event dict
                 event_id = str(uuid.uuid4())
                 event_data = {
                     "event_id": event_id,
@@ -602,11 +753,11 @@ class MosaicNode(ABC):
                     "source_node_id": self.node.node_id,
                     "source_session_id": source_session_id,
                     "target_node_id": target_node,
-                    "target_session_id": target_session_id,
+                    "target_session_id": target_session,
                     "payload": payload
                 }
 
-                # 4.3 Send event via ZMQ
+                # 4.2 Send event via ZMQ
                 await self._zmq_client.send(
                     target_mosaic_id=self.mosaic_instance.mosaic.id,
                     target_node_id=target_node,
@@ -615,7 +766,7 @@ class MosaicNode(ABC):
 
                 logger.debug(
                     f"Event sent: event_id={event_id}, {self.node.node_id}/{source_session_id} -> "
-                    f"{target_node}/{target_session_id}, event_type={event_type}"
+                    f"{target_node}/{target_session}, event_type={event_type}"
                 )
 
             except Exception as e:
@@ -624,7 +775,7 @@ class MosaicNode(ABC):
                     exc_info=True
                 )
                 # Continue sending to other targets in broadcast mode
-                if len(target_nodes) > 1:
+                if len(targets) > 1:
                     continue
                 else:
                     raise

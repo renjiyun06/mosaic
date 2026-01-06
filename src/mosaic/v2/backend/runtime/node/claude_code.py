@@ -1083,25 +1083,42 @@ class ClaudeCodeSession(MosaicSession):
         Provides:
         - send_message: Send message to another node
         - send_email: Send email via email node
+        - task_complete: Signal that the current task has been completed
         """
         @tool(
             "send_message",
             "Send a message to a node",
             {
-                "target_node_id": str,
-                "message": str
+                "type": "object",
+                "properties": {
+                    "target_node_id": {
+                        "type": "string",
+                        "description": "The ID of the node to send the message to"
+                    },
+                    "target_session_id": {
+                        "type": "string",
+                        "description": "The ID of the session to send the message to"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "The message to send"
+                    }
+                },
+                "required": ["target_node_id", "message"]
             }
         )
         async def send_message(args):
             try:
                 target_node_id = args['target_node_id']
+                target_session_id = args.get('target_session_id', None)
                 message = args['message']
 
                 await self.node.send_event(
                     source_session_id=self.session_id,
                     event_type=EventType.NODE_MESSAGE,
                     payload={"message": message},
-                    target_node_id=target_node_id
+                    target_node_id=target_node_id,
+                    target_session_id=target_session_id
                 )
 
                 return {
