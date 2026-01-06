@@ -81,3 +81,38 @@ class SessionOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class SessionTopologyNode(BaseModel):
+    """Session topology node (tree structure)"""
+
+    # Basic session information
+    session_id: str = Field(..., description="Session ID")
+    node_id: str = Field(..., description="Node ID")
+    status: SessionStatus = Field(..., description="Session status")
+
+    # Tree structure
+    parent_session_id: Optional[str] = Field(None, description="Parent session ID (null for root node)")
+    children: list['SessionTopologyNode'] = Field(default_factory=list, description="List of child nodes")
+
+    # Statistics
+    depth: int = Field(..., description="Current node depth (0 for root node)")
+    descendant_count: int = Field(..., description="Total number of descendants (all children and grandchildren)")
+
+    # Timestamps
+    created_at: datetime = Field(..., description="Session creation time")
+    closed_at: Optional[datetime] = Field(None, description="Session close time")
+
+    class Config:
+        from_attributes = True
+
+
+class SessionTopologyResponse(BaseModel):
+    """Session topology response"""
+
+    root_session: SessionTopologyNode = Field(..., description="Root session node (with complete tree structure)")
+    total_nodes: int = Field(..., description="Total number of nodes (including root)")
+    max_depth: int = Field(..., description="Maximum depth of the tree")
+
+    class Config:
+        from_attributes = True
