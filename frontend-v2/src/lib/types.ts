@@ -310,6 +310,24 @@ export interface SessionOut {
   closed_at: string | null
 }
 
+export interface SessionTopologyNode {
+  session_id: string
+  node_id: string
+  status: SessionStatus
+  parent_session_id: string | null
+  children: SessionTopologyNode[]
+  depth: number
+  descendant_count: number
+  created_at: string
+  closed_at: string | null
+}
+
+export interface SessionTopologyResponse {
+  root_session: SessionTopologyNode
+  total_nodes: number
+  max_depth: number
+}
+
 // ==================== Message Types ====================
 
 export interface MessageOut {

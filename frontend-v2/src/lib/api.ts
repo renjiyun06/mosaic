@@ -42,6 +42,7 @@ import type {
   CreateSessionRequest,
   ListSessionsRequest,
   SessionOut,
+  SessionTopologyResponse,
 
   // Message types
   MessageOut,
@@ -566,6 +567,31 @@ class ApiClient {
     const url = `/api/mosaics/${mosaicId}/sessions${queryString ? `?${queryString}` : ''}`
 
     return request<PaginatedData<SessionOut>>(url, {
+      autoToast: {
+        success: false,
+        error: true
+      }
+    })
+  }
+
+  /**
+   * Get session topology tree starting from a root session
+   */
+  async getSessionTopology(
+    mosaicId: number,
+    sessionId: string,
+    maxDepth?: number
+  ): Promise<SessionTopologyResponse> {
+    const queryParams = new URLSearchParams()
+
+    if (maxDepth !== undefined) {
+      queryParams.append('max_depth', maxDepth.toString())
+    }
+
+    const queryString = queryParams.toString()
+    const url = `/api/mosaics/${mosaicId}/sessions/${sessionId}/topology${queryString ? `?${queryString}` : ''}`
+
+    return request<SessionTopologyResponse>(url, {
       autoToast: {
         success: false,
         error: true

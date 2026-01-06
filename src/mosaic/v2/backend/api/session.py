@@ -6,11 +6,11 @@ from math import ceil
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from typing import Annotated, Optional
 
 from ..schema.response import SuccessResponse, PaginatedData
-from ..schema.session import CreateSessionRequest, SessionOut
+from ..schema.session import CreateSessionRequest, SessionOut, SessionTopologyNode, SessionTopologyResponse
 from ..model import Session, Node, Mosaic
 from ..dep import get_db_session, get_current_user
 from ..model.user import User
@@ -466,3 +466,253 @@ async def list_sessions(
     )
 
     return SuccessResponse(data=paginated_data)
+
+
+# ==================== Helper Functions for Topology ====================
+
+
+async def fetch_session_tree(
+    session: AsyncSession,
+    mosaic_id: int,
+    root_session_id: str,
+    max_depth: Optional[int] = None
+) -> list[dict]:
+    """Fetch session tree using recursive CTE
+
+    Args:
+        session: Database session
+        mosaic_id: Mosaic ID to filter by
+        root_session_id: Root session ID to start the tree from
+        max_depth: Optional maximum depth to traverse (None for unlimited)
+
+    Returns:
+        List of session tree nodes with columns:
+        - session_id: str
+        - parent_id: Optional[str]
+        - node_id: str
+        - depth: int
+        - status: str
+        - created_at: datetime
+        - closed_at: Optional[datetime]
+    """
+    # Build recursive CTE query
+    cte_query = text("""
+        WITH RECURSIVE session_tree AS (
+            -- Base case: root session (has no parent in the tree)
+            SELECT
+                :root_session_id AS session_id,
+                NULL AS parent_id,
+                s.node_id AS node_id,
+                0 AS depth,
+                s.status AS status,
+                s.created_at AS created_at,
+                s.closed_at AS closed_at
+            FROM sessions s
+            WHERE s.session_id = :root_session_id
+                AND s.mosaic_id = :mosaic_id
+                AND s.deleted_at IS NULL
+
+            UNION ALL
+
+            -- Recursive case: find children through session_routings
+            SELECT
+                sr.remote_session_id AS session_id,
+                sr.local_session_id AS parent_id,
+                sr.remote_node_id AS node_id,
+                st.depth + 1 AS depth,
+                COALESCE(s.status, 'UNKNOWN') AS status,
+                s.created_at AS created_at,
+                s.closed_at AS closed_at
+            FROM session_routings sr
+            INNER JOIN session_tree st ON sr.local_session_id = st.session_id
+            LEFT JOIN sessions s ON sr.remote_session_id = s.session_id
+            WHERE sr.mosaic_id = :mosaic_id
+                AND sr.deleted_at IS NULL
+                AND (:max_depth IS NULL OR st.depth < :max_depth)
+        )
+        SELECT
+            session_id,
+            parent_id,
+            node_id,
+            depth,
+            status,
+            created_at,
+            closed_at
+        FROM session_tree
+        ORDER BY depth, session_id
+    """)
+
+    # Execute query
+    result = await session.execute(
+        cte_query,
+        {
+            "root_session_id": root_session_id,
+            "mosaic_id": mosaic_id,
+            "max_depth": max_depth
+        }
+    )
+
+    # Convert rows to dictionaries
+    rows = result.mappings().all()
+    return [dict(row) for row in rows]
+
+
+def build_tree_structure(
+    nodes: list[dict],
+    root_session_id: str
+) -> Optional[SessionTopologyNode]:
+    """Build tree structure from flat node list
+
+    Args:
+        nodes: Flat list of session nodes from fetch_session_tree()
+        root_session_id: Session ID of the root node
+
+    Returns:
+        Root SessionTopologyNode with nested children, or None if root not found
+    """
+    if not nodes:
+        return None
+
+    # Create mapping from session_id to node data
+    node_map = {node['session_id']: node for node in nodes}
+
+    # Create mapping from session_id to SessionTopologyNode
+    topology_map: dict[str, SessionTopologyNode] = {}
+
+    # First pass: create all SessionTopologyNode objects
+    for node in nodes:
+        topology_map[node['session_id']] = SessionTopologyNode(
+            session_id=node['session_id'],
+            node_id=node['node_id'],
+            status=node['status'].lower() if node['status'] else 'active',
+            parent_session_id=node['parent_id'],
+            children=[],
+            depth=node['depth'],
+            descendant_count=0,  # Will be calculated in second pass
+            created_at=node['created_at'],
+            closed_at=node['closed_at']
+        )
+
+    # Second pass: build parent-child relationships
+    for node in nodes:
+        session_id = node['session_id']
+        parent_id = node['parent_id']
+
+        if parent_id and parent_id in topology_map:
+            # Add current node to parent's children
+            topology_map[parent_id].children.append(topology_map[session_id])
+
+    # Third pass: calculate descendant counts (bottom-up)
+    def calculate_descendants(node: SessionTopologyNode) -> int:
+        """Recursively calculate descendant count"""
+        if not node.children:
+            node.descendant_count = 0
+            return 0
+
+        total = len(node.children)
+        for child in node.children:
+            total += calculate_descendants(child)
+
+        node.descendant_count = total
+        return total
+
+    # Get root node and calculate descendants
+    root_node = topology_map.get(root_session_id)
+    if root_node:
+        calculate_descendants(root_node)
+
+    return root_node
+
+
+@router.get("/{session_id}/topology", response_model=SuccessResponse[SessionTopologyResponse])
+async def get_session_topology(
+    mosaic_id: int,
+    session_id: str,
+    session: SessionDep,
+    current_user: CurrentUserDep,
+    max_depth: Optional[int] = Query(None, ge=1, le=100, description="Maximum depth to traverse (optional)")
+):
+    """Get session topology tree starting from a root session
+
+    Business logic:
+    1. Verify root session exists and belongs to current user
+    2. Use recursive CTE to fetch complete session tree from session_routing
+    3. Build tree structure with parent-child relationships
+    4. Calculate tree statistics (total nodes, max depth, descendant counts)
+    5. Return tree structure with root node
+
+    Query Parameters:
+    - max_depth: Optional limit on tree traversal depth (1-100, default unlimited)
+
+    Returns:
+        Session topology tree with root session and all descendants
+
+    Note:
+        - Uses SQLite recursive CTE for efficient tree traversal
+        - Tree is built from session_routing relationships (local -> remote)
+        - Each node includes session info, status, and descendant count
+        - Root session is the starting point (depth=0)
+
+    Raises:
+        NotFoundError: If root session not found
+        PermissionError: If session doesn't belong to current user
+    """
+    logger.info(
+        f"Fetching session topology: mosaic_id={mosaic_id}, session_id={session_id}, "
+        f"user_id={current_user.id}, max_depth={max_depth}"
+    )
+
+    # 1. Verify root session exists and belongs to current user
+    stmt = select(Session).where(
+        Session.session_id == session_id,
+        Session.mosaic_id == mosaic_id,
+        Session.user_id == current_user.id,
+        Session.deleted_at.is_(None)
+    )
+    result = await session.execute(stmt)
+    root_session = result.scalar_one_or_none()
+
+    if not root_session:
+        logger.warning(
+            f"Root session not found or access denied: session_id={session_id}, "
+            f"mosaic_id={mosaic_id}, user_id={current_user.id}"
+        )
+        raise NotFoundError("Session not found")
+
+    # 2. Fetch session tree using recursive CTE
+    tree_nodes = await fetch_session_tree(
+        session=session,
+        mosaic_id=mosaic_id,
+        root_session_id=session_id,
+        max_depth=max_depth
+    )
+
+    logger.debug(f"Fetched {len(tree_nodes)} nodes in session tree")
+
+    # 3. Build tree structure
+    root_topology = build_tree_structure(
+        nodes=tree_nodes,
+        root_session_id=session_id
+    )
+
+    if not root_topology:
+        logger.error(f"Failed to build tree structure for session_id={session_id}")
+        raise NotFoundError("Failed to build session tree")
+
+    # 4. Calculate tree statistics
+    total_nodes = len(tree_nodes)
+    max_depth_actual = max((node['depth'] for node in tree_nodes), default=0)
+
+    logger.info(
+        f"Session topology built: session_id={session_id}, total_nodes={total_nodes}, "
+        f"max_depth={max_depth_actual}"
+    )
+
+    # 5. Construct response
+    topology_response = SessionTopologyResponse(
+        root_session=root_topology,
+        total_nodes=total_nodes,
+        max_depth=max_depth_actual
+    )
+
+    return SuccessResponse(data=topology_response)
