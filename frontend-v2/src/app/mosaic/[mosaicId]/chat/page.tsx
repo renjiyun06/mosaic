@@ -44,6 +44,12 @@ import {
   Archive,
   Lock,
   AlertCircle,
+  Folder,
+  FolderOpen,
+  File,
+  FileText,
+  FileCode,
+  RefreshCw,
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
@@ -59,6 +65,7 @@ import {
   type NodeOut,
   type SessionOut,
   type MessageOut,
+  type WorkspaceFileItem,
 } from "@/lib/types"
 
 interface ParsedMessage extends MessageOut {
@@ -70,16 +77,32 @@ interface NodeWithSessions extends NodeOut {
   expanded: boolean
 }
 
+// Workspace file tree types (extend WorkspaceFileItem with expanded state)
+interface FileNode extends WorkspaceFileItem {
+  expanded?: boolean
+}
+
+type ViewMode = 'chat' | 'workspace'
+
 export default function ChatPage() {
   const params = useParams()
   const { token } = useAuth()
   const mosaicId = parseInt(params.mosaicId as string)
   const { isConnected, sendMessage, interrupt, subscribe } = useWebSocket()
 
+  // View mode
+  const [viewMode, setViewMode] = useState<ViewMode>('chat')
+
   // Node and session management
   const [nodes, setNodes] = useState<NodeWithSessions[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ParsedMessage[]>([])
+
+  // Workspace state
+  const [fileTree, setFileTree] = useState<FileNode[]>([])
+  const [selectedFile, setSelectedFile] = useState<{ path: string; content: string; language: string | null } | null>(null)
+  const [workspaceLoading, setWorkspaceLoading] = useState(false)
+  const [fileContentLoading, setFileContentLoading] = useState(false)
 
   // Input and loading states
   const [input, setInput] = useState("")
@@ -365,6 +388,43 @@ export default function ChatPage() {
     }
   }, [])
 
+  // Load workspace files
+  const loadWorkspace = async (nodeId: string) => {
+    if (!nodeId) return
+
+    try {
+      setWorkspaceLoading(true)
+      const data = await apiClient.listWorkspaceFiles(mosaicId, nodeId, {
+        path: '/',
+        recursive: true,
+        max_depth: 10
+      })
+
+      // Convert WorkspaceFileItem[] to FileNode[] (add expanded property)
+      const convertToFileNodes = (items: WorkspaceFileItem[]): FileNode[] => {
+        return items.map(item => ({
+          ...item,
+          expanded: false,
+          children: item.children ? convertToFileNodes(item.children) : undefined
+        }))
+      }
+
+      setFileTree(convertToFileNodes(data.items))
+    } catch (error) {
+      console.error("Failed to load workspace:", error)
+      setFileTree([])
+    } finally {
+      setWorkspaceLoading(false)
+    }
+  }
+
+  // Load workspace when switching to workspace view or when active session changes
+  useEffect(() => {
+    if (viewMode === 'workspace' && currentSessionInfo) {
+      loadWorkspace(currentSessionInfo.nodeId)
+    }
+  }, [viewMode, activeSessionId])
+
   const loadMessages = async (sessionId: string) => {
     try {
       // Find the session's node_id
@@ -633,6 +693,102 @@ export default function ChatPage() {
     })
   }
 
+  // Workspace functions
+  const toggleDirectory = (path: string) => {
+    const toggleInTree = (nodes: FileNode[]): FileNode[] => {
+      return nodes.map(node => {
+        if (node.path === path && node.type === 'directory') {
+          return { ...node, expanded: !node.expanded }
+        }
+        if (node.children) {
+          return { ...node, children: toggleInTree(node.children) }
+        }
+        return node
+      })
+    }
+    setFileTree(toggleInTree(fileTree))
+  }
+
+  const handleFileClick = async (path: string, nodeId: string) => {
+    if (!nodeId) return
+
+    try {
+      setFileContentLoading(true)
+      const data = await apiClient.getWorkspaceFileContent(mosaicId, nodeId, {
+        path,
+        encoding: 'utf-8',
+        max_size: 1048576 // 1MB
+      })
+
+      setSelectedFile({
+        path: data.path,
+        content: data.content,
+        language: data.language
+      })
+    } catch (error) {
+      console.error("Failed to load file content:", error)
+      setSelectedFile({
+        path,
+        content: `// Failed to load file: ${error}`,
+        language: null
+      })
+    } finally {
+      setFileContentLoading(false)
+    }
+  }
+
+  const renderFileTree = (nodes: FileNode[], nodeId: string, level: number = 0) => {
+    return nodes.map((node) => (
+      <div key={node.path}>
+        <div
+          className={`flex items-center gap-2 px-2 py-1 hover:bg-muted/50 cursor-pointer ${
+            selectedFile?.path === node.path ? 'bg-muted' : ''
+          }`}
+          style={{ paddingLeft: `${level * 16 + 8}px` }}
+          onClick={() => {
+            if (node.type === 'directory') {
+              toggleDirectory(node.path)
+            } else {
+              handleFileClick(node.path, nodeId)
+            }
+          }}
+        >
+          {node.type === 'directory' ? (
+            <>
+              {node.expanded ? (
+                <ChevronDown className="h-4 w-4 shrink-0" />
+              ) : (
+                <ChevronRight className="h-4 w-4 shrink-0" />
+              )}
+              {node.expanded ? (
+                <FolderOpen className="h-4 w-4 shrink-0 text-yellow-500" />
+              ) : (
+                <Folder className="h-4 w-4 shrink-0 text-yellow-500" />
+              )}
+            </>
+          ) : (
+            <>
+              <span className="w-4" />
+              {node.name.endsWith('.tsx') || node.name.endsWith('.ts') || node.name.endsWith('.jsx') || node.name.endsWith('.js') ? (
+                <FileCode className="h-4 w-4 shrink-0 text-blue-500" />
+              ) : node.name.endsWith('.json') ? (
+                <FileText className="h-4 w-4 shrink-0 text-green-500" />
+              ) : node.name.endsWith('.md') ? (
+                <FileText className="h-4 w-4 shrink-0 text-purple-500" />
+              ) : (
+                <File className="h-4 w-4 shrink-0 text-muted-foreground" />
+              )}
+            </>
+          )}
+          <span className="text-sm truncate">{node.name}</span>
+        </div>
+        {node.type === 'directory' && node.expanded && node.children && (
+          <div>{renderFileTree(node.children, nodeId, level + 1)}</div>
+        )}
+      </div>
+    ))
+  }
+
   const renderMessage = (msg: ParsedMessage) => {
     console.log("[Chat] renderMessage called for:", {
       message_id: msg.message_id,
@@ -732,92 +888,119 @@ export default function ChatPage() {
 
   return (
     <div className="flex absolute inset-0 overflow-hidden">
-      {/* Middle: Chat Area */}
+      {/* Middle: Main Content Area */}
       <div className="flex-1 flex flex-col bg-muted/20 min-w-0">
-        {!activeSessionId ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center text-muted-foreground">
-              <MessageSquare className="h-16 w-16 mx-auto mb-4 opacity-30" />
-              <p>请选择一个会话</p>
-            </div>
+        {/* Tab Switcher + Header */}
+        <div className="border-b bg-background flex items-center justify-between shrink-0 h-11">
+          {/* Left: Tab buttons */}
+          <div className="flex items-center">
+            <Button
+              variant={viewMode === 'chat' ? 'default' : 'ghost'}
+              size="sm"
+              className="rounded-none h-11 px-6"
+              onClick={() => setViewMode('chat')}
+            >
+              <MessageSquare className="h-4 w-4 mr-2" />
+              聊天
+            </Button>
+            <Button
+              variant={viewMode === 'workspace' ? 'default' : 'ghost'}
+              size="sm"
+              className="rounded-none h-11 px-6"
+              onClick={() => setViewMode('workspace')}
+            >
+              <Folder className="h-4 w-4 mr-2" />
+              工作区
+            </Button>
           </div>
-        ) : !isConnected ? (
-          <div className="flex-1 flex items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin" />
-            <span className="ml-2">连接中...</span>
-          </div>
-        ) : (
-          <>
-            {/* Session Info Header */}
-            <div className="border-b bg-background px-6 flex items-center justify-between shrink-0 h-11">
-              {/* Left: Session path */}
+
+          {/* Right: Session info and stats */}
+          {viewMode === 'chat' && currentSessionInfo && (
+            <div className="flex items-center gap-4 px-6">
+              {/* Session path */}
               <div className="flex items-center gap-2">
-                <MessageSquare className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-mono text-muted-foreground">
-                  {currentSessionInfo && (
-                    <>
-                      {currentSessionInfo.nodeId}
-                      <span className="mx-1">/</span>
-                      {activeSessionId.slice(0, 8)}
-                    </>
-                  )}
+                  {currentSessionInfo.nodeId}
+                  <span className="mx-1">/</span>
+                  {activeSessionId?.slice(0, 8)}
                 </span>
-                {currentSessionInfo && (
-                  <>
-                    <Badge variant="outline" className="text-xs">
-                      {currentSessionInfo.session.mode}
-                    </Badge>
-                    {currentSessionInfo.session.model && (
-                      <Badge variant="outline" className="text-xs">
-                        {currentSessionInfo.session.model}
-                      </Badge>
-                    )}
-                  </>
+                <Badge variant="outline" className="text-xs">
+                  {currentSessionInfo.session.mode}
+                </Badge>
+                {currentSessionInfo.session.model && (
+                  <Badge variant="outline" className="text-xs">
+                    {currentSessionInfo.session.model}
+                  </Badge>
                 )}
               </div>
 
-              {/* Right: WebSocket status indicator and usage statistics */}
-              <div className="flex items-center gap-4">
-                {/* WebSocket connection status (only for active sessions) */}
-                {currentSessionInfo?.session.status === SessionStatus.ACTIVE && (
-                  <div className="flex items-center">
-                    <div
-                      className={`h-2 w-2 rounded-full ${
-                        isConnected ? "bg-green-500" : "bg-red-500"
-                      }`}
-                    />
-                  </div>
-                )}
+              {/* WebSocket status */}
+              {currentSessionInfo.session.status === SessionStatus.ACTIVE && (
+                <div className="flex items-center">
+                  <div
+                    className={`h-2 w-2 rounded-full ${
+                      isConnected ? "bg-green-500" : "bg-red-500"
+                    }`}
+                  />
+                </div>
+              )}
 
-                {/* Usage statistics */}
-                {sessionStats && (
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    {sessionStats.total_cost_usd !== undefined && (
-                      <div className="flex items-center gap-1">
-                        <span>💰</span>
-                        <span className="font-mono">
-                          ${sessionStats.total_cost_usd.toFixed(4)}
-                        </span>
-                      </div>
-                    )}
-                    {(sessionStats.total_input_tokens !== undefined ||
-                      sessionStats.total_output_tokens !== undefined) && (
-                      <div className="flex items-center gap-1">
-                        <span>📊</span>
-                        <span className="font-mono">
-                          {sessionStats.total_input_tokens?.toLocaleString() || 0}↑
-                          <span className="mx-0.5">/</span>
-                          {sessionStats.total_output_tokens?.toLocaleString() || 0}↓
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
+              {/* Usage statistics */}
+              {sessionStats && (
+                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                  {sessionStats.total_cost_usd !== undefined && (
+                    <div className="flex items-center gap-1">
+                      <span>💰</span>
+                      <span className="font-mono">
+                        ${sessionStats.total_cost_usd.toFixed(4)}
+                      </span>
+                    </div>
+                  )}
+                  {(sessionStats.total_input_tokens !== undefined ||
+                    sessionStats.total_output_tokens !== undefined) && (
+                    <div className="flex items-center gap-1">
+                      <span>📊</span>
+                      <span className="font-mono">
+                        {sessionStats.total_input_tokens?.toLocaleString() || 0}↑
+                        <span className="mx-0.5">/</span>
+                        {sessionStats.total_output_tokens?.toLocaleString() || 0}↓
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Workspace header */}
+          {viewMode === 'workspace' && (
+            <div className="flex items-center gap-2 px-6">
+              <span className="text-sm text-muted-foreground">
+                {currentSessionInfo ? `节点: ${currentSessionInfo.nodeId}` : '请选择会话'}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Content Area - Switch between Chat and Workspace */}
+        {viewMode === 'chat' ? (
+          /* Chat View */
+          !activeSessionId ? (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center text-muted-foreground">
+                <MessageSquare className="h-16 w-16 mx-auto mb-4 opacity-30" />
+                <p>请选择一个会话</p>
               </div>
             </div>
-
-            {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-6">
+          ) : !isConnected ? (
+            <div className="flex-1 flex items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin" />
+              <span className="ml-2">连接中...</span>
+            </div>
+          ) : (
+            <>
+              {/* Messages Area */}
+              <div className="flex-1 overflow-y-auto p-6">
               {messages.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-muted-foreground">
                   <div className="text-center">
@@ -899,6 +1082,87 @@ export default function ChatPage() {
               </div>
             </div>
           </>
+        )
+        ) : (
+          /* Workspace View */
+          !activeSessionId ? (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center text-muted-foreground">
+                <Folder className="h-16 w-16 mx-auto mb-4 opacity-30" />
+                <p>请选择一个会话查看工作区</p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex overflow-hidden">
+              {/* Left: File Tree */}
+              <div className="w-80 border-r bg-background overflow-y-auto">
+                <div className="px-3 py-1.5 border-b bg-background flex items-center justify-between shrink-0">
+                  <div className="flex items-center gap-2">
+                    <Folder className="h-4 w-4" />
+                    <span className="text-sm font-medium">文件树</span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    onClick={() => currentSessionInfo && loadWorkspace(currentSessionInfo.nodeId)}
+                    disabled={workspaceLoading}
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${workspaceLoading ? 'animate-spin' : ''}`} />
+                  </Button>
+                </div>
+                <div className="py-2">
+                  {workspaceLoading ? (
+                    <div className="p-4 text-center text-sm text-muted-foreground">
+                      <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                      加载中...
+                    </div>
+                  ) : fileTree.length === 0 ? (
+                    <div className="p-4 text-center text-sm text-muted-foreground">
+                      工作区为空
+                    </div>
+                  ) : (
+                    currentSessionInfo && renderFileTree(fileTree, currentSessionInfo.nodeId)
+                  )}
+                </div>
+              </div>
+
+              {/* Right: File Content Viewer */}
+              <div className="flex-1 flex flex-col bg-muted/20 overflow-hidden">
+                {fileContentLoading ? (
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center text-muted-foreground">
+                      <Loader2 className="h-12 w-12 animate-spin mx-auto mb-2" />
+                      <p>加载文件内容...</p>
+                    </div>
+                  </div>
+                ) : selectedFile ? (
+                  <>
+                    {/* File header */}
+                    <div className="border-b bg-background px-4 py-2 shrink-0">
+                      <div className="flex items-center gap-2">
+                        <FileCode className="h-4 w-4 text-blue-500" />
+                        <span className="text-sm font-mono">{selectedFile.path}</span>
+                      </div>
+                    </div>
+                    {/* File content */}
+                    <div className="flex-1 overflow-auto">
+                      <pre className="p-4 text-sm font-mono">
+                        <code>{selectedFile.content}</code>
+                      </pre>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center text-muted-foreground">
+                      <FileText className="h-16 w-16 mx-auto mb-4 opacity-30" />
+                      <p>选择一个文件查看内容</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )
         )}
       </div>
 

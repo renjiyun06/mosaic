@@ -226,6 +226,51 @@ export interface NodeOut {
   updated_at: string
 }
 
+// ==================== Workspace Types ====================
+
+export interface WorkspaceStats {
+  total_files: number
+  total_directories: number
+  total_size_bytes: number
+}
+
+export interface WorkspaceInfoOut {
+  workspace_path: string
+  node_id: string
+  mosaic_id: number
+  exists: boolean
+  readable: boolean
+  stats: WorkspaceStats | null
+}
+
+export interface WorkspaceFileItem {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  size: number | null
+  modified_at: string
+  extension: string | null
+  mime_type: string | null
+  children?: WorkspaceFileItem[]
+}
+
+export interface WorkspaceFilesOut {
+  path: string
+  absolute_path: string
+  items: WorkspaceFileItem[]
+}
+
+export interface WorkspaceFileContentOut {
+  path: string
+  name: string
+  size: number
+  encoding: string
+  content: string
+  truncated: boolean
+  mime_type: string | null
+  language: string | null
+}
+
 // ==================== Connection Types ====================
 
 export interface CreateConnectionRequest {
