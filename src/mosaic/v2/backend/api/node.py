@@ -3,6 +3,9 @@
 import logging
 from pathlib import Path
 from datetime import datetime
+import mimetypes
+import base64
+import os
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +17,9 @@ from ..schema.node import (
     CreateNodeRequest,
     UpdateNodeRequest,
     NodeOut,
+    WorkspaceInfoOut,
+    WorkspaceFilesOut,
+    WorkspaceFileContentOut,
 )
 from ..model import Mosaic, Node, Session
 from ..dep import get_db_session, get_current_user
@@ -806,3 +812,612 @@ async def stop_node(
     )
 
     return SuccessResponse(data=node_out)
+
+# ==================== Workspace API Endpoints ====================
+
+def _validate_workspace_path(workspace_root: Path, requested_path: str) -> Path:
+    """Validate and resolve a path within workspace (prevent path traversal)
+
+    Args:
+        workspace_root: Workspace root directory
+        requested_path: User-requested relative path
+
+    Returns:
+        Resolved absolute path within workspace
+
+    Raises:
+        ValidationError: If path is invalid or outside workspace
+    """
+    # Normalize path (remove leading/trailing slashes)
+    normalized_path = requested_path.strip("/")
+
+    # Construct full path
+    if normalized_path:
+        full_path = workspace_root / normalized_path
+    else:
+        full_path = workspace_root
+
+    # Resolve to absolute path
+    try:
+        resolved_path = full_path.resolve()
+    except (OSError, RuntimeError) as e:
+        raise ValidationError(f"Invalid path: {e}")
+
+    # Security check: ensure resolved path is within workspace
+    try:
+        resolved_path.relative_to(workspace_root.resolve())
+    except ValueError:
+        raise ValidationError("Path traversal attempt detected")
+
+    return resolved_path
+
+
+def _build_file_item(file_path: Path, workspace_root: Path, recursive: bool, current_depth: int, max_depth: int):
+    """Build a WorkspaceFileItem from a file path
+
+    Args:
+        file_path: Absolute path to file/directory
+        workspace_root: Workspace root directory
+        recursive: Whether to recursively list subdirectories
+        current_depth: Current recursion depth
+        max_depth: Maximum recursion depth
+
+    Returns:
+        WorkspaceFileItem dict
+    """
+    from ..schema.node import WorkspaceFileItem
+
+    stat = file_path.stat()
+    is_dir = file_path.is_dir()
+
+    # Calculate relative path from workspace root
+    rel_path = "/" + str(file_path.relative_to(workspace_root)).replace("\\", "/")
+    if rel_path == "/.":
+        rel_path = "/"
+
+    # Get file extension and MIME type
+    extension = None
+    mime_type = None
+    if not is_dir:
+        extension = file_path.suffix.lstrip(".") if file_path.suffix else None
+        mime_type, _ = mimetypes.guess_type(file_path.name)
+
+    # Build children if recursive and is directory
+    children = None
+    if recursive and is_dir and current_depth < max_depth:
+        children = []
+        try:
+            # List and sort directory contents
+            items = list(file_path.iterdir())
+            # Sort: directories first, then files, alphabetically
+            items.sort(key=lambda p: (not p.is_dir(), p.name.lower()))
+
+            for item in items:
+                try:
+                    child_item = _build_file_item(
+                        item, workspace_root, recursive, current_depth + 1, max_depth
+                    )
+                    children.append(child_item)
+                except (OSError, PermissionError) as e:
+                    logger.warning(f"Skipping inaccessible item: {item}, error: {e}")
+                    continue
+        except (OSError, PermissionError) as e:
+            logger.warning(f"Failed to list directory: {file_path}, error: {e}")
+            children = None
+
+    return WorkspaceFileItem(
+        name=file_path.name,
+        path=rel_path,
+        type="directory" if is_dir else "file",
+        size=None if is_dir else stat.st_size,
+        modified_at=datetime.fromtimestamp(stat.st_mtime),
+        extension=extension,
+        mime_type=mime_type,
+        children=children
+    )
+
+
+@router.get("/{node_id}/workspace", response_model=SuccessResponse[WorkspaceInfoOut])
+async def get_workspace_info(
+    mosaic_id: int,
+    node_id: str,
+    req: Request,
+    session: SessionDep,
+    current_user: CurrentUserDep,
+):
+    """Get workspace information for a node
+
+    Business logic:
+    1. Verify mosaic exists and ownership (mosaic.user_id == current_user.id)
+    2. Query node and verify it exists
+    3. Construct workspace path: {instance_path}/users/{user_id}/{mosaic_id}/{node.id}/
+    4. Check if workspace directory exists and is readable
+    5. Optionally calculate workspace statistics:
+       - Count total files (recursively)
+       - Count total directories (recursively)
+       - Calculate total size (sum of all file sizes)
+    6. Return workspace information
+
+    Path construction:
+    - instance_path: req.app.state.instance_path (e.g., /home/tomato/mosaic)
+    - Workspace path: {instance_path}/users/{user_id}/{mosaic_id}/{node.id}/
+
+    Security:
+    - Only returns information about the workspace, no file listing
+    - Validates ownership before revealing paths
+
+    Raises:
+        NotFoundError: Mosaic or node not found or deleted
+        PermissionError: Current user is not the mosaic owner
+
+    Returns:
+        WorkspaceInfoOut: Workspace path, existence status, readability, and optional stats
+    """
+    logger.info(
+        f"Getting workspace info: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"user_id={current_user.id}"
+    )
+
+    # 1. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Query node
+    node_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.node_id == node_id,
+        Node.deleted_at.is_(None)
+    )
+    node_result = await session.execute(node_stmt)
+    node = node_result.scalar_one_or_none()
+
+    if not node:
+        logger.warning(f"Node not found: mosaic_id={mosaic_id}, node_id={node_id}")
+        raise NotFoundError("Node not found")
+
+    # 3. Construct workspace path
+    instance_path = req.app.state.instance_path
+    workspace_path = instance_path / "users" / str(current_user.id) / str(mosaic_id) / str(node.id)
+
+    # 4. Check if workspace exists and is readable
+    exists = workspace_path.exists()
+    readable = exists and os.access(workspace_path, os.R_OK)
+
+    # 5. Calculate statistics (optional, only if workspace exists)
+    stats = None
+    if exists and readable:
+        try:
+            total_files = 0
+            total_directories = 0
+            total_size_bytes = 0
+
+            for root, dirs, files in os.walk(workspace_path):
+                total_directories += len(dirs)
+                total_files += len(files)
+                for file in files:
+                    file_path = Path(root) / file
+                    try:
+                        total_size_bytes += file_path.stat().st_size
+                    except (OSError, PermissionError):
+                        # Skip files we can't access
+                        pass
+
+            from ..schema.node import WorkspaceStats
+            stats = WorkspaceStats(
+                total_files=total_files,
+                total_directories=total_directories,
+                total_size_bytes=total_size_bytes
+            )
+        except Exception as e:
+            logger.warning(f"Failed to calculate workspace stats: {e}")
+            # Don't fail the request if stats calculation fails
+
+    # 6. Return workspace information
+    workspace_info = WorkspaceInfoOut(
+        workspace_path=str(workspace_path),
+        node_id=node.node_id,
+        mosaic_id=mosaic_id,
+        exists=exists,
+        readable=readable,
+        stats=stats
+    )
+
+    logger.info(f"Workspace info retrieved: path={workspace_path}, exists={exists}")
+    return SuccessResponse(data=workspace_info)
+
+
+@router.get("/{node_id}/workspace/files", response_model=SuccessResponse[WorkspaceFilesOut])
+async def list_workspace_files(
+    mosaic_id: int,
+    node_id: str,
+    path: str = "/",
+    recursive: bool = False,
+    max_depth: int = 1,
+    req: Request = None,
+    session: SessionDep = None,
+    current_user: CurrentUserDep = None,
+):
+    """List files and directories in workspace
+
+    Business logic:
+    1. Verify mosaic exists and ownership
+    2. Query node and verify it exists
+    3. Construct base workspace path: {instance_path}/users/{user_id}/{mosaic_id}/{node.id}/
+    4. Validate and sanitize requested path:
+       - Remove leading/trailing slashes for normalization
+       - Construct full path: base_path / requested_path
+       - Resolve to absolute path using Path.resolve()
+       - Security check: ensure resolved path is within workspace (prevent path traversal)
+    5. Check if target path exists and is a directory
+    6. List directory contents:
+       - If recursive=False: Only list immediate children (files and directories)
+       - If recursive=True: Recursively list up to max_depth levels
+       - For each item, collect:
+         * name: File/directory name
+         * path: Relative path from workspace root (e.g., '/src/components/Button.tsx')
+         * type: 'file' or 'directory'
+         * size: File size in bytes (null for directories)
+         * modified_at: Last modification timestamp
+         * extension: File extension (e.g., 'tsx', 'json'), null for directories
+         * mime_type: MIME type (e.g., 'text/plain'), null for directories
+         * children: Child items if recursive=True and type='directory'
+    7. Sort items: directories first (alphabetical), then files (alphabetical)
+    8. Return file list with metadata
+
+    Query parameters:
+    - path: Relative path from workspace root (default: '/')
+    - recursive: Whether to recursively list subdirectories (default: false)
+    - max_depth: Maximum recursion depth if recursive=true (default: 1)
+
+    Path traversal security:
+    - MUST validate that final resolved path is within workspace directory
+    - Examples of attacks to prevent:
+      * path='../../etc/passwd'
+      * path='/etc/passwd'
+      * path='../../../secrets'
+    - Implementation: Use Path.resolve() and check if resolved path starts with workspace path
+
+    Example requests:
+    - GET /mosaics/1/nodes/main/workspace/files?path=/
+      → List root directory
+    - GET /mosaics/1/nodes/main/workspace/files?path=/src
+      → List /src directory
+    - GET /mosaics/1/nodes/main/workspace/files?path=/src&recursive=true&max_depth=2
+      → Recursively list /src and its subdirectories up to 2 levels
+
+    Raises:
+        NotFoundError: Mosaic, node, or requested path not found
+        PermissionError: Current user is not the mosaic owner
+        ValidationError: Invalid path (path traversal attempt or not a directory)
+
+    Returns:
+        WorkspaceFilesOut: List of files and directories with metadata
+    """
+    logger.info(
+        f"Listing workspace files: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"path={path}, recursive={recursive}, user_id={current_user.id}"
+    )
+
+    # 1. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Query node
+    node_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.node_id == node_id,
+        Node.deleted_at.is_(None)
+    )
+    node_result = await session.execute(node_stmt)
+    node = node_result.scalar_one_or_none()
+
+    if not node:
+        logger.warning(f"Node not found: mosaic_id={mosaic_id}, node_id={node_id}")
+        raise NotFoundError("Node not found")
+
+    # 3. Construct workspace path
+    instance_path = req.app.state.instance_path
+    workspace_root = instance_path / "users" / str(current_user.id) / str(mosaic_id) / str(node.id)
+
+    # 4. Validate and sanitize requested path
+    target_path = _validate_workspace_path(workspace_root, path)
+
+    # 5. Check if target path exists and is a directory
+    if not target_path.exists():
+        logger.warning(f"Path not found: {target_path}")
+        raise NotFoundError(f"Path not found: {path}")
+
+    if not target_path.is_dir():
+        logger.warning(f"Path is not a directory: {target_path}")
+        raise ValidationError(f"Path is not a directory: {path}")
+
+    # 6. List directory contents
+    items = []
+    try:
+        # List immediate children
+        children = list(target_path.iterdir())
+        # Sort: directories first, then files, alphabetically
+        children.sort(key=lambda p: (not p.is_dir(), p.name.lower()))
+
+        for child in children:
+            try:
+                item = _build_file_item(child, workspace_root, recursive, 1, max_depth)
+                items.append(item)
+            except (OSError, PermissionError) as e:
+                logger.warning(f"Skipping inaccessible item: {child}, error: {e}")
+                continue
+    except (OSError, PermissionError) as e:
+        logger.error(f"Failed to list directory: {target_path}, error: {e}")
+        raise ValidationError(f"Failed to list directory: {e}")
+
+    # 7. Return file list
+    files_out = WorkspaceFilesOut(
+        path=path,
+        absolute_path=str(target_path),
+        items=items
+    )
+
+    logger.info(f"Listed {len(items)} items in workspace path: {path}")
+    return SuccessResponse(data=files_out)
+
+
+@router.get("/{node_id}/workspace/file-content", response_model=SuccessResponse[WorkspaceFileContentOut])
+async def get_workspace_file_content(
+    mosaic_id: int,
+    node_id: str,
+    path: str,
+    encoding: str = "utf-8",
+    max_size: int = 1048576,  # 1MB default
+    req: Request = None,
+    session: SessionDep = None,
+    current_user: CurrentUserDep = None,
+):
+    """Get file content from workspace
+
+    Business logic:
+    1. Verify mosaic exists and ownership
+    2. Query node and verify it exists
+    3. Construct base workspace path: {instance_path}/users/{user_id}/{mosaic_id}/{node.id}/
+    4. Validate and sanitize requested path (same as list_workspace_files):
+       - Construct full path: base_path / requested_path
+       - Resolve to absolute path using Path.resolve()
+       - Security check: ensure resolved path is within workspace
+    5. Check if target path exists and is a file (not directory)
+    6. Check file size:
+       - If size > max_size, either:
+         * Return error with file_too_large code
+         * Or truncate content and set truncated=true flag
+    7. Read file content based on encoding:
+       - 'utf-8': Read as text, decode as UTF-8
+       - 'base64': Read as binary, encode as base64 (for images, PDFs, etc.)
+       - 'binary': Read as binary (use case: downloading files)
+    8. Infer additional metadata:
+       - mime_type: Use mimetypes.guess_type() or python-magic
+       - language: Infer from file extension (e.g., '.tsx' → 'typescript', '.py' → 'python')
+    9. Return file content with metadata
+
+    Query parameters:
+    - path: Relative path to file from workspace root (required)
+    - encoding: Content encoding - 'utf-8' (default), 'base64', 'binary'
+    - max_size: Maximum file size in bytes (default: 1048576 = 1MB)
+
+    File size handling:
+    - Check size before reading to avoid memory issues
+    - If file > max_size:
+      * Option 1: Raise ValidationError with 'file_too_large' code
+      * Option 2: Read up to max_size bytes and set truncated=true
+
+    Encoding selection guide:
+    - Text files (.txt, .md, .py, .tsx, etc.): encoding='utf-8'
+    - Binary files (.png, .jpg, .pdf, etc.): encoding='base64'
+
+    Path traversal security:
+    - Same validation as list_workspace_files
+    - MUST prevent access to files outside workspace
+
+    Example requests:
+    - GET /mosaics/1/nodes/main/workspace/file-content?path=/src/app.tsx
+      → Read app.tsx as UTF-8 text
+    - GET /mosaics/1/nodes/main/workspace/file-content?path=/public/logo.png&encoding=base64
+      → Read logo.png as base64
+    - GET /mosaics/1/nodes/main/workspace/file-content?path=/large-file.txt&max_size=2097152
+      → Read with 2MB size limit
+
+    Raises:
+        NotFoundError: Mosaic, node, or file not found
+        PermissionError: Current user is not the mosaic owner
+        ValidationError: Invalid path, path traversal attempt, target is directory, or file too large
+
+    Returns:
+        WorkspaceFileContentOut: File content with metadata (encoding, size, mime_type, etc.)
+    """
+    logger.info(
+        f"Getting file content: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"path={path}, encoding={encoding}, user_id={current_user.id}"
+    )
+
+    # 1. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Query node
+    node_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.node_id == node_id,
+        Node.deleted_at.is_(None)
+    )
+    node_result = await session.execute(node_stmt)
+    node = node_result.scalar_one_or_none()
+
+    if not node:
+        logger.warning(f"Node not found: mosaic_id={mosaic_id}, node_id={node_id}")
+        raise NotFoundError("Node not found")
+
+    # 3. Construct workspace path
+    instance_path = req.app.state.instance_path
+    workspace_root = instance_path / "users" / str(current_user.id) / str(mosaic_id) / str(node.id)
+
+    # 4. Validate and sanitize requested path
+    file_path = _validate_workspace_path(workspace_root, path)
+
+    # 5. Check if target path exists and is a file
+    if not file_path.exists():
+        logger.warning(f"File not found: {file_path}")
+        raise NotFoundError(f"File not found: {path}")
+
+    if file_path.is_dir():
+        logger.warning(f"Path is a directory, not a file: {file_path}")
+        raise ValidationError(f"Path is a directory, not a file: {path}")
+
+    # 6. Check file size
+    file_size = file_path.stat().st_size
+    truncated = False
+
+    if file_size > max_size:
+        logger.warning(f"File size {file_size} exceeds limit {max_size}: {file_path}")
+        # Option: truncate content
+        truncated = True
+
+    # 7. Read file content based on encoding
+    try:
+        if encoding == "utf-8":
+            # Read as text
+            if truncated:
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read(max_size)
+            else:
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+
+        elif encoding == "base64":
+            # Read as binary and encode as base64
+            if truncated:
+                with open(file_path, "rb") as f:
+                    binary_content = f.read(max_size)
+            else:
+                with open(file_path, "rb") as f:
+                    binary_content = f.read()
+            content = base64.b64encode(binary_content).decode("ascii")
+
+        elif encoding == "binary":
+            # Read as binary (return base64 encoded)
+            if truncated:
+                with open(file_path, "rb") as f:
+                    binary_content = f.read(max_size)
+            else:
+                with open(file_path, "rb") as f:
+                    binary_content = f.read()
+            content = base64.b64encode(binary_content).decode("ascii")
+
+        else:
+            raise ValidationError(f"Unsupported encoding: {encoding}")
+
+    except UnicodeDecodeError as e:
+        logger.error(f"Failed to decode file as UTF-8: {file_path}, error: {e}")
+        raise ValidationError(f"Failed to decode file as UTF-8. Try using 'base64' encoding.")
+    except Exception as e:
+        logger.error(f"Failed to read file: {file_path}, error: {e}")
+        raise InternalError(f"Failed to read file: {e}")
+
+    # 8. Infer metadata
+    mime_type, _ = mimetypes.guess_type(file_path.name)
+
+    # Infer language from extension
+    language = None
+    extension = file_path.suffix.lstrip(".")
+    language_map = {
+        "ts": "typescript",
+        "tsx": "typescript",
+        "js": "javascript",
+        "jsx": "javascript",
+        "py": "python",
+        "java": "java",
+        "cpp": "cpp",
+        "c": "c",
+        "go": "go",
+        "rs": "rust",
+        "rb": "ruby",
+        "php": "php",
+        "cs": "csharp",
+        "swift": "swift",
+        "kt": "kotlin",
+        "scala": "scala",
+        "sh": "bash",
+        "bash": "bash",
+        "zsh": "zsh",
+        "fish": "fish",
+        "sql": "sql",
+        "html": "html",
+        "css": "css",
+        "scss": "scss",
+        "sass": "sass",
+        "less": "less",
+        "json": "json",
+        "yaml": "yaml",
+        "yml": "yaml",
+        "toml": "toml",
+        "xml": "xml",
+        "md": "markdown",
+        "markdown": "markdown",
+    }
+    language = language_map.get(extension)
+
+    # 9. Return file content with metadata
+    file_content_out = WorkspaceFileContentOut(
+        path=path,
+        name=file_path.name,
+        size=file_size,
+        encoding=encoding,
+        content=content,
+        truncated=truncated,
+        mime_type=mime_type,
+        language=language
+    )
+
+    logger.info(f"File content retrieved: path={path}, size={file_size}, truncated={truncated}")
+    return SuccessResponse(data=file_content_out)

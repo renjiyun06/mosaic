@@ -356,6 +356,72 @@ class ApiClient {
     })
   }
 
+  /**
+   * Get workspace information for a node
+   */
+  async getWorkspaceInfo(mosaicId: number, nodeId: string): Promise<WorkspaceInfoOut> {
+    return request<WorkspaceInfoOut>(`/api/mosaics/${mosaicId}/nodes/${nodeId}/workspace`, {
+      method: 'GET',
+      context: 'node.workspace.info',
+      autoToast: {
+        success: false,
+        error: true
+      }
+    })
+  }
+
+  /**
+   * List files in workspace
+   */
+  async listWorkspaceFiles(
+    mosaicId: number,
+    nodeId: string,
+    params?: { path?: string; recursive?: boolean; max_depth?: number }
+  ): Promise<WorkspaceFilesOut> {
+    const queryParams = new URLSearchParams()
+    if (params?.path) queryParams.append('path', params.path)
+    if (params?.recursive !== undefined) queryParams.append('recursive', String(params.recursive))
+    if (params?.max_depth !== undefined) queryParams.append('max_depth', String(params.max_depth))
+
+    const queryString = queryParams.toString()
+    const url = `/api/mosaics/${mosaicId}/nodes/${nodeId}/workspace/files${queryString ? '?' + queryString : ''}`
+
+    return request<WorkspaceFilesOut>(url, {
+      method: 'GET',
+      context: 'node.workspace.files',
+      autoToast: {
+        success: false,
+        error: true
+      }
+    })
+  }
+
+  /**
+   * Get file content from workspace
+   */
+  async getWorkspaceFileContent(
+    mosaicId: number,
+    nodeId: string,
+    params: { path: string; encoding?: string; max_size?: number }
+  ): Promise<WorkspaceFileContentOut> {
+    const queryParams = new URLSearchParams()
+    queryParams.append('path', params.path)
+    if (params.encoding) queryParams.append('encoding', params.encoding)
+    if (params.max_size !== undefined) queryParams.append('max_size', String(params.max_size))
+
+    return request<WorkspaceFileContentOut>(
+      `/api/mosaics/${mosaicId}/nodes/${nodeId}/workspace/file-content?${queryParams}`,
+      {
+        method: 'GET',
+        context: 'node.workspace.content',
+        autoToast: {
+          success: false,
+          error: true
+        }
+      }
+    )
+  }
+
   // ========================================================================
   // Connection Management API
   // ========================================================================

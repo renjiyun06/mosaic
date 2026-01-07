@@ -83,3 +83,61 @@ class NodeOut(BaseModel):
 
     class Config:
         from_attributes = True  # Enable ORM mode
+
+
+# ==================== Workspace Schemas ====================
+
+class WorkspaceStats(BaseModel):
+    """Workspace statistics"""
+
+    total_files: int = Field(..., description="Total number of files")
+    total_directories: int = Field(..., description="Total number of directories")
+    total_size_bytes: int = Field(..., description="Total size in bytes")
+
+
+class WorkspaceInfoOut(BaseModel):
+    """Workspace information output schema"""
+
+    workspace_path: str = Field(..., description="Absolute path to workspace directory")
+    node_id: str = Field(..., description="Node identifier")
+    mosaic_id: int = Field(..., description="Mosaic ID")
+    exists: bool = Field(..., description="Whether workspace directory exists")
+    readable: bool = Field(..., description="Whether workspace is readable")
+    stats: WorkspaceStats | None = Field(None, description="Workspace statistics (optional)")
+
+
+class WorkspaceFileItem(BaseModel):
+    """Workspace file or directory item"""
+
+    name: str = Field(..., description="File or directory name")
+    path: str = Field(..., description="Relative path from workspace root (e.g., '/src/app.tsx')")
+    type: str = Field(..., description="Item type: 'file' or 'directory'")
+    size: int | None = Field(None, description="File size in bytes (null for directories)")
+    modified_at: datetime = Field(..., description="Last modification time")
+    extension: str | None = Field(None, description="File extension (e.g., 'tsx', 'json'), null for directories")
+    mime_type: str | None = Field(None, description="MIME type (e.g., 'text/plain'), null for directories")
+    children: list["WorkspaceFileItem"] | None = Field(
+        None,
+        description="Child items if recursive mode is enabled and this is a directory"
+    )
+
+
+class WorkspaceFilesOut(BaseModel):
+    """Workspace files list output schema"""
+
+    path: str = Field(..., description="Requested relative path")
+    absolute_path: str = Field(..., description="Absolute path on server (for debugging)")
+    items: list[WorkspaceFileItem] = Field(..., description="List of files and directories")
+
+
+class WorkspaceFileContentOut(BaseModel):
+    """Workspace file content output schema"""
+
+    path: str = Field(..., description="Relative file path")
+    name: str = Field(..., description="File name")
+    size: int = Field(..., description="File size in bytes")
+    encoding: str = Field(..., description="Content encoding: 'utf-8', 'base64', or 'binary'")
+    content: str = Field(..., description="File content (text or base64 encoded)")
+    truncated: bool = Field(..., description="Whether content was truncated due to size limit")
+    mime_type: str | None = Field(None, description="MIME type")
+    language: str | None = Field(None, description="Programming language (inferred from extension)")
