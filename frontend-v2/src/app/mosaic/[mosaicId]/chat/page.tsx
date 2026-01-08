@@ -396,8 +396,8 @@ export default function ChatPage() {
       setWorkspaceLoading(true)
       const data = await apiClient.listWorkspaceFiles(mosaicId, nodeId, {
         path: '/',
-        recursive: true,
-        max_depth: 10
+        recursive: false,
+        max_depth: 1
       })
 
       // Convert WorkspaceFileItem[] to FileNode[] (add expanded property)
@@ -405,7 +405,11 @@ export default function ChatPage() {
         return items.map(item => ({
           ...item,
           expanded: false,
-          children: item.children ? convertToFileNodes(item.children) : undefined
+          // 目录：children 为 undefined（未加载）或已加载的数组
+          // 文件：children 为 undefined（不需要 children）
+          children: item.type === 'directory'
+            ? (item.children ? convertToFileNodes(item.children) : undefined)
+            : undefined
         }))
       }
 
@@ -708,19 +712,78 @@ export default function ChatPage() {
   }
 
   // Workspace functions
-  const toggleDirectory = (path: string) => {
-    const toggleInTree = (nodes: FileNode[]): FileNode[] => {
-      return nodes.map(node => {
-        if (node.path === path && node.type === 'directory') {
-          return { ...node, expanded: !node.expanded }
-        }
-        if (node.children) {
-          return { ...node, children: toggleInTree(node.children) }
-        }
-        return node
+  // 懒加载目录子节点
+  const loadDirectoryChildren = async (path: string, nodeId: string) => {
+    try {
+      const data = await apiClient.listWorkspaceFiles(mosaicId, nodeId, {
+        path: path,
+        recursive: false,
+        max_depth: 1
       })
+
+      // 将加载的数据转换为 FileNode
+      const convertToFileNodes = (items: WorkspaceFileItem[]): FileNode[] => {
+        return items.map(item => ({
+          ...item,
+          expanded: false,
+          children: item.type === 'directory' ? undefined : undefined
+        }))
+      }
+
+      return convertToFileNodes(data.items)
+    } catch (error) {
+      console.error(`Failed to load directory: ${path}`, error)
+      return []
     }
-    setFileTree(toggleInTree(fileTree))
+  }
+
+  const toggleDirectory = async (path: string) => {
+    // 先找到目标节点，检查是否需要懒加载
+    const findNode = (nodes: FileNode[]): FileNode | null => {
+      for (const node of nodes) {
+        if (node.path === path) return node
+        if (node.children) {
+          const found = findNode(node.children)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const targetNode = findNode(fileTree)
+
+    // 如果是展开操作 且 children 未加载（undefined），则先加载数据
+    if (targetNode && !targetNode.expanded && targetNode.children === undefined && currentSessionInfo) {
+      const children = await loadDirectoryChildren(path, currentSessionInfo.nodeId)
+
+      // 更新树：设置 children 并展开
+      const updateTree = (nodes: FileNode[]): FileNode[] => {
+        return nodes.map(node => {
+          if (node.path === path) {
+            return { ...node, expanded: true, children }
+          }
+          if (node.children) {
+            return { ...node, children: updateTree(node.children) }
+          }
+          return node
+        })
+      }
+      setFileTree(updateTree(fileTree))
+    } else {
+      // 如果已有数据，只切换展开/折叠状态
+      const toggleInTree = (nodes: FileNode[]): FileNode[] => {
+        return nodes.map(node => {
+          if (node.path === path && node.type === 'directory') {
+            return { ...node, expanded: !node.expanded }
+          }
+          if (node.children) {
+            return { ...node, children: toggleInTree(node.children) }
+          }
+          return node
+        })
+      }
+      setFileTree(toggleInTree(fileTree))
+    }
   }
 
   const handleFileClick = async (path: string, nodeId: string) => {
@@ -759,9 +822,9 @@ export default function ChatPage() {
             selectedFile?.path === node.path ? 'bg-muted' : ''
           }`}
           style={{ paddingLeft: `${level * 16 + 8}px` }}
-          onClick={() => {
+          onClick={async () => {
             if (node.type === 'directory') {
-              toggleDirectory(node.path)
+              await toggleDirectory(node.path)
             } else {
               handleFileClick(node.path, nodeId)
             }
