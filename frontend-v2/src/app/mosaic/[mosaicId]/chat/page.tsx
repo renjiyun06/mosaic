@@ -25,6 +25,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -32,6 +33,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import {
   Send,
   Loader2,
@@ -50,6 +64,12 @@ import {
   FileText,
   FileCode,
   RefreshCw,
+  MoreVertical,
+  Search,
+  List,
+  LayoutList,
+  FolderTree,
+  Circle,
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
@@ -83,6 +103,7 @@ interface FileNode extends WorkspaceFileItem {
 }
 
 type ViewMode = 'chat' | 'workspace'
+type SessionListMode = 'detailed' | 'compact'
 
 export default function ChatPage() {
   const params = useParams()
@@ -92,6 +113,11 @@ export default function ChatPage() {
 
   // View mode
   const [viewMode, setViewMode] = useState<ViewMode>('chat')
+
+  // Session list mode and search
+  const [sessionListMode, setSessionListMode] = useState<SessionListMode>('compact')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null)
 
   // Node and session management
   const [nodes, setNodes] = useState<NodeWithSessions[]>([])
@@ -785,6 +811,198 @@ export default function ChatPage() {
     })
   }
 
+  // Filter sessions based on search query
+  const filteredNodes = nodes.map(node => {
+    if (!searchQuery.trim()) return node
+
+    const query = searchQuery.toLowerCase()
+    const filteredSessions = node.sessions.filter(session =>
+      session.session_id.toLowerCase().includes(query) ||
+      session.mode.toLowerCase().includes(query) ||
+      (session.model && session.model.toLowerCase().includes(query))
+    )
+
+    return { ...node, sessions: filteredSessions }
+  }).filter(node => {
+    // Only filter out nodes with no sessions when searching
+    // Always show all nodes when not searching (even if they have no sessions)
+    return !searchQuery.trim() || node.sessions.length > 0
+  })
+
+  // Handle copy session ID (referenced from sessions page)
+  const handleCopySessionId = async (sessionId: string) => {
+    console.log("handleCopySessionId called for:", sessionId)
+    console.log("navigator.clipboard:", navigator.clipboard)
+    console.log("window.isSecureContext:", window.isSecureContext)
+
+    try {
+      // Try modern clipboard API first
+      if (navigator.clipboard && window.isSecureContext) {
+        console.log("Using navigator.clipboard.writeText")
+        await navigator.clipboard.writeText(sessionId)
+        console.log("Copy successful via clipboard API")
+        setCopiedSessionId(sessionId)
+        setTimeout(() => setCopiedSessionId(null), 1000)
+      } else {
+        // Fallback for older browsers or non-secure contexts
+        console.log("Using execCommand fallback")
+
+        // Create and immediately append textarea
+        const textArea = document.createElement("textarea")
+        textArea.value = sessionId
+        textArea.style.position = "fixed"
+        textArea.style.left = "0"
+        textArea.style.top = "0"
+        textArea.style.width = "2em"
+        textArea.style.height = "2em"
+        textArea.style.padding = "0"
+        textArea.style.border = "none"
+        textArea.style.outline = "none"
+        textArea.style.boxShadow = "none"
+        textArea.style.background = "transparent"
+
+        document.body.appendChild(textArea)
+
+        // Store current selection
+        const selected = document.getSelection()?.rangeCount ? document.getSelection()?.getRangeAt(0) : null
+
+        // Select the textarea content
+        textArea.select()
+        textArea.setSelectionRange(0, textArea.value.length)
+
+        // Execute copy command
+        let successful = false
+        try {
+          successful = document.execCommand('copy')
+          console.log("execCommand result:", successful)
+        } catch (err) {
+          console.error("execCommand error:", err)
+        }
+
+        // Restore previous selection
+        if (selected) {
+          document.getSelection()?.removeAllRanges()
+          document.getSelection()?.addRange(selected)
+        }
+
+        document.body.removeChild(textArea)
+
+        if (successful) {
+          setCopiedSessionId(sessionId)
+          setTimeout(() => setCopiedSessionId(null), 1000)
+        } else {
+          throw new Error("Copy command failed")
+        }
+      }
+    } catch (error) {
+      console.error("Copy failed:", error)
+    }
+  }
+
+  // Session action menu component
+  const SessionActionMenu = ({ session, nodeId }: { session: SessionOut; nodeId: string }) => {
+    const handleCopy = () => {
+      console.log("handleCopy triggered in SessionActionMenu")
+
+      // 延迟执行复制操作，确保在菜单关闭后执行
+      setTimeout(() => {
+        console.log("Executing delayed copy operation")
+
+        // Create a hidden input element
+        const input = document.createElement("input")
+        input.value = session.session_id
+        input.style.position = "fixed"
+        input.style.top = "0"
+        input.style.left = "0"
+        input.style.width = "2em"
+        input.style.height = "2em"
+        input.style.padding = "0"
+        input.style.border = "none"
+        input.style.outline = "none"
+        input.style.boxShadow = "none"
+        input.style.background = "transparent"
+        input.setAttribute("readonly", "")
+
+        document.body.appendChild(input)
+
+        // Focus and select the input content
+        input.focus()
+        input.select()
+        input.setSelectionRange(0, input.value.length)
+
+        // Copy using execCommand
+        let successful = false
+        try {
+          successful = document.execCommand('copy')
+          console.log("execCommand result:", successful)
+
+          if (successful) {
+            console.log("Setting copiedSessionId to:", session.session_id)
+            setCopiedSessionId(session.session_id)
+            setTimeout(() => {
+              console.log("Clearing copiedSessionId")
+              setCopiedSessionId(null)
+            }, 1000)
+          } else {
+            console.error("execCommand returned false")
+          }
+        } catch (err) {
+          console.error("Copy error:", err)
+        }
+
+        document.body.removeChild(input)
+        console.log("Copy operation completed")
+      }, 100) // 100ms 延迟，足够菜单关闭
+    }
+
+    const handleClose = (e: Event) => {
+      e.preventDefault()
+      openCloseDialog(session.session_id, nodeId)
+    }
+
+    const handleArchive = (e: Event) => {
+      e.preventDefault()
+      handleArchiveSession(session.session_id, nodeId)
+    }
+
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <MoreVertical className="h-3.5 w-3.5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
+          <DropdownMenuItem
+            onSelect={(e) => {
+              // 阻止默认的菜单关闭行为（如果需要）
+              // e.preventDefault()
+              handleCopy()
+            }}
+          >
+            复制会话 ID
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {session.status === SessionStatus.ACTIVE && (
+            <DropdownMenuItem onSelect={handleClose}>
+              关闭会话
+            </DropdownMenuItem>
+          )}
+          {session.status === SessionStatus.CLOSED && (
+            <DropdownMenuItem onSelect={handleArchive}>
+              归档会话
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
+
   // Workspace functions
   // 懒加载目录子节点
   const loadDirectoryChildren = async (path: string, nodeId: string) => {
@@ -1387,7 +1605,47 @@ export default function ChatPage() {
       </div>
 
       {/* Right: Session List */}
-      <div className="w-80 border-l flex flex-col">
+      <div className="w-80 border-l flex flex-col bg-background">
+        {/* Header with mode toggle */}
+        <div className="h-11 border-b px-3 flex items-center justify-between shrink-0">
+          <span className="text-sm font-medium">会话</span>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={() => setSessionListMode(mode => mode === 'detailed' ? 'compact' : 'detailed')}
+                >
+                  {sessionListMode === 'detailed' ? (
+                    <LayoutList className="h-4 w-4" />
+                  ) : (
+                    <List className="h-4 w-4" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {sessionListMode === 'detailed' ? '切换到紧凑模式' : '切换到详细模式'}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+
+        {/* Search bar */}
+        <div className="px-3 py-2 border-b">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="搜索会话..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-8 h-8 text-sm"
+            />
+          </div>
+        </div>
+
+        {/* Session tree */}
         <div
           className="flex-1 overflow-y-auto"
           style={{
@@ -1395,148 +1653,198 @@ export default function ChatPage() {
             scrollbarColor: 'hsl(var(--border)) transparent'
           }}
         >
-          {nodes.length === 0 ? (
-            <div className="p-4 text-center text-sm text-muted-foreground border rounded-lg mx-4 mt-16">
-              <Bot className="h-12 w-12 mx-auto mb-2 opacity-50" />
-              <p>暂无 Claude Code 节点</p>
-              <p className="text-xs mt-1">请先创建节点</p>
+          {filteredNodes.length === 0 ? (
+            <div className="p-4 text-center text-sm text-muted-foreground">
+              {searchQuery ? (
+                <>
+                  <Search className="h-12 w-12 mx-auto mb-2 opacity-30" />
+                  <p>未找到匹配的会话</p>
+                </>
+              ) : (
+                <>
+                  <Bot className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>暂无 Claude Code 节点</p>
+                  <p className="text-xs mt-1">请先创建节点</p>
+                </>
+              )}
             </div>
           ) : (
-            nodes.map((node) => (
-              <div key={node.node_id} className="border-b">
+            filteredNodes.map((node) => (
+              <div key={node.node_id} className="border-b last:border-b-0">
                 {/* Node header */}
-                <div className="p-3 bg-muted/50">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 w-6 p-0 shrink-0"
-                      onClick={() => toggleNode(node.node_id)}
-                    >
-                      {node.expanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                    </Button>
-                    <Bot className="h-4 w-4 shrink-0" />
+                <div
+                  className="px-3 py-2.5 bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer"
+                  onClick={() => toggleNode(node.node_id)}
+                >
+                  <div className="flex items-center gap-2">
+                    {/* Expand/collapse icon */}
+                    {node.expanded ? (
+                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    )}
+
+                    {/* Folder icon */}
+                    <FolderTree className="h-4 w-4 shrink-0 text-amber-600" />
+
+                    {/* Node name */}
                     <span
-                      className="font-medium text-sm truncate min-w-0"
+                      className="font-medium text-sm truncate flex-1 min-w-0"
                       title={node.node_id}
                     >
                       {node.node_id}
                     </span>
-                    <Badge variant="outline" className="ml-auto text-xs shrink-0">
-                      {node.sessions.length} 会话
-                    </Badge>
+
+                    {/* Status indicator */}
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Circle
+                            className={`h-2 w-2 shrink-0 ${
+                              node.status === NodeStatus.RUNNING
+                                ? 'fill-green-500 text-green-500'
+                                : 'fill-gray-400 text-gray-400'
+                            }`}
+                          />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {node.status === NodeStatus.RUNNING ? '运行中' : '已停止'}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+
+                    {/* Session count and create button */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-xs text-muted-foreground">
+                        {node.sessions.length}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          openCreateDialog(node.node_id)
+                        }}
+                        disabled={node.status !== NodeStatus.RUNNING || !isConnected}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full h-7"
-                    onClick={() => openCreateDialog(node.node_id)}
-                    disabled={node.status !== NodeStatus.RUNNING || !isConnected}
-                  >
-                    <Plus className="h-3 w-3 mr-1" />
-                    新建会话
-                  </Button>
-                  {node.status !== NodeStatus.RUNNING ? (
-                    <div className="mt-1 text-xs text-muted-foreground text-center">
-                      节点未运行，请先启动节点
-                    </div>
-                  ) : !isConnected ? (
-                    <div className="mt-1 text-xs text-muted-foreground text-center">
-                      WebSocket 连接中...
-                    </div>
-                  ) : null}
                 </div>
 
                 {/* Sessions under this node */}
                 {node.expanded && (
-                  <div>
+                  <div className="bg-background">
                     {node.sessions.length === 0 ? (
-                      <div className="p-3 text-center text-xs text-muted-foreground">
+                      <div className="pl-8 pr-3 py-3 text-center text-xs text-muted-foreground">
                         暂无会话
                       </div>
                     ) : (
-                      node.sessions.map((session) => (
-                        <div
-                          key={session.session_id}
-                          className={`p-3 cursor-pointer hover:bg-muted/50 border-l-2 ${
-                            activeSessionId === session.session_id
-                              ? "border-l-primary bg-muted/50"
-                              : "border-l-transparent"
-                          }`}
-                          onClick={() => setActiveSessionId(session.session_id)}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {session.session_id.slice(0, 8)}
-                            </span>
-                            <div className="flex items-center gap-1">
-                              <Badge
-                                variant={
-                                  session.status === SessionStatus.ACTIVE
-                                    ? "default"
-                                    : "secondary"
-                                }
-                                className="text-xs h-5"
-                              >
-                                {session.status === SessionStatus.ACTIVE && "活跃"}
-                                {session.status === SessionStatus.CLOSED && "已关闭"}
-                                {session.status === SessionStatus.ARCHIVED && "已归档"}
-                              </Badge>
+                      node.sessions.map((session, index) => {
+                        const isLast = index === node.sessions.length - 1
+                        const isActive = activeSessionId === session.session_id
 
-                              {/* Close button (only for active sessions) */}
-                              {session.status === SessionStatus.ACTIVE && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-6 w-6 p-0"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    openCloseDialog(session.session_id, node.node_id)
-                                  }}
-                                  title="关闭会话"
-                                >
-                                  <Lock className="h-3 w-3" />
-                                </Button>
-                              )}
-
-                              {/* Archive button (only for closed sessions) */}
-                              {session.status === SessionStatus.CLOSED && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-6 w-6 p-0"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleArchiveSession(session.session_id, node.node_id)
-                                  }}
-                                  title="归档会话"
-                                >
-                                  <Archive className="h-3 w-3" />
-                                </Button>
-                              )}
+                        return (
+                          <div
+                            key={session.session_id}
+                            className={`group relative cursor-pointer hover:bg-muted/50 transition-colors ${
+                              isActive
+                                ? "bg-primary/10 border-l-3 border-l-primary"
+                                : "border-l-3 border-l-transparent"
+                            }`}
+                            onClick={() => setActiveSessionId(session.session_id)}
+                          >
+                            {/* Tree line */}
+                            <div className="absolute left-5 top-0 bottom-0 w-px bg-border">
+                              {isLast && <div className="absolute top-3 left-0 w-px h-full bg-background" />}
                             </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs">
-                              {session.mode}
-                            </Badge>
-                            {session.model && (
-                              <Badge variant="outline" className="text-xs">
-                                {session.model}
-                              </Badge>
+                            <div className="absolute left-5 top-3 w-3 h-px bg-border" />
+
+                            {sessionListMode === 'detailed' ? (
+                              /* Detailed mode: Two-line layout */
+                              <div className="pl-8 pr-3 py-2">
+                                {/* Line 1: Session ID + Status + Menu */}
+                                <div className="flex items-center gap-2 mb-1">
+                                  <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                  <span
+                                    className={`font-mono text-xs truncate ${
+                                      isActive ? "font-semibold" : "text-muted-foreground"
+                                    }`}
+                                  >
+                                    {session.session_id.slice(0, 8)}
+                                  </span>
+                                  <Badge
+                                    variant={
+                                      session.status === SessionStatus.ACTIVE
+                                        ? "default"
+                                        : "secondary"
+                                    }
+                                    className="text-xs h-5 px-1.5"
+                                  >
+                                    {session.status === SessionStatus.ACTIVE && "活跃"}
+                                    {session.status === SessionStatus.CLOSED && "已关闭"}
+                                  </Badge>
+                                  <div className="ml-auto">
+                                    <SessionActionMenu session={session} nodeId={node.node_id} />
+                                  </div>
+                                </div>
+
+                                {/* Line 2: Mode · Model · Message count */}
+                                <div className="pl-5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                                  <span>{session.mode}</span>
+                                  <span>·</span>
+                                  <span>{session.model || 'sonnet'}</span>
+                                </div>
+                              </div>
+                            ) : (
+                              /* Compact mode: Single line */
+                              <div className="pl-8 pr-3 py-1.5">
+                                <div className="flex items-center gap-2">
+                                  <MessageSquare className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                  <span
+                                    className={`font-mono text-xs truncate ${
+                                      isActive ? "font-semibold" : "text-muted-foreground"
+                                    }`}
+                                  >
+                                    {session.session_id.slice(0, 8)}
+                                  </span>
+                                  <Circle
+                                    className={`h-1.5 w-1.5 shrink-0 ml-auto ${
+                                      session.status === SessionStatus.ACTIVE
+                                        ? 'fill-blue-500 text-blue-500'
+                                        : 'fill-gray-400 text-gray-400'
+                                    }`}
+                                  />
+                                  <div>
+                                    <SessionActionMenu session={session} nodeId={node.node_id} />
+                                  </div>
+                                </div>
+                              </div>
                             )}
                           </div>
-                        </div>
-                      ))
+                        )
+                      })
                     )}
                   </div>
                 )}
               </div>
             ))
+          )}
+        </div>
+
+        {/* Footer statistics */}
+        <div className="h-9 border-t px-3 flex items-center justify-between shrink-0 bg-muted/20">
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span>{nodes.length} 节点</span>
+            <span>·</span>
+            <span>{nodes.reduce((sum, node) => sum + node.sessions.length, 0)} 会话</span>
+          </div>
+          {isConnected ? (
+            <Circle className="h-2 w-2 fill-green-500 text-green-500" />
+          ) : (
+            <Circle className="h-2 w-2 fill-red-500 text-red-500" />
           )}
         </div>
       </div>
