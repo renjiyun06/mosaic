@@ -54,6 +54,10 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
     async def lifespan(app: FastAPI):
         """Manage application lifespan (startup and shutdown)"""
         # Startup
+        # 0. Run database preflight checks
+        from .db_init import run_preflight_checks
+        await run_preflight_checks(app.state.async_session_factory)
+
         # 1. Set main event loop for UserMessageBroker
         import asyncio
         app.state.user_message_broker.set_main_loop(asyncio.get_running_loop())
