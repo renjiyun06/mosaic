@@ -108,6 +108,9 @@ async def create_session(
         node=node,
         mode=request.mode,
         model=request.model,
+        token_threshold_enabled=node.config.get("token_threshold_enabled", False),
+        token_threshold=node.config.get("token_threshold", 60000),
+        inherit_threshold=node.config.get("inherit_threshold", True),
         timeout=10.0
     )
 

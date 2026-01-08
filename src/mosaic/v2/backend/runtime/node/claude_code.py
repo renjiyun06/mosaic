@@ -10,6 +10,7 @@ from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
     AssistantMessage,
+    SystemMessage,
     ResultMessage,
     TextBlock,
     ThinkingBlock,
@@ -297,6 +298,15 @@ class ClaudeCodeNode(MosaicNode):
         )
 
 
+    def get_default_session_config(self) -> Optional[Dict[str, Any]]:
+        return {
+            "mode": self.node.config.get("mode", SessionMode.BACKGROUND),
+            "model": self.node.config.get("model", LLMModel.SONNET),
+            "token_threshold_enabled": self.node.config.get("token_threshold_enabled", False),
+            "token_threshold": self.node.config.get("token_threshold", 60000),
+            "inherit_threshold": self.node.config.get("inherit_threshold", True)
+        }
+
 class ClaudeCodeSession(MosaicSession):
     """
     Claude Code session with Claude Agent SDK integration.
@@ -338,6 +348,9 @@ class ClaudeCodeSession(MosaicSession):
         config = config or {}
         self.mode = config.get("mode", SessionMode.BACKGROUND)
         self.model = config.get("model", LLMModel.SONNET)
+        self.token_threshold_enabled = config.get("token_threshold_enabled", False)
+        self.token_threshold = config.get("token_threshold", 60000)
+        self.inherit_threshold = config.get("inherit_threshold", True)
         self.mcp_servers = config.get("mcp_servers", {})  # Additional MCP servers
 
         # Claude SDK client (initialized in _on_initialize)
@@ -357,6 +370,8 @@ class ClaudeCodeSession(MosaicSession):
 
         # Message sequence number (starts from 0, incremented for each message)
         self._message_sequence = 0
+
+        self._token_threshold_notified = False
 
         logger.debug(
             f"Initialized ClaudeCodeSession: session_id={session_id}, "
@@ -546,6 +561,16 @@ class ClaudeCodeSession(MosaicSession):
 
             # Sync session state to database
             await self._update_session_to_db()
+
+        if self.mode != SessionMode.PROGRAM and self.token_threshold_enabled and self._total_output_tokens > self.token_threshold and not self._token_threshold_notified:
+            logger.warning(f"Token threshold reached: session_id={self.session_id}, total_output_tokens={self._total_output_tokens}")
+            self.enqueue_event({
+                "event_type": EventType.SYSTEM_MESSAGE,
+                "payload": {
+                    "message": "Token threshold reached"
+                }
+            })
+            self._token_threshold_notified = True
 
         # Reset interrupt flag
         self._is_interrupted = False
@@ -814,6 +839,8 @@ class ClaudeCodeSession(MosaicSession):
                             timestamp=timestamp,
                             payload={"message": block.thinking}
                         )
+            elif isinstance(message, SystemMessage):
+                logger.debug(f"System message received: {json.dumps(message.data, ensure_ascii=False)}")
 
             elif isinstance(message, ResultMessage):
                 # Collect statistics for return
@@ -1432,14 +1459,20 @@ class ClaudeCodeSession(MosaicSession):
             payload = event.get("payload", {})
             return payload.get("message", "")
 
-        # Network events: Format as structured event
-        formatted_event = {
-            "event_id": event.get("event_id", "unknown"),
-            "event_type": event.get("event_type", "unknown"),
-            "source_node_id": event.get("source_node_id", "unknown"),
-            "source_session_id": event.get("source_session_id", "unknown"),
-            "payload": event.get("payload", {})
-        }
+        if event_type == EventType.SYSTEM_MESSAGE:
+            formatted_event = {
+                "event_type": EventType.SYSTEM_MESSAGE,
+                "payload": event.get("payload", {})
+            }
+        else:
+            # Network events: Format as structured event
+            formatted_event = {
+                "event_id": event.get("event_id", "unknown"),
+                "event_type": event.get("event_type", "unknown"),
+                "source_node_id": event.get("source_node_id", "unknown"),
+                "source_session_id": event.get("source_session_id", "unknown"),
+                "payload": event.get("payload", {})
+            }
 
         # Convert to formatted JSON string
         message = f"{json.dumps(formatted_event, indent=2, ensure_ascii=False)}"

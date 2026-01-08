@@ -659,6 +659,9 @@ class RuntimeManager:
         node: 'Node',
         mode: 'SessionMode',
         model: 'LLMModel',
+        token_threshold_enabled: bool = False,
+        token_threshold: int = 60000,
+        inherit_threshold: bool = True,
         timeout: float = 10.0
     ) -> str:
         """
@@ -671,13 +674,16 @@ class RuntimeManager:
 
         Steps:
         1. Generate a unique session_id
-        2. Create CreateSessionCommand with node, session_id, and config (mode/model)
+        2. Create CreateSessionCommand with node, session_id, config
         3. Submit command and wait for completion
 
         Args:
             node: Node model object (validated by FastAPI layer)
             mode: Session mode (PROGRAM or CHAT)
             model: LLM model to use (SONNET, OPUS, or HAIKU)
+            token_threshold_enabled: Enable token threshold monitoring (default: False)
+            token_threshold: Token count threshold (default: 60000)
+            inherit_threshold: Whether child sessions inherit threshold config (default: True)
             timeout: Maximum wait time in seconds
 
         Returns:
@@ -700,7 +706,10 @@ class RuntimeManager:
         logger.info(
             f"Creating session: session_id={session_id}, "
             f"node_id={node.node_id}, mosaic_id={node.mosaic_id}, "
-            f"mode={mode.value}, model={model.value}"
+            f"mode={mode.value}, model={model.value}, "
+            f"token_threshold_enabled={token_threshold_enabled}, "
+            f"token_threshold={token_threshold}, "
+            f"inherit_threshold={inherit_threshold}"
         )
 
         # Import command here to avoid circular import
@@ -709,7 +718,10 @@ class RuntimeManager:
         # Build config dictionary for agent session
         config = {
             'mode': mode,
-            'model': model
+            'model': model,
+            'token_threshold_enabled': token_threshold_enabled,
+            'token_threshold': token_threshold,
+            'inherit_threshold': inherit_threshold
         }
 
         # Add mcp_servers from node config if present
