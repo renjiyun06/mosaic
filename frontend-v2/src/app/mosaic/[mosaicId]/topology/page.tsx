@@ -66,6 +66,19 @@ export default function TopologyPage() {
   const [error, setError] = useState<string | null>(null)
   const [topologyNodes, setTopologyNodes] = useState<Node[]>([])
   const [topologyEdges, setTopologyEdges] = useState<Edge[]>([])
+  const [isMobile, setIsMobile] = useState(false)
+
+  // Detect mobile screen size
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 640)
+    }
+
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Handle node changes (for dragging)
   const onNodesChange = useCallback(
@@ -85,6 +98,14 @@ export default function TopologyPage() {
         setError(null)
         const topology = await apiClient.getTopology(Number(mosaicId))
 
+        // Responsive sizing
+        const nodeMaxWidth = isMobile ? '140px' : '180px'
+        const nodeFontSize = isMobile ? '10px' : '11px'
+        const nodeTypeFontSize = isMobile ? '8px' : '9px'
+        const nodePadding = isMobile ? 6 : 8
+        const nodeMinWidth = isMobile ? 80 : 100
+        const nodeMinHeight = isMobile ? 38 : 45
+
         // Convert nodes to React Flow nodes
         const initialNodes: Node[] = topology.nodes.map((node) => ({
           id: node.node_id,
@@ -94,14 +115,14 @@ export default function TopologyPage() {
               <div
                 style={{
                   overflow: 'hidden',
-                  maxWidth: '180px',
+                  maxWidth: nodeMaxWidth,
                   width: '100%'
                 }}
                 title={`${node.node_id} (${getNodeTypeLabel(node.node_type)})`}
               >
                 <div style={{
                   fontWeight: 600,
-                  fontSize: '11px',
+                  fontSize: nodeFontSize,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap'
@@ -109,7 +130,7 @@ export default function TopologyPage() {
                   {node.node_id}
                 </div>
                 <div style={{
-                  fontSize: '9px',
+                  fontSize: nodeTypeFontSize,
                   opacity: 0.8,
                   marginTop: '2px',
                   whiteSpace: 'nowrap'
@@ -125,12 +146,12 @@ export default function TopologyPage() {
             background: "#3b82f6",
             color: "white",
             border: "1px solid #222",
-            padding: 8,
+            padding: nodePadding,
             borderRadius: 4,
-            minWidth: 100,
+            minWidth: nodeMinWidth,
             maxWidth: 200,
             height: 'auto',
-            minHeight: 45,
+            minHeight: nodeMinHeight,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -150,6 +171,10 @@ export default function TopologyPage() {
         // Create a set of connections that have subscriptions
         const subscriptionPairs = new Set(subscriptionGroups.keys())
 
+        // Responsive edge styling
+        const edgeLabelFontSize = isMobile ? 6 : 7
+        const edgeStrokeWidth = isMobile ? 1.5 : 2
+
         // Create edges from subscriptions with curvature offset for multiple edges
         const subscriptionEdges: Edge[] = []
         subscriptionGroups.forEach((subs, key) => {
@@ -168,7 +193,7 @@ export default function TopologyPage() {
               labelStyle: {
                 fill: "#3b82f6",
                 fontWeight: 600,
-                fontSize: 7,
+                fontSize: edgeLabelFontSize,
               },
               labelBgStyle: {
                 fill: "#ffffff",
@@ -177,7 +202,7 @@ export default function TopologyPage() {
               style: {
                 stroke: "#3b82f6",
                 strokeDasharray: "5,5",
-                strokeWidth: 2
+                strokeWidth: edgeStrokeWidth
               },
               markerEnd: {
                 type: "arrowclosed" as const,
@@ -203,7 +228,7 @@ export default function TopologyPage() {
             style: {
               stroke: "#6b7280",
               strokeDasharray: "5,5",
-              strokeWidth: 2
+              strokeWidth: edgeStrokeWidth
             },
             markerEnd: {
               type: "arrowclosed" as const,
@@ -231,13 +256,13 @@ export default function TopologyPage() {
     }
 
     fetchTopology()
-  }, [mosaicId, token])
+  }, [mosaicId, token, isMobile])
 
   // Loading state
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="flex items-center justify-center min-h-[300px] sm:min-h-[400px]">
+        <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-muted-foreground" />
       </div>
     )
   }
@@ -245,17 +270,17 @@ export default function TopologyPage() {
   // Error state
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <p className="text-muted-foreground mb-4">{error}</p>
+      <div className="flex flex-col items-center justify-center min-h-[300px] sm:min-h-[400px] px-4">
+        <p className="text-muted-foreground mb-4 text-sm sm:text-base text-center">{error}</p>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col h-full space-y-6 overflow-auto">
+    <div className="flex flex-col h-full space-y-3 sm:space-y-4 md:space-y-6 overflow-auto">
       <div className="flex-shrink-0">
-        <h1 className="text-3xl font-bold">拓扑可视化</h1>
-        <p className="text-muted-foreground mt-1">查看节点和连接关系</p>
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">拓扑可视化</h1>
+        <p className="text-muted-foreground mt-1 text-sm sm:text-base">查看节点和连接关系</p>
       </div>
 
       <Card className="flex-1 flex flex-col min-h-0">
@@ -270,11 +295,31 @@ export default function TopologyPage() {
               nodesDraggable={true}
               nodesConnectable={false}
               elementsSelectable={true}
-              className="bg-background"
+              className="bg-background touchdevice-flow"
+              minZoom={0.1}
+              maxZoom={2}
+              panOnScroll={true}
+              panOnDrag={true}
+              zoomOnScroll={true}
+              zoomOnPinch={true}
+              zoomOnDoubleClick={true}
+              preventScrolling={true}
+              defaultViewport={{ x: 0, y: 0, zoom: 1 }}
             >
               <Background />
-              <Controls />
-              <MiniMap />
+              <Controls
+                showZoom={true}
+                showFitView={true}
+                showInteractive={false}
+                position="bottom-right"
+                className="!bottom-2 sm:!bottom-4 !right-2 sm:!right-4"
+              />
+              {/* MiniMap only visible on larger screens */}
+              <MiniMap
+                className="hidden lg:block"
+                nodeColor="#3b82f6"
+                maskColor="rgb(0, 0, 0, 0.1)"
+              />
             </ReactFlow>
           </div>
         </CardContent>

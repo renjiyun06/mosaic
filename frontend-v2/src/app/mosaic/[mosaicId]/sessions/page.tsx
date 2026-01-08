@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Loader2, MessageSquare, ChevronLeft, ChevronRight, Copy, Check, X } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
@@ -36,6 +37,9 @@ export default function SessionsPage() {
   const params = useParams()
   const { token } = useAuth()
   const mosaicId = params.mosaicId as string
+
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(false)
 
   // Node list state
   const [nodes, setNodes] = useState<NodeOut[]>([])
@@ -59,6 +63,14 @@ export default function SessionsPage() {
 
   // Copy state
   const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null)
+
+  // Mobile detection effect
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Fetch nodes on mount
   useEffect(() => {
@@ -196,8 +208,8 @@ export default function SessionsPage() {
   // Loading nodes state
   if (loadingNodes) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="flex items-center justify-center min-h-[300px] sm:min-h-[400px]">
+        <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-muted-foreground" />
       </div>
     )
   }
@@ -205,15 +217,15 @@ export default function SessionsPage() {
   // No nodes state
   if (nodes.length === 0) {
     return (
-      <div className="flex flex-col h-full space-y-6 overflow-auto">
+      <div className="flex flex-col h-full space-y-3 sm:space-y-4 md:space-y-6 overflow-auto">
         <div className="flex-shrink-0">
-          <h1 className="text-3xl font-bold">会话列表</h1>
-          <p className="text-muted-foreground mt-1">查看和管理节点的会话记录</p>
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">会话列表</h1>
+          <p className="text-muted-foreground mt-1 text-sm md:text-base">查看和管理节点的会话记录</p>
         </div>
-        <div className="flex-1 flex flex-col items-center pt-16 border rounded-lg">
-          <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-xl font-semibold mb-2">还没有创建任何节点</h2>
-          <p className="text-muted-foreground text-center mb-6 max-w-lg">
+        <div className="flex-1 flex flex-col items-center pt-8 sm:pt-16 border rounded-lg px-4">
+          <MessageSquare className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground mb-3 sm:mb-4" />
+          <h2 className="text-lg sm:text-xl font-semibold mb-2 text-center">还没有创建任何节点</h2>
+          <p className="text-sm sm:text-base text-muted-foreground text-center mb-4 sm:mb-6 max-w-lg">
             请先创建节点，然后才能查看会话记录。
           </p>
         </div>
@@ -222,15 +234,15 @@ export default function SessionsPage() {
   }
 
   return (
-    <div className="flex flex-col h-full space-y-6 overflow-auto">
+    <div className="flex flex-col h-full space-y-3 sm:space-y-4 md:space-y-6 overflow-auto">
       {/* Header */}
       <div className="flex-shrink-0">
-        <h1 className="text-3xl font-bold">会话列表</h1>
-        <p className="text-muted-foreground mt-1">查看和管理节点的会话记录</p>
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">会话列表</h1>
+        <p className="text-muted-foreground mt-1 text-sm md:text-base">查看和管理节点的会话记录</p>
       </div>
 
       {/* Filters */}
-      <div className="flex-shrink-0 grid gap-4 md:grid-cols-3">
+      <div className="flex-shrink-0 grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
         {/* Node selector */}
         <Select value={selectedNodeId} onValueChange={handleNodeChange}>
           <SelectTrigger id="node-select">
@@ -295,24 +307,104 @@ export default function SessionsPage() {
 
       {/* Session list */}
       {loading ? (
-        <div className="flex items-center justify-center min-h-[400px]">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="flex items-center justify-center min-h-[300px] sm:min-h-[400px]">
+          <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-muted-foreground" />
         </div>
       ) : error ? (
-        <div className="flex flex-col items-center justify-center min-h-[400px]">
-          <p className="text-muted-foreground mb-4">{error}</p>
+        <div className="flex flex-col items-center justify-center min-h-[300px] sm:min-h-[400px] px-4">
+          <p className="text-sm sm:text-base text-muted-foreground mb-4 text-center">{error}</p>
         </div>
       ) : sessions.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center pt-16 border rounded-lg">
-          <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-xl font-semibold mb-2">没有找到会话</h2>
-          <p className="text-muted-foreground text-center mb-6 max-w-lg">
+        <div className="flex-1 flex flex-col items-center pt-8 sm:pt-16 border rounded-lg px-4">
+          <MessageSquare className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground mb-3 sm:mb-4" />
+          <h2 className="text-lg sm:text-xl font-semibold mb-2 text-center">没有找到会话</h2>
+          <p className="text-sm sm:text-base text-muted-foreground text-center mb-4 sm:mb-6 max-w-lg">
             {sessionIdFilter || statusFilter !== "all"
               ? "当前筛选条件下没有会话记录，请尝试调整筛选条件。"
               : "该节点还没有任何会话记录。"}
           </p>
         </div>
+      ) : isMobile ? (
+        // Mobile card view
+        <div className="flex-1 overflow-auto space-y-3">
+          {sessions.map((session) => (
+            <Card key={session.id}>
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <CardTitle className="text-base font-mono text-sm break-all">
+                      {session.session_id}
+                    </CardTitle>
+                  </div>
+                  <button
+                    onClick={() => handleCopySessionId(session.session_id)}
+                    className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                  >
+                    {copiedSessionId === session.session_id ? (
+                      <Check className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span className="text-xs text-muted-foreground">节点</span>
+                    <div className="font-mono text-sm mt-0.5">{session.node_id}</div>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground">状态</span>
+                    <div className="mt-0.5">
+                      <Badge variant={SESSION_STATUS_CONFIG[session.status].variant} className="text-xs">
+                        {SESSION_STATUS_CONFIG[session.status].label}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground">模式</span>
+                    <div className="mt-0.5">
+                      <Badge variant="outline" className="text-xs">{session.mode}</Badge>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground">模型</span>
+                    <div className="mt-0.5">
+                      <Badge variant="outline" className="text-xs">{session.model || "—"}</Badge>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground">消息数</span>
+                    <div className="font-medium text-sm mt-0.5">{session.message_count}</div>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground">成本</span>
+                    <div className="font-mono text-sm mt-0.5">{formatCost(session.total_cost_usd)}</div>
+                  </div>
+                </div>
+                <div className="space-y-1 text-xs">
+                  <div>
+                    <span className="text-muted-foreground">Token: </span>
+                    <span className="font-mono">{session.total_input_tokens.toLocaleString()} / {session.total_output_tokens.toLocaleString()}</span>
+                  </div>
+                  <div className="text-muted-foreground">
+                    最后活动: {new Date(session.last_activity_at).toLocaleString("zh-CN", {
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: false
+                    })}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       ) : (
+        // Desktop table view
         <>
           <div className="flex-1 flex flex-col min-h-0 border rounded-lg">
             <div className="flex-1 overflow-auto">
@@ -401,35 +493,38 @@ export default function SessionsPage() {
             </div>
           </div>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex-shrink-0 flex items-center justify-between">
-              <div className="text-sm text-muted-foreground">
-                共 {total} 条记录，第 {currentPage} / {totalPages} 页
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handlePreviousPage}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4 mr-1" />
-                  上一页
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleNextPage}
-                  disabled={currentPage === totalPages}
-                >
-                  下一页
-                  <ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
-              </div>
-            </div>
-          )}
         </>
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && sessions.length > 0 && (
+        <div className="flex-shrink-0 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
+          <div className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">
+            共 {total} 条记录，第 {currentPage} / {totalPages} 页
+          </div>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePreviousPage}
+              disabled={currentPage === 1}
+              className="flex-1 sm:flex-initial"
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" />
+              上一页
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleNextPage}
+              disabled={currentPage === totalPages}
+              className="flex-1 sm:flex-initial"
+            >
+              下一页
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        </div>
       )}
     </div>
   )

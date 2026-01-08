@@ -61,3 +61,32 @@
     height: 100%;
   }
 }
+
+/* Mobile-friendly ReactFlow styles */
+@layer utilities {
+  .touchdevice-flow {
+    touch-action: none;
+  }
+
+  /* Improve touch targets for ReactFlow controls on mobile */
+  @media (max-width: 640px) {
+    .react-flow__controls button {
+      width: 32px !important;
+      height: 32px !important;
+    }
+
+    .react-flow__controls button svg {
+      max-width: 16px !important;
+      max-height: 16px !important;
+    }
+  }
+
+  /* Ensure ReactFlow pane is scrollable on mobile */
+  .react-flow__pane {
+    cursor: grab;
+  }
+
+  .react-flow__pane:active {
+    cursor: grabbing;
+  }
+}

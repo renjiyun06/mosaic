@@ -59,6 +59,9 @@ export default function SessionTopologyPage() {
   const { toast } = useToast()
   const { subscribe } = useWebSocket()
 
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(false)
+
   // Filter state
   const [sessionIdFilter, setSessionIdFilter] = useState("")
   const [loading, setLoading] = useState(false)
@@ -74,6 +77,14 @@ export default function SessionTopologyPage() {
   // ReactFlow states
   const [nodes, setNodes] = useState<Node[]>([])
   const [edges, setEdges] = useState<Edge[]>([])
+
+  // Mobile detection effect
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Fetch topology function (extracted to be reused by WebSocket listener)
   const fetchTopology = useCallback(async () => {
@@ -272,21 +283,21 @@ export default function SessionTopologyPage() {
   }
 
   return (
-    <div className="flex flex-col h-full space-y-6 overflow-hidden">
+    <div className="flex flex-col h-full space-y-3 sm:space-y-4 md:space-y-6 overflow-hidden">
       {/* Header */}
       <div className="flex-shrink-0">
-        <h1 className="text-3xl font-bold">会话拓扑可视化</h1>
-        <p className="text-muted-foreground mt-1">输入根会话 ID 查看会话调用树</p>
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">会话拓扑可视化</h1>
+        <p className="text-muted-foreground mt-1 text-sm md:text-base">输入根会话 ID 查看会话调用树</p>
       </div>
 
       {/* Search Input */}
       <div className="flex-shrink-0 flex justify-end">
-        <div className="relative w-1/2">
+        <div className="relative w-full sm:w-3/4 md:w-1/2">
           <Input
             placeholder="输入会话 ID..."
             value={sessionIdFilter}
             onChange={(e) => setSessionIdFilter(e.target.value)}
-            className="pr-8 focus-visible:ring-0 focus-visible:ring-offset-0"
+            className="pr-8 text-base focus-visible:ring-0 focus-visible:ring-offset-0"
           />
           {sessionIdFilter && (
             <button
@@ -302,18 +313,18 @@ export default function SessionTopologyPage() {
       {/* Graph Area */}
       <div className="flex-1 min-h-0">
         {error ? (
-          <Card className="h-full flex flex-col items-center justify-center">
-            <AlertCircle className="h-16 w-16 text-destructive mb-4" />
-            <h2 className="text-xl font-semibold mb-2">加载失败</h2>
-            <p className="text-muted-foreground text-center max-w-md">
+          <Card className="h-full flex flex-col items-center justify-center px-4">
+            <AlertCircle className="h-12 w-12 sm:h-16 sm:w-16 text-destructive mb-3 sm:mb-4" />
+            <h2 className="text-lg sm:text-xl font-semibold mb-2 text-center">加载失败</h2>
+            <p className="text-sm sm:text-base text-muted-foreground text-center max-w-md">
               {error}
             </p>
           </Card>
         ) : !topologyData ? (
-          <Card className="h-full flex flex-col items-center justify-center">
-            <Network className="h-16 w-16 text-muted-foreground mb-4" />
-            <h2 className="text-xl font-semibold mb-2">请输入会话 ID</h2>
-            <p className="text-muted-foreground text-center max-w-md">
+          <Card className="h-full flex flex-col items-center justify-center px-4">
+            <Network className="h-12 w-12 sm:h-16 sm:w-16 text-muted-foreground mb-3 sm:mb-4" />
+            <h2 className="text-lg sm:text-xl font-semibold mb-2 text-center">请输入会话 ID</h2>
+            <p className="text-sm sm:text-base text-muted-foreground text-center max-w-md">
               在上方输入框中输入一个会话 ID 作为根节点，查看其调用树
             </p>
           </Card>
@@ -350,21 +361,24 @@ export default function SessionTopologyPage() {
 
       {/* Legend */}
       {topologyData && (
-        <div className="flex-shrink-0 flex items-center gap-6 text-sm text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#10b981' }}></div>
-            <span>活跃 (ACTIVE)</span>
+        <div className="flex-shrink-0 flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 md:gap-6 text-xs sm:text-sm text-muted-foreground">
+          <div className="flex items-center gap-3 sm:gap-4 md:gap-6 flex-wrap">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 sm:w-4 sm:h-4 rounded" style={{ backgroundColor: '#10b981' }}></div>
+              <span className="whitespace-nowrap">活跃 (ACTIVE)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 sm:w-4 sm:h-4 rounded" style={{ backgroundColor: '#6b7280' }}></div>
+              <span className="whitespace-nowrap">已关闭 (CLOSED)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 sm:w-4 sm:h-4 rounded" style={{ backgroundColor: '#94a3b8' }}></div>
+              <span className="whitespace-nowrap">已归档 (ARCHIVED)</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#6b7280' }}></div>
-            <span>已关闭 (CLOSED)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#94a3b8' }}></div>
-            <span>已归档 (ARCHIVED)</span>
-          </div>
-          <div className="ml-auto">
-            共 {topologyData.totalNodes} 个会话节点 | 最大深度: {topologyData.maxDepth}
+          <div className="sm:ml-auto">
+            <span className="hidden sm:inline">共 {topologyData.totalNodes} 个会话节点 | 最大深度: {topologyData.maxDepth}</span>
+            <span className="sm:hidden">节点: {topologyData.totalNodes} | 深度: {topologyData.maxDepth}</span>
           </div>
         </div>
       )}

@@ -38,6 +38,7 @@ import { MosaicStatus } from "@/lib/types"
 
 interface SidebarProps {
   mosaicId: string
+  onNavigate?: () => void
 }
 
 const navItems = [
@@ -98,7 +99,7 @@ const navItems = [
   },
 ]
 
-export function Sidebar({ mosaicId }: SidebarProps) {
+export function Sidebar({ mosaicId, onNavigate }: SidebarProps) {
   const pathname = usePathname()
   const { token } = useAuth()
   const [mosaic, setMosaic] = useState<MosaicOut | null>(null)
@@ -170,9 +171,9 @@ export function Sidebar({ mosaicId }: SidebarProps) {
 
   return (
     <>
-      <div className="flex h-full w-64 flex-col border-r bg-background">
+      <div className="flex h-full w-64 flex-col border-r bg-background overflow-y-auto">
         {/* Mosaic Status Card */}
-        <div className="border-b px-4 pt-4 pb-3">
+        <div className="border-b px-4 pt-4 pb-3 flex-shrink-0">
           {loading ? (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -254,7 +255,7 @@ export function Sidebar({ mosaicId }: SidebarProps) {
         </div>
 
         {/* Navigation */}
-        <div className="flex-1 space-y-1 px-4 pb-4 pt-4">
+        <div className="flex-1 space-y-1 px-4 pb-4 pt-4 overflow-y-auto">
           <div className="mb-2 px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             导航
           </div>
@@ -266,6 +267,7 @@ export function Sidebar({ mosaicId }: SidebarProps) {
               <Link
                 key={item.href}
                 href={href}
+                onClick={onNavigate}
                 className={cn(
                   "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all hover:bg-accent",
                   isActive
@@ -283,10 +285,10 @@ export function Sidebar({ mosaicId }: SidebarProps) {
 
       {/* Stop Confirmation Dialog */}
       <Dialog open={stopConfirmOpen} onOpenChange={setStopConfirmOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[425px] max-w-[calc(100vw-2rem)]">
           <DialogHeader>
-            <DialogTitle>确认停止 Mosaic 实例</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-lg sm:text-xl">确认停止 Mosaic 实例</DialogTitle>
+            <DialogDescription className="text-sm">
               停止运行中的 Mosaic 实例将会终止所有正在运行的节点。此操作可以随时重新启动。
             </DialogDescription>
           </DialogHeader>
@@ -297,16 +299,18 @@ export function Sidebar({ mosaicId }: SidebarProps) {
               </span> 吗？
             </p>
           </div>
-          <DialogFooter>
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
             <Button
               variant="outline"
               onClick={() => setStopConfirmOpen(false)}
+              className="w-full sm:w-auto"
             >
               取消
             </Button>
             <Button
               variant="destructive"
               onClick={confirmStop}
+              className="w-full sm:w-auto"
             >
               确认停止
             </Button>

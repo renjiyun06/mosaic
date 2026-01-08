@@ -24,6 +24,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import {
@@ -70,6 +77,7 @@ import {
   LayoutList,
   FolderTree,
   Circle,
+  Menu,
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
@@ -110,6 +118,10 @@ export default function ChatPage() {
   const { token } = useAuth()
   const mosaicId = parseInt(params.mosaicId as string)
   const { isConnected, sendMessage, interrupt, subscribe } = useWebSocket()
+
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(false)
+  const [sessionSheetOpen, setSessionSheetOpen] = useState(false)
 
   // View mode
   const [viewMode, setViewMode] = useState<ViewMode>('chat')
@@ -243,6 +255,14 @@ export default function ChatPage() {
       console.error("Failed to load nodes and sessions:", error)
     }
   }, [mosaicId, activeSessionId])
+
+  // Mobile detection effect
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Load nodes and sessions on mount
   useEffect(() => {
@@ -1195,12 +1215,12 @@ export default function ChatPage() {
 
     return (
       <div
-        className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}
+        className={`flex ${isUser ? "justify-end" : "justify-start"} mb-3 sm:mb-4`}
       >
         <div
-          className={`max-w-[70%] rounded-lg ${
+          className={`max-w-[85%] sm:max-w-[80%] md:max-w-[70%] rounded-lg ${
             isUser ? "bg-primary text-primary-foreground" : "bg-muted"
-          } ${isCollapsible ? "px-2 py-1" : "px-4 py-2"}`}
+          } ${isCollapsible ? "px-2 py-1" : "px-3 sm:px-4 py-2"}`}
         >
           {isThinking ? (
             <div>
@@ -1308,8 +1328,19 @@ export default function ChatPage() {
       <div className="flex-1 flex flex-col bg-muted/20 min-w-0">
         {/* Tab Switcher + Header */}
         <div className="border-b bg-background flex items-center justify-between shrink-0 h-11">
-          {/* Left: Tab buttons */}
+          {/* Left: Tab buttons + Mobile menu */}
           <div className="flex items-center">
+            {/* Mobile session list button */}
+            {isMobile && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-11 px-3"
+                onClick={() => setSessionSheetOpen(true)}
+              >
+                <Menu className="h-4 w-4" />
+              </Button>
+            )}
             <Button
               variant={viewMode === 'chat' ? 'default' : 'ghost'}
               size="sm"
@@ -1332,19 +1363,19 @@ export default function ChatPage() {
 
           {/* Right: Session info and stats */}
           {viewMode === 'chat' && currentSessionInfo && (
-            <div className="flex items-center gap-4 px-6">
+            <div className="flex items-center gap-2 sm:gap-3 md:gap-4 px-2 sm:px-4 md:px-6 overflow-hidden">
               {/* Session path */}
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-mono text-muted-foreground">
-                  {currentSessionInfo.nodeId}
-                  <span className="mx-1">/</span>
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                <span className="text-xs sm:text-sm font-mono text-muted-foreground truncate">
+                  <span className="hidden sm:inline">{currentSessionInfo.nodeId}</span>
+                  <span className="sm:inline hidden mx-1">/</span>
                   {activeSessionId?.slice(0, 8)}
                 </span>
-                <Badge variant="outline" className="text-xs">
+                <Badge variant="outline" className="text-xs shrink-0 hidden sm:inline-flex">
                   {currentSessionInfo.session.mode}
                 </Badge>
                 {currentSessionInfo.session.model && (
-                  <Badge variant="outline" className="text-xs">
+                  <Badge variant="outline" className="text-xs shrink-0 hidden md:inline-flex">
                     {currentSessionInfo.session.model}
                   </Badge>
                 )}
@@ -1352,7 +1383,7 @@ export default function ChatPage() {
 
               {/* WebSocket status */}
               {currentSessionInfo.session.status === SessionStatus.ACTIVE && (
-                <div className="flex items-center">
+                <div className="flex items-center shrink-0">
                   <div
                     className={`h-2 w-2 rounded-full ${
                       isConnected ? "bg-green-500" : "bg-red-500"
@@ -1363,7 +1394,7 @@ export default function ChatPage() {
 
               {/* Usage statistics */}
               {sessionStats && (
-                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2 sm:gap-3 md:gap-4 text-xs text-muted-foreground">
                   {sessionStats.total_cost_usd !== undefined && (
                     <div className="flex items-center gap-1">
                       <span>💰</span>
@@ -1390,8 +1421,8 @@ export default function ChatPage() {
 
           {/* Workspace header */}
           {viewMode === 'workspace' && (
-            <div className="flex items-center gap-2 px-6">
-              <span className="text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 px-2 sm:px-4 md:px-6">
+              <span className="text-xs sm:text-sm text-muted-foreground truncate">
                 {currentSessionInfo ? `节点: ${currentSessionInfo.nodeId}` : '请选择会话'}
               </span>
             </div>
@@ -1403,25 +1434,25 @@ export default function ChatPage() {
           /* Chat View */
           !activeSessionId ? (
             <div className="flex-1 flex items-center justify-center">
-              <div className="text-center text-muted-foreground">
-                <MessageSquare className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                <p>请选择一个会话</p>
+              <div className="text-center text-muted-foreground px-4">
+                <MessageSquare className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 mx-auto mb-3 sm:mb-4 opacity-30" />
+                <p className="text-sm sm:text-base">请选择一个会话</p>
               </div>
             </div>
           ) : !isConnected ? (
             <div className="flex-1 flex items-center justify-center">
-              <Loader2 className="h-8 w-8 animate-spin" />
-              <span className="ml-2">连接中...</span>
+              <Loader2 className="h-6 w-6 sm:h-7 sm:w-7 md:h-8 md:w-8 animate-spin" />
+              <span className="ml-2 text-sm sm:text-base">连接中...</span>
             </div>
           ) : (
             <>
               {/* Messages Area */}
-              <div className="flex-1 overflow-y-auto p-6">
+              <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">
               {messages.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-muted-foreground">
                   <div className="text-center">
-                    <MessageSquare className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                    <p>发送消息开始对话</p>
+                    <MessageSquare className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 mx-auto mb-3 sm:mb-4 opacity-30" />
+                    <p className="text-sm sm:text-base">发送消息开始对话</p>
                   </div>
                 </div>
               ) : (
@@ -1499,10 +1530,10 @@ export default function ChatPage() {
                       : "输入消息... (Ctrl+Enter发送)"
                   }
                   disabled={currentLoading || !isConnected || !canSendMessage}
-                  className="w-full resize-none overflow-y-auto border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-3 pt-3"
+                  className="w-full resize-none overflow-y-auto border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-2 sm:px-3 pt-2 sm:pt-3"
                   style={{ minHeight: "24px" }}
                 />
-                <div className="flex justify-end px-2 pb-2">
+                <div className="flex justify-end px-2 pb-2 gap-2">
                   {currentLoading ? (
                     <Button onClick={handleInterrupt} variant="destructive" size="icon">
                       <StopCircle className="h-4 w-4" />
@@ -1526,14 +1557,14 @@ export default function ChatPage() {
           !activeSessionId ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center text-muted-foreground">
-                <Folder className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                <p>请选择一个会话查看工作区</p>
+                <Folder className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 mx-auto mb-3 sm:mb-4 opacity-30" />
+                <p className="text-sm sm:text-base px-4">请选择一个会话查看工作区</p>
               </div>
             </div>
           ) : (
             <div className="flex-1 flex overflow-hidden">
               {/* Left: File Tree */}
-              <div className="w-80 border-r bg-background overflow-y-auto">
+              <div className="w-64 sm:w-72 md:w-80 border-r bg-background overflow-y-auto">
                 <div className="px-3 py-1.5 border-b bg-background flex items-center justify-between shrink-0">
                   <div className="flex items-center gap-2">
                     <Folder className="h-4 w-4" />
@@ -1552,11 +1583,11 @@ export default function ChatPage() {
                 <div className="py-2">
                   {workspaceLoading ? (
                     <div className="p-4 text-center text-sm text-muted-foreground">
-                      <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-                      加载中...
+                      <Loader2 className="h-5 w-5 sm:h-6 sm:w-6 animate-spin mx-auto mb-2" />
+                      <span className="text-xs sm:text-sm">加载中...</span>
                     </div>
                   ) : fileTree.length === 0 ? (
-                    <div className="p-4 text-center text-sm text-muted-foreground">
+                    <div className="p-4 text-center text-xs sm:text-sm text-muted-foreground">
                       工作区为空
                     </div>
                   ) : (
@@ -1570,31 +1601,31 @@ export default function ChatPage() {
                 {fileContentLoading ? (
                   <div className="flex-1 flex items-center justify-center">
                     <div className="text-center text-muted-foreground">
-                      <Loader2 className="h-12 w-12 animate-spin mx-auto mb-2" />
-                      <p>加载文件内容...</p>
+                      <Loader2 className="h-8 w-8 sm:h-10 sm:w-10 md:h-12 md:w-12 animate-spin mx-auto mb-2" />
+                      <p className="text-xs sm:text-sm">加载文件内容...</p>
                     </div>
                   </div>
                 ) : selectedFile ? (
                   <>
                     {/* File header */}
-                    <div className="border-b bg-background px-4 py-2 shrink-0">
+                    <div className="border-b bg-background px-2 sm:px-3 md:px-4 py-2 shrink-0">
                       <div className="flex items-center gap-2">
-                        <FileCode className="h-4 w-4 text-blue-500" />
-                        <span className="text-sm font-mono">{selectedFile.path}</span>
+                        <FileCode className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-blue-500 shrink-0" />
+                        <span className="text-xs sm:text-sm font-mono truncate">{selectedFile.path}</span>
                       </div>
                     </div>
                     {/* File content */}
                     <div className="flex-1 overflow-auto">
-                      <pre className="p-4 text-sm font-mono">
+                      <pre className="p-2 sm:p-3 md:p-4 text-xs sm:text-sm font-mono">
                         <code>{selectedFile.content}</code>
                       </pre>
                     </div>
                   </>
                 ) : (
                   <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center text-muted-foreground">
-                      <FileText className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                      <p>选择一个文件查看内容</p>
+                    <div className="text-center text-muted-foreground px-4">
+                      <FileText className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 mx-auto mb-3 sm:mb-4 opacity-30" />
+                      <p className="text-sm sm:text-base">选择一个文件查看内容</p>
                     </div>
                   </div>
                 )}
@@ -1604,8 +1635,8 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* Right: Session List */}
-      <div className="w-80 border-l flex flex-col bg-background">
+      {/* Right: Session List (desktop only) */}
+      <div className="w-80 border-l flex-col bg-background hidden md:flex">
         {/* Header with mode toggle */}
         <div className="h-11 border-b px-3 flex items-center justify-between shrink-0">
           <span className="text-sm font-medium">会话</span>
@@ -1851,7 +1882,7 @@ export default function ChatPage() {
 
       {/* Create Session Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-scroll">
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md max-h-[90vh] overflow-y-scroll">
           <DialogHeader>
             <DialogTitle>新建会话</DialogTitle>
             <DialogDescription>
@@ -1909,7 +1940,7 @@ export default function ChatPage() {
 
       {/* Close Session Confirmation Dialog */}
       <Dialog open={closeDialogOpen} onOpenChange={setCloseDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>确认关闭会话？</DialogTitle>
           </DialogHeader>
@@ -1946,6 +1977,256 @@ export default function ChatPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Mobile Session List Sheet */}
+      <Sheet open={sessionSheetOpen} onOpenChange={setSessionSheetOpen}>
+        <SheetContent side="right" className="w-full sm:w-96 p-0 flex flex-col">
+          <SheetHeader className="h-11 border-b px-3 flex flex-row items-center justify-between shrink-0">
+            <SheetTitle className="text-sm font-medium">会话</SheetTitle>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    onClick={() => setSessionListMode(mode => mode === 'detailed' ? 'compact' : 'detailed')}
+                  >
+                    {sessionListMode === 'detailed' ? (
+                      <LayoutList className="h-4 w-4" />
+                    ) : (
+                      <List className="h-4 w-4" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {sessionListMode === 'detailed' ? '切换到紧凑模式' : '切换到详细模式'}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </SheetHeader>
+
+          {/* Search bar */}
+          <div className="px-3 py-2 border-b">
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="搜索会话..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-8 h-8 text-sm"
+              />
+            </div>
+          </div>
+
+          {/* Session tree */}
+          <div
+            className="flex-1 overflow-y-auto"
+            style={{
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'hsl(var(--border)) transparent'
+            }}
+          >
+            {filteredNodes.length === 0 ? (
+              <div className="p-4 text-center text-sm text-muted-foreground">
+                {searchQuery ? (
+                  <>
+                    <Search className="h-12 w-12 mx-auto mb-2 opacity-30" />
+                    <p>未找到匹配的会话</p>
+                  </>
+                ) : (
+                  <>
+                    <Bot className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                    <p>暂无 Claude Code 节点</p>
+                    <p className="text-xs mt-1">请先创建节点</p>
+                  </>
+                )}
+              </div>
+            ) : (
+              filteredNodes.map((node) => (
+                <div key={node.node_id} className="border-b last:border-b-0">
+                  {/* Node header */}
+                  <div
+                    className="px-3 py-2.5 bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer"
+                    onClick={() => toggleNode(node.node_id)}
+                  >
+                    <div className="flex items-center gap-2">
+                      {/* Expand/collapse icon */}
+                      {node.expanded ? (
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      )}
+
+                      {/* Folder icon */}
+                      <FolderTree className="h-4 w-4 shrink-0 text-amber-600" />
+
+                      {/* Node name */}
+                      <span
+                        className="font-medium text-sm truncate flex-1 min-w-0"
+                        title={node.node_id}
+                      >
+                        {node.node_id}
+                      </span>
+
+                      {/* Status indicator */}
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Circle
+                              className={`h-2 w-2 shrink-0 ${
+                                node.status === NodeStatus.RUNNING
+                                  ? 'fill-green-500 text-green-500'
+                                  : 'fill-gray-400 text-gray-400'
+                              }`}
+                            />
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {node.status === NodeStatus.RUNNING ? '运行中' : '已停止'}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+
+                      {/* Session count and create button */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-xs text-muted-foreground">
+                          {node.sessions.length}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            openCreateDialog(node.node_id)
+                            setSessionSheetOpen(false)
+                          }}
+                          disabled={node.status !== NodeStatus.RUNNING || !isConnected}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sessions under this node */}
+                  {node.expanded && (
+                    <div className="bg-background">
+                      {node.sessions.length === 0 ? (
+                        <div className="pl-8 pr-3 py-3 text-center text-xs text-muted-foreground">
+                          暂无会话
+                        </div>
+                      ) : (
+                        node.sessions.map((session, index) => {
+                          const isLast = index === node.sessions.length - 1
+                          const isActive = activeSessionId === session.session_id
+
+                          return (
+                            <div
+                              key={session.session_id}
+                              className={`group relative cursor-pointer hover:bg-muted/50 transition-colors ${
+                                isActive
+                                  ? "bg-primary/10 border-l-3 border-l-primary"
+                                  : "border-l-3 border-l-transparent"
+                              }`}
+                              onClick={() => {
+                                setActiveSessionId(session.session_id)
+                                setSessionSheetOpen(false)
+                              }}
+                            >
+                              {/* Tree line */}
+                              <div className="absolute left-5 top-0 bottom-0 w-px bg-border">
+                                {isLast && <div className="absolute top-3 left-0 w-px h-full bg-background" />}
+                              </div>
+                              <div className="absolute left-5 top-3 w-3 h-px bg-border" />
+
+                              {sessionListMode === 'detailed' ? (
+                                /* Detailed mode: Two-line layout */
+                                <div className="pl-8 pr-3 py-2">
+                                  {/* Line 1: Session ID + Status + Menu */}
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                    <span
+                                      className={`font-mono text-xs truncate ${
+                                        isActive ? "font-semibold" : "text-muted-foreground"
+                                      }`}
+                                    >
+                                      {session.session_id.slice(0, 8)}
+                                    </span>
+                                    <Badge
+                                      variant={
+                                        session.status === SessionStatus.ACTIVE
+                                          ? "default"
+                                          : "secondary"
+                                      }
+                                      className="text-xs h-5 px-1.5"
+                                    >
+                                      {session.status === SessionStatus.ACTIVE && "活跃"}
+                                      {session.status === SessionStatus.CLOSED && "已关闭"}
+                                    </Badge>
+                                    <div className="ml-auto">
+                                      <SessionActionMenu session={session} nodeId={node.node_id} />
+                                    </div>
+                                  </div>
+
+                                  {/* Line 2: Mode · Model · Message count */}
+                                  <div className="pl-5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                                    <span>{session.mode}</span>
+                                    <span>·</span>
+                                    <span>{session.model || 'sonnet'}</span>
+                                  </div>
+                                </div>
+                              ) : (
+                                /* Compact mode: Single line */
+                                <div className="pl-8 pr-3 py-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <MessageSquare className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                    <span
+                                      className={`font-mono text-xs truncate ${
+                                        isActive ? "font-semibold" : "text-muted-foreground"
+                                      }`}
+                                    >
+                                      {session.session_id.slice(0, 8)}
+                                    </span>
+                                    <Circle
+                                      className={`h-1.5 w-1.5 shrink-0 ml-auto ${
+                                        session.status === SessionStatus.ACTIVE
+                                          ? 'fill-blue-500 text-blue-500'
+                                          : 'fill-gray-400 text-gray-400'
+                                      }`}
+                                    />
+                                    <div>
+                                      <SessionActionMenu session={session} nodeId={node.node_id} />
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Footer statistics */}
+          <div className="h-9 border-t px-3 flex items-center justify-between shrink-0 bg-muted/20">
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <span>{nodes.length} 节点</span>
+              <span>·</span>
+              <span>{nodes.reduce((sum, node) => sum + node.sessions.length, 0)} 会话</span>
+            </div>
+            {isConnected ? (
+              <Circle className="h-2 w-2 fill-green-500 text-green-500" />
+            ) : (
+              <Circle className="h-2 w-2 fill-red-500 text-red-500" />
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }
