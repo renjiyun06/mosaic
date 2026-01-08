@@ -32,7 +32,7 @@ export default function MosaicLayout({
 
           {/* Mobile Sidebar (Sheet) */}
           <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-            <SheetContent side="left" className="p-0 w-64">
+            <SheetContent side="left" className="p-0 w-64" showClose={false}>
               <SheetTitle className="sr-only">导航菜单</SheetTitle>
               <Sidebar mosaicId={mosaicId} onNavigate={() => setMobileMenuOpen(false)} />
             </SheetContent>

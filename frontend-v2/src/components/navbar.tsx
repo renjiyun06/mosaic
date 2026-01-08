@@ -64,28 +64,38 @@ export function Navbar({ onMenuClick, showMenuButton = false }: NavbarProps = {}
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex h-14 items-center px-4">
-        {/* Mobile menu button */}
-        {showMenuButton && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onMenuClick}
-            className="mr-2 lg:hidden"
-          >
-            <Menu className="h-5 w-5" />
-            <span className="sr-only">打开菜单</span>
-          </Button>
-        )}
+      <div className="flex h-14 items-center">
+        {/* Mobile: hamburger + logo */}
+        <div className="flex items-center px-4 sm:px-6 lg:hidden flex-1">
+          {showMenuButton && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onMenuClick}
+              className="-ml-2 mr-2"
+            >
+              <Menu className="h-5 w-5" />
+              <span className="sr-only">打开菜单</span>
+            </Button>
+          )}
+          <div className="mr-4 flex items-center">
+            <Link href="/" className="flex items-center space-x-2">
+              <Boxes className="h-5 w-5 sm:h-6 sm:w-6" />
+              <span className="font-bold text-sm sm:text-base">Mosaic</span>
+            </Link>
+          </div>
+        </div>
 
-        <div className="mr-4 flex items-center">
+        {/* Desktop: logo in sidebar area */}
+        <div className="hidden lg:flex items-center w-64 border-r px-4 h-14 flex-shrink-0">
           <Link href="/" className="flex items-center space-x-2">
-            <Boxes className="h-5 w-5 sm:h-6 sm:w-6" />
-            <span className="font-bold text-sm sm:text-base">Mosaic</span>
+            <Boxes className="h-6 w-6" />
+            <span className="font-bold">Mosaic</span>
           </Link>
         </div>
 
-        <div className="flex flex-1 items-center justify-end space-x-1 sm:space-x-2">
+        {/* Right side content */}
+        <div className="flex flex-1 items-center justify-end space-x-1 sm:space-x-2 px-4 sm:px-6 lg:px-6">
           {currentMosaic && mosaics.length > 0 && (
             <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>

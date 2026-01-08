@@ -1324,23 +1324,23 @@ export default function ChatPage() {
 
   return (
     <div className="flex absolute inset-0 overflow-hidden">
+      {/* Mobile session list button - Fixed on right edge */}
+      {isMobile && (
+        <button
+          onClick={() => setSessionSheetOpen(true)}
+          className="fixed right-0 top-1/2 -translate-y-1/2 z-40 bg-background/80 backdrop-blur border border-border rounded-l-md shadow-sm px-1.5 py-3 hover:bg-muted/80 transition-colors md:hidden flex items-center"
+          style={{ writingMode: 'vertical-rl' }}
+        >
+          <span className="text-xs text-muted-foreground">会话列表</span>
+        </button>
+      )}
+
       {/* Middle: Main Content Area */}
       <div className="flex-1 flex flex-col bg-muted/20 min-w-0">
         {/* Tab Switcher + Header */}
         <div className="border-b bg-background flex items-center justify-between shrink-0 h-11">
-          {/* Left: Tab buttons + Mobile menu */}
+          {/* Left: Tab buttons */}
           <div className="flex items-center">
-            {/* Mobile session list button */}
-            {isMobile && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-11 px-3"
-                onClick={() => setSessionSheetOpen(true)}
-              >
-                <Menu className="h-4 w-4" />
-              </Button>
-            )}
             <Button
               variant={viewMode === 'chat' ? 'default' : 'ghost'}
               size="sm"
@@ -1530,7 +1530,7 @@ export default function ChatPage() {
                       : "输入消息... (Ctrl+Enter发送)"
                   }
                   disabled={currentLoading || !isConnected || !canSendMessage}
-                  className="w-full resize-none overflow-y-auto border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-2 sm:px-3 pt-2 sm:pt-3"
+                  className="w-full resize-none overflow-y-auto border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-2 sm:px-3 pt-2 sm:pt-3 text-base"
                   style={{ minHeight: "24px" }}
                 />
                 <div className="flex justify-end px-2 pb-2 gap-2">
@@ -1980,7 +1980,17 @@ export default function ChatPage() {
 
       {/* Mobile Session List Sheet */}
       <Sheet open={sessionSheetOpen} onOpenChange={setSessionSheetOpen}>
-        <SheetContent side="right" className="w-full sm:w-96 p-0 flex flex-col">
+        <SheetContent side="right" className="p-0 w-[85vw] sm:w-96" showClose={false}>
+          <div className="flex h-full w-full flex-col bg-background relative">
+            {/* Mobile Close Button */}
+            <button
+              onClick={() => setSessionSheetOpen(false)}
+              className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-50 rounded-full bg-background border shadow-md p-2 hover:bg-accent transition-colors"
+              aria-label="关闭会话列表"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+
           <SheetHeader className="h-11 border-b px-3 flex flex-row items-center justify-between shrink-0">
             <SheetTitle className="text-sm font-medium">会话</SheetTitle>
             <TooltipProvider>
@@ -2224,6 +2234,7 @@ export default function ChatPage() {
             ) : (
               <Circle className="h-2 w-2 fill-red-500 text-red-500" />
             )}
+          </div>
           </div>
         </SheetContent>
       </Sheet>

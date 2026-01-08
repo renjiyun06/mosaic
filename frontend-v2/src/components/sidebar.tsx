@@ -19,6 +19,7 @@ import {
   Loader2,
   Route,
   Network,
+  ChevronLeft,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "./ui/button"
@@ -171,7 +172,18 @@ export function Sidebar({ mosaicId, onNavigate }: SidebarProps) {
 
   return (
     <>
-      <div className="flex h-full w-64 flex-col border-r bg-background overflow-y-auto">
+      <div className="flex h-full w-64 flex-col border-r bg-background overflow-y-auto relative">
+        {/* Mobile Close Button */}
+        {onNavigate && (
+          <button
+            onClick={onNavigate}
+            className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-50 rounded-full bg-background border shadow-md p-2 hover:bg-accent transition-colors lg:hidden"
+            aria-label="关闭侧边栏"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+        )}
+
         {/* Mosaic Status Card */}
         <div className="border-b px-4 pt-4 pb-3 flex-shrink-0">
           {loading ? (

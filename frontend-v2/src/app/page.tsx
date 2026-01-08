@@ -296,7 +296,7 @@ function HomePage() {
                             <Button
                               size="sm"
                               variant="default"
-                              className="flex-1"
+                              className="w-full"
                               onClick={(e) => handleStartMosaic(mosaic.id, e)}
                             >
                               <Play className="mr-1.5 h-3.5 w-3.5" />
@@ -311,35 +311,16 @@ function HomePage() {
                               <Edit className="mr-1.5 h-3.5 w-3.5 sm:mr-0" />
                               <span className="sm:hidden">编辑</span>
                             </Button>
-                            {mosaic.node_count > 0 ? (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="text-destructive hover:text-destructive sm:w-auto w-full"
-                                    disabled
-                                  >
-                                    <Trash2 className="mr-1.5 h-3.5 w-3.5 sm:mr-0" />
-                                    <span className="sm:hidden">删除 (有 {mosaic.node_count} 个节点)</span>
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  <p>此 Mosaic 有 {mosaic.node_count} 个节点</p>
-                                  <p className="text-xs text-muted-foreground">需要先删除所有节点</p>
-                                </TooltipContent>
-                              </Tooltip>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-destructive hover:text-destructive sm:w-auto w-full"
-                                onClick={(e) => handleDeleteMosaic(mosaic.id, e)}
-                              >
-                                <Trash2 className="mr-1.5 h-3.5 w-3.5 sm:mr-0" />
-                                <span className="sm:hidden">删除</span>
-                              </Button>
-                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-destructive hover:text-destructive sm:w-auto w-full"
+                              disabled={mosaic.node_count > 0}
+                              onClick={(e) => handleDeleteMosaic(mosaic.id, e)}
+                            >
+                              <Trash2 className="mr-1.5 h-3.5 w-3.5 sm:mr-0" />
+                              <span className="sm:hidden">删除</span>
+                            </Button>
                           </>
                         )}
                       </div>
