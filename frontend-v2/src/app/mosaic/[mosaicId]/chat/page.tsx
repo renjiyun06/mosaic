@@ -105,9 +105,25 @@ export default function ChatPage() {
   const [fileContentLoading, setFileContentLoading] = useState(false)
 
   // Input and loading states
-  const [input, setInput] = useState("")
-  const [loading, setLoading] = useState(false)
+  // Store input per session to preserve content when switching sessions
+  // Initialize from localStorage to persist across page navigation
+  const [sessionInputs, setSessionInputs] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {}
+    try {
+      const saved = localStorage.getItem(`mosaic-${mosaicId}-session-inputs`)
+      return saved ? JSON.parse(saved) : {}
+    } catch (error) {
+      console.error("Failed to load session inputs from localStorage:", error)
+      return {}
+    }
+  })
+  // Store loading state per session to allow independent message sending
+  const [sessionLoadings, setSessionLoadings] = useState<Record<string, boolean>>({})
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Get current session's input and loading state
+  const currentInput = activeSessionId ? (sessionInputs[activeSessionId] || "") : ""
+  const currentLoading = activeSessionId ? (sessionLoadings[activeSessionId] || false) : false
 
   // Session usage statistics
   const [sessionStats, setSessionStats] = useState<{
@@ -362,7 +378,10 @@ export default function ChatPage() {
 
       // Stop loading on result
       if (wsMessage.message_type === "assistant_result") {
-        setLoading(false)
+        setSessionLoadings(prev => ({
+          ...prev,
+          [activeSessionId]: false
+        }))
       }
     })
 
@@ -371,6 +390,19 @@ export default function ChatPage() {
       unsubscribe()
     }
   }, [activeSessionId, subscribe])
+
+  // Save session inputs to localStorage whenever they change
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      localStorage.setItem(
+        `mosaic-${mosaicId}-session-inputs`,
+        JSON.stringify(sessionInputs)
+      )
+    } catch (error) {
+      console.error("Failed to save session inputs to localStorage:", error)
+    }
+  }, [sessionInputs, mosaicId])
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -496,26 +528,58 @@ export default function ChatPage() {
           total_output_tokens: lastResult.contentParsed.total_output_tokens,
         })
       }
+
+      // Restore loading state based on last message
+      // If messages exist and the last message is not ASSISTANT_RESULT, session is still processing
+      if (parsed.length > 0) {
+        const lastMessage = parsed[parsed.length - 1]
+        const isProcessing = lastMessage.message_type !== MessageType.ASSISTANT_RESULT
+        setSessionLoadings(prev => ({
+          ...prev,
+          [sessionId]: isProcessing
+        }))
+        if (isProcessing) {
+          console.log("[Chat] Session is still processing, restored loading state for", sessionId)
+        }
+      } else {
+        // No messages, session is ready for input
+        setSessionLoadings(prev => ({
+          ...prev,
+          [sessionId]: false
+        }))
+      }
     } catch (error) {
       console.error("Failed to load messages:", error)
     }
   }
 
   const handleSendMessage = () => {
-    if (!input.trim() || !activeSessionId || !isConnected || loading) return
+    const input = currentInput
+    if (!input.trim() || !activeSessionId || !isConnected || currentLoading) return
 
     try {
       // Send message via global WebSocket
       sendMessage(activeSessionId, input)
-      setInput("")
-      setLoading(true)
+      // Clear current session's input
+      setSessionInputs(prev => ({
+        ...prev,
+        [activeSessionId]: ""
+      }))
+      // Set current session's loading state
+      setSessionLoadings(prev => ({
+        ...prev,
+        [activeSessionId]: true
+      }))
       // Reset textarea height
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto"
       }
     } catch (error) {
       console.error("Failed to send message:", error)
-      setLoading(false)
+      setSessionLoadings(prev => ({
+        ...prev,
+        [activeSessionId]: false
+      }))
     }
   }
 
@@ -534,22 +598,25 @@ export default function ChatPage() {
 
     const newHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)
     textarea.style.height = `${newHeight}px`
-  }, [input])
+  }, [currentInput])
 
   // Auto-focus textarea when loading finishes
   useEffect(() => {
-    if (!loading && activeSessionId && isConnected && textareaRef.current) {
+    if (!currentLoading && activeSessionId && isConnected && textareaRef.current) {
       textareaRef.current.focus()
     }
-  }, [loading, activeSessionId, isConnected])
+  }, [currentLoading, activeSessionId, isConnected])
 
   const handleInterrupt = () => {
-    if (!activeSessionId || !isConnected || !loading) return
+    if (!activeSessionId || !isConnected || !currentLoading) return
 
     try {
       // Send interrupt via global WebSocket
       interrupt(activeSessionId)
-      setLoading(false)
+      setSessionLoadings(prev => ({
+        ...prev,
+        [activeSessionId]: false
+      }))
     } catch (error) {
       console.error("Failed to interrupt session:", error)
     }
@@ -630,6 +697,13 @@ export default function ChatPage() {
           sessions: node.sessions.filter((s) => s.session_id !== sessionId),
         }))
       )
+
+      // Clear input content for this session
+      setSessionInputs(prev => {
+        const newInputs = { ...prev }
+        delete newInputs[sessionId]
+        return newInputs
+      })
 
       // If it was active, clear selection
       if (activeSessionId === sessionId) {
@@ -1180,8 +1254,15 @@ export default function ChatPage() {
               <div className="bg-background overflow-hidden">
                 <Textarea
                   ref={textareaRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  value={currentInput}
+                  onChange={(e) => {
+                    if (activeSessionId) {
+                      setSessionInputs(prev => ({
+                        ...prev,
+                        [activeSessionId]: e.target.value
+                      }))
+                    }
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && e.ctrlKey) {
                       e.preventDefault()
@@ -1199,19 +1280,19 @@ export default function ChatPage() {
                       ? "WebSocket 连接中..."
                       : "输入消息... (Ctrl+Enter发送)"
                   }
-                  disabled={loading || !isConnected || !canSendMessage}
+                  disabled={currentLoading || !isConnected || !canSendMessage}
                   className="w-full resize-none overflow-y-auto border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-3 pt-3"
                   style={{ minHeight: "24px" }}
                 />
                 <div className="flex justify-end px-2 pb-2">
-                  {loading ? (
+                  {currentLoading ? (
                     <Button onClick={handleInterrupt} variant="destructive" size="icon">
                       <StopCircle className="h-4 w-4" />
                     </Button>
                   ) : (
                     <Button
                       onClick={handleSendMessage}
-                      disabled={!input.trim() || !isConnected || !canSendMessage}
+                      disabled={!currentInput.trim() || !isConnected || !canSendMessage}
                       size="icon"
                     >
                       <Send className="h-4 w-4" />
