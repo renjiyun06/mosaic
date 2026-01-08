@@ -411,6 +411,9 @@ class ClaudeCodeSession(MosaicSession):
                 "PreToolUse": [
                     HookMatcher(hooks=[self._pre_tool_use_hook])
                 ],
+                "PostToolUse": [
+                    HookMatcher(hooks=[self._post_tool_use_hook])
+                ],
             },
             mcp_servers=mcp_servers,
             allowed_tools=["*"],
@@ -812,27 +815,6 @@ class ClaudeCodeSession(MosaicSession):
                             payload={"message": block.thinking}
                         )
 
-                    elif isinstance(block, ToolUseBlock):
-                        message_id, sequence, timestamp = await self._save_message_to_db(
-                            role=MessageRole.ASSISTANT,
-                            message_type=MessageType.ASSISTANT_TOOL_USE,
-                            payload={
-                                "tool_name": block.name,
-                                "tool_input": block.input
-                            }
-                        )
-                        self._push_to_websocket(
-                            role=MessageRole.ASSISTANT,
-                            message_type=MessageType.ASSISTANT_TOOL_USE,
-                            message_id=message_id,
-                            sequence=sequence,
-                            timestamp=timestamp,
-                            payload={
-                                "tool_name": block.name,
-                                "tool_input": block.input
-                            }
-                        )
-
             elif isinstance(message, ResultMessage):
                 # Collect statistics for return
                 cost_usd = message.total_cost_usd or 0.0
@@ -1058,13 +1040,35 @@ class ClaudeCodeSession(MosaicSession):
         Returns:
             Hook response allowing tool use
         """
+        tool_name = hook_input.get("tool_name")
+        tool_input = hook_input.get("tool_input")
+
+        message_id, sequence, timestamp = await self._save_message_to_db(
+            role=MessageRole.ASSISTANT,
+            message_type=MessageType.ASSISTANT_TOOL_USE,
+            payload={
+                "tool_name": tool_name,
+                "tool_input": tool_input
+            }
+        )
+        self._push_to_websocket(
+            role=MessageRole.ASSISTANT,
+            message_type=MessageType.ASSISTANT_TOOL_USE,
+            message_id=message_id,
+            sequence=sequence,
+            timestamp=timestamp,
+            payload={
+                "tool_name": tool_name,
+                "tool_input": tool_input
+            }
+        )
         if self.mode != SessionMode.PROGRAM:
             await self.node.send_event(
                 source_session_id=self.session_id,
                 event_type=EventType.PRE_TOOL_USE,
                 payload={
-                    "tool_name": hook_input.get("tool_name"),
-                    "tool_input": hook_input.get("tool_input")
+                    "tool_name": tool_name,
+                    "tool_input": tool_input
                 }
             )
 
@@ -1075,6 +1079,46 @@ class ClaudeCodeSession(MosaicSession):
                 "permissionDecisionReason": "",
             }
         }
+
+    async def _post_tool_use_hook(
+        self,
+        hook_input: Dict[str, Any],
+        tool_use_id: Optional[str],
+        context: Any
+    ):
+        tool_name = hook_input.get("tool_name")
+        tool_output = hook_input.get("tool_response")
+        
+        message_id, sequence, timestamp = await self._save_message_to_db(
+            role=MessageRole.ASSISTANT,
+            message_type=MessageType.ASSISTANT_TOOL_OUTPUT,
+            payload={
+                "tool_name": tool_name,
+                "tool_output": tool_output
+            }
+        )
+        self._push_to_websocket(
+            role=MessageRole.ASSISTANT,
+            message_type=MessageType.ASSISTANT_TOOL_OUTPUT,
+            message_id=message_id,
+            sequence=sequence,
+            timestamp=timestamp,
+            payload={
+                "tool_name": tool_name,
+                "tool_output": tool_output
+            }
+        )
+        if self.mode != SessionMode.PROGRAM:
+            await self.node.send_event(
+                source_session_id=self.session_id,
+                event_type=EventType.POST_TOOL_USE,
+                payload={
+                    "tool_name": tool_name,
+                    "tool_output": tool_output
+                }
+            )
+        
+        return {}
 
     def _create_mosaic_mcp_server(self):
         """

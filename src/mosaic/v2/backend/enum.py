@@ -149,6 +149,7 @@ class MessageType(str, Enum):
     ASSISTANT_TEXT = "assistant_text"
     ASSISTANT_THINKING = "assistant_thinking"
     ASSISTANT_TOOL_USE = "assistant_tool_use"
+    ASSISTANT_TOOL_OUTPUT = "assistant_tool_output"
     ASSISTANT_RESULT = "assistant_result"
     SYSTEM_MESSAGE = "system_message"
     SESSION_STARTED = "session_started"

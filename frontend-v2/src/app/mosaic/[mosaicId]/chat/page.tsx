@@ -356,7 +356,7 @@ export default function ChatPage() {
       setMessages((prev) => [...prev, newMessage])
 
       // Collapse thinking, system, and tool use messages by default
-      if (wsMessage.message_type === "assistant_thinking" || wsMessage.message_type === "system_message" || wsMessage.message_type === "assistant_tool_use") {
+      if (wsMessage.message_type === "assistant_thinking" || wsMessage.message_type === "system_message" || wsMessage.message_type === "assistant_tool_use" || wsMessage.message_type === "assistant_tool_output") {
         setCollapsedMessages((prev) => new Set(prev).add(wsMessage.message_id!)) // message_id is guaranteed to exist (checked above)
       }
 
@@ -452,6 +452,20 @@ export default function ChatPage() {
         ...msg,
         contentParsed: typeof msg.payload === "string" ? JSON.parse(msg.payload) : msg.payload,
       }))
+
+      // Debug: Log all tool_output messages from database
+      const toolOutputMessages = parsed.filter(msg => msg.message_type === MessageType.ASSISTANT_TOOL_OUTPUT)
+      if (toolOutputMessages.length > 0) {
+        console.log("[Chat] Loaded tool_output messages from DB:", toolOutputMessages.map(msg => ({
+          message_id: msg.message_id,
+          message_type: msg.message_type,
+          role: msg.role,
+          sequence: msg.sequence,
+          payload: msg.payload,
+          contentParsed: msg.contentParsed
+        })))
+      }
+
       setMessages(parsed)
 
       // Update max sequence number from loaded messages
@@ -465,7 +479,7 @@ export default function ChatPage() {
 
       // Collapse all thinking, system, and tool use messages by default
       const collapsibleIds = parsed
-        .filter((msg) => msg.message_type === MessageType.ASSISTANT_THINKING || msg.message_type === MessageType.SYSTEM_MESSAGE || msg.message_type === MessageType.ASSISTANT_TOOL_USE)
+        .filter((msg) => msg.message_type === MessageType.ASSISTANT_THINKING || msg.message_type === MessageType.SYSTEM_MESSAGE || msg.message_type === MessageType.ASSISTANT_TOOL_USE || msg.message_type === MessageType.ASSISTANT_TOOL_OUTPUT)
         .map((msg) => msg.message_id)
       setCollapsedMessages(new Set(collapsibleIds))
 
@@ -807,8 +821,22 @@ export default function ChatPage() {
     const isThinking = msg.message_type === MessageType.ASSISTANT_THINKING
     const isSystemMessage = msg.message_type === MessageType.SYSTEM_MESSAGE
     const isToolUse = msg.message_type === MessageType.ASSISTANT_TOOL_USE
-    const isCollapsible = isThinking || isSystemMessage || isToolUse
+    const isToolOutput = msg.message_type === MessageType.ASSISTANT_TOOL_OUTPUT
+    const isCollapsible = isThinking || isSystemMessage || isToolUse || isToolOutput
     const isCollapsed = isCollapsible && collapsedMessages.has(msg.message_id)
+
+    // Debug log for tool_output messages
+    if (isToolOutput) {
+      console.log("[Chat] Rendering tool_output:", {
+        message_id: msg.message_id,
+        tool_name: msg.contentParsed?.tool_name,
+        tool_output_type: typeof msg.contentParsed?.tool_output,
+        tool_output_length: typeof msg.contentParsed?.tool_output === 'string'
+          ? msg.contentParsed.tool_output.length
+          : JSON.stringify(msg.contentParsed?.tool_output || {}).length,
+        payload: msg.contentParsed
+      })
+    }
 
     return (
       <div
@@ -871,8 +899,41 @@ export default function ChatPage() {
                 <span className="text-xs opacity-70">🔧 {msg.contentParsed.tool_name}</span>
               </div>
               {!isCollapsed && (
-                <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0">
+                <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0 font-mono">
                   {JSON.stringify(msg.contentParsed.tool_input, null, 2)}
+                </div>
+              )}
+            </div>
+          ) : isToolOutput ? (
+            <div>
+              <div
+                className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
+                onClick={() => toggleThinkingCollapse(msg.message_id)}
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="h-3 w-3 opacity-70" />
+                ) : (
+                  <ChevronDown className="h-3 w-3 opacity-70" />
+                )}
+                <span className="text-xs opacity-70">
+                  📤 {msg.contentParsed?.tool_name || 'Tool'} 结果
+                  {(msg.contentParsed?.tool_output === null || msg.contentParsed?.tool_output === undefined) && (
+                    <span className="ml-1 text-xs opacity-50">(空)</span>
+                  )}
+                </span>
+              </div>
+              {!isCollapsed && (
+                <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0 font-mono">
+                  {(() => {
+                    const output = msg.contentParsed?.tool_output
+                    if (output === undefined || output === null) {
+                      return <span className="text-muted-foreground italic">工具执行完成，无返回输出</span>
+                    }
+                    if (typeof output === 'string') {
+                      return output.trim() || <span className="text-muted-foreground italic">空字符串</span>
+                    }
+                    return JSON.stringify(output, null, 2)
+                  })()}
                 </div>
               )}
             </div>
@@ -1013,6 +1074,21 @@ export default function ChatPage() {
                   {(() => {
                     console.log("[Chat] Rendering messages, total count:", messages.length)
                     console.log("[Chat] Message IDs:", messages.map(m => m.message_id))
+
+                    // Check for tool_output messages
+                    const toolOutputCount = messages.filter(m => m.message_type === MessageType.ASSISTANT_TOOL_OUTPUT).length
+                    if (toolOutputCount > 0) {
+                      console.log(`[Chat] Found ${toolOutputCount} tool_output messages in render queue`)
+                      console.log("[Chat] Tool output messages:", messages
+                        .filter(m => m.message_type === MessageType.ASSISTANT_TOOL_OUTPUT)
+                        .map(m => ({
+                          message_id: m.message_id,
+                          sequence: m.sequence,
+                          message_type: m.message_type,
+                          contentParsed: m.contentParsed
+                        }))
+                      )
+                    }
 
                     // Check for duplicate message_ids
                     const ids = messages.map(m => m.message_id)
