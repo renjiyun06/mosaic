@@ -468,6 +468,18 @@ class ClaudeCodeSession(MosaicSession):
         })
         logger.info(f"Pushed session_started notification to WebSocket: session_id={self.session_id}")
 
+        # 6. Send self-notification if session_start_notify is enabled (all modes except PROGRAM)
+        if self.mode != SessionMode.PROGRAM and self.node.node.config.get("session_start_notify", False):
+            self.enqueue_event({
+                "event_type": EventType.SYSTEM_MESSAGE,
+                "payload": {
+                    "message": "Session started"
+                }
+            })
+            logger.info(
+                f"Enqueued session_start self-notification: session_id={self.session_id}"
+            )
+
     async def _handle_event(self, event: dict) -> None:
         """
         Handle an incoming event.
