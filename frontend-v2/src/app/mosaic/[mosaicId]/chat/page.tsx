@@ -61,6 +61,7 @@ import {
   MessageSquare,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   Bot,
   Archive,
   Lock,
@@ -454,6 +455,29 @@ export default function ChatPage() {
   const [workspaceLoading, setWorkspaceLoading] = useState(false)
   const [fileContentLoading, setFileContentLoading] = useState(false)
 
+  // Workspace sidebar state (resizable & collapsible)
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    if (typeof window === 'undefined') return 280
+    try {
+      const saved = localStorage.getItem(`mosaic-${mosaicId}-sidebar-width`)
+      return saved ? parseInt(saved, 10) : 280
+    } catch (error) {
+      return 280
+    }
+  })
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    try {
+      const saved = localStorage.getItem(`mosaic-${mosaicId}-sidebar-collapsed`)
+      return saved === 'true'
+    } catch (error) {
+      return false
+    }
+  })
+  const [isResizing, setIsResizing] = useState(false)
+  const resizeStartX = useRef<number>(0)
+  const resizeStartWidth = useRef<number>(0)
+
   // Input and loading states
   // Store input per session to preserve content when switching sessions
   // Initialize from localStorage to persist across page navigation
@@ -806,6 +830,73 @@ export default function ChatPage() {
       setWorkspaceLoading(false)
     }
   }
+
+  // Sidebar resize handlers
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsResizing(true)
+    resizeStartX.current = e.clientX
+    resizeStartWidth.current = sidebarWidth
+  }, [sidebarWidth])
+
+  const handleResizeMove = useCallback((e: MouseEvent) => {
+    if (!isResizing) return
+
+    const deltaX = e.clientX - resizeStartX.current
+    const newWidth = resizeStartWidth.current + deltaX
+
+    // Constrain width between min (200px) and max (600px)
+    const constrainedWidth = Math.min(Math.max(newWidth, 200), 600)
+    setSidebarWidth(constrainedWidth)
+  }, [isResizing])
+
+  const handleResizeEnd = useCallback(() => {
+    if (!isResizing) return
+    setIsResizing(false)
+  }, [isResizing])
+
+  // Sidebar collapse toggle
+  const toggleSidebarCollapse = useCallback(() => {
+    setSidebarCollapsed(prev => !prev)
+  }, [])
+
+  // Attach global mouse event listeners for resizing
+  useEffect(() => {
+    if (isResizing) {
+      document.addEventListener('mousemove', handleResizeMove)
+      document.addEventListener('mouseup', handleResizeEnd)
+      // Prevent text selection while resizing
+      document.body.style.userSelect = 'none'
+      document.body.style.cursor = 'col-resize'
+
+      return () => {
+        document.removeEventListener('mousemove', handleResizeMove)
+        document.removeEventListener('mouseup', handleResizeEnd)
+        document.body.style.userSelect = ''
+        document.body.style.cursor = ''
+      }
+    }
+  }, [isResizing, handleResizeMove, handleResizeEnd])
+
+  // Save sidebar width to localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      localStorage.setItem(`mosaic-${mosaicId}-sidebar-width`, sidebarWidth.toString())
+    } catch (error) {
+      console.error("Failed to save sidebar width to localStorage:", error)
+    }
+  }, [sidebarWidth, mosaicId])
+
+  // Save sidebar collapsed state to localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      localStorage.setItem(`mosaic-${mosaicId}-sidebar-collapsed`, sidebarCollapsed.toString())
+    } catch (error) {
+      console.error("Failed to save sidebar collapsed state to localStorage:", error)
+    }
+  }, [sidebarCollapsed, mosaicId])
 
   // Load workspace when switching to workspace view or when active session changes
   useEffect(() => {
@@ -1617,38 +1708,86 @@ export default function ChatPage() {
             </div>
           ) : (
             <div className="flex-1 flex overflow-hidden">
-              {/* Left: File Tree */}
-              <div className="w-64 sm:w-72 md:w-80 border-r bg-background overflow-y-auto">
+              {/* Left: File Tree - Resizable & Collapsible */}
+              <div
+                className="border-r bg-background overflow-hidden flex flex-col"
+                style={{
+                  width: sidebarCollapsed ? '48px' : `${sidebarWidth}px`,
+                  minWidth: sidebarCollapsed ? '48px' : `${sidebarWidth}px`,
+                  maxWidth: sidebarCollapsed ? '48px' : `${sidebarWidth}px`,
+                  transition: sidebarCollapsed ? 'width 0.2s ease-in-out' : 'none',
+                }}
+              >
+                {/* Header */}
                 <div className="px-3 py-1.5 border-b bg-background flex items-center justify-between shrink-0">
-                  <div className="flex items-center gap-2">
-                    <Folder className="h-4 w-4" />
-                    <span className="text-sm font-medium">文件树</span>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 p-0"
-                    onClick={() => currentSessionInfo && loadWorkspace(currentSessionInfo.nodeId)}
-                    disabled={workspaceLoading}
-                  >
-                    <RefreshCw className={`h-3.5 w-3.5 ${workspaceLoading ? 'animate-spin' : ''}`} />
-                  </Button>
-                </div>
-                <div className="py-2">
-                  {workspaceLoading ? (
-                    <div className="p-4 text-center text-sm text-muted-foreground">
-                      <Loader2 className="h-5 w-5 sm:h-6 sm:w-6 animate-spin mx-auto mb-2" />
-                      <span className="text-xs sm:text-sm">加载中...</span>
-                    </div>
-                  ) : fileTree.length === 0 ? (
-                    <div className="p-4 text-center text-xs sm:text-sm text-muted-foreground">
-                      工作区为空
-                    </div>
+                  {!sidebarCollapsed ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <Folder className="h-4 w-4" />
+                        <span className="text-sm font-medium">文件树</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => currentSessionInfo && loadWorkspace(currentSessionInfo.nodeId)}
+                          disabled={workspaceLoading}
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${workspaceLoading ? 'animate-spin' : ''}`} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={toggleSidebarCollapse}
+                        >
+                          <ChevronLeft className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </>
                   ) : (
-                    currentSessionInfo && renderFileTree(fileTree, currentSessionInfo.nodeId)
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 mx-auto"
+                      onClick={toggleSidebarCollapse}
+                    >
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
                   )}
                 </div>
+
+                {/* File Tree Content */}
+                {!sidebarCollapsed && (
+                  <div className="py-2 overflow-y-auto flex-1">
+                    {workspaceLoading ? (
+                      <div className="p-4 text-center text-sm text-muted-foreground">
+                        <Loader2 className="h-5 w-5 sm:h-6 sm:w-6 animate-spin mx-auto mb-2" />
+                        <span className="text-xs sm:text-sm">加载中...</span>
+                      </div>
+                    ) : fileTree.length === 0 ? (
+                      <div className="p-4 text-center text-xs sm:text-sm text-muted-foreground">
+                        工作区为空
+                      </div>
+                    ) : (
+                      currentSessionInfo && renderFileTree(fileTree, currentSessionInfo.nodeId)
+                    )}
+                  </div>
+                )}
               </div>
+
+              {/* Resize Handle - Draggable divider */}
+              {!sidebarCollapsed && (
+                <div
+                  className="w-px hover:w-0.5 bg-border hover:bg-muted-foreground/50 cursor-col-resize shrink-0"
+                  onMouseDown={handleResizeStart}
+                  style={{
+                    width: isResizing ? '2px' : undefined,
+                    backgroundColor: isResizing ? 'hsl(var(--muted-foreground) / 0.5)' : undefined,
+                  }}
+                />
+              )}
 
               {/* Right: File Content Viewer */}
               <div className="flex-1 flex flex-col bg-muted/20 overflow-hidden">
