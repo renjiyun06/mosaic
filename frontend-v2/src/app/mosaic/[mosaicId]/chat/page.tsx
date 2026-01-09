@@ -790,10 +790,12 @@ export default function ChatPage() {
     }
   }, [sessionInputs, mosaicId])
 
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom when messages change or when switching back to chat view
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    if (viewMode === 'chat') {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    }
+  }, [messages, viewMode])
 
   // Cleanup pending session_started resolvers on unmount
   useEffect(() => {
