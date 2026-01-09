@@ -78,10 +78,12 @@ import {
   FolderTree,
   Circle,
   Menu,
+  Mic,
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
 import { useWebSocket } from "@/contexts/websocket-context"
+import { useVoiceInput } from "@/hooks/use-voice-input"
 import {
   SessionMode,
   SessionStatus,
@@ -139,6 +141,25 @@ const ChatInput = memo(function ChatInput({
 }: ChatInputProps) {
   const [input, setInput] = useState(initialValue)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const savedInputRef = useRef("")
+
+  // Voice input hook
+  const { isRecording, isSupported, interimText, finalText, start, stop } = useVoiceInput(
+    (final, interim) => {
+      // Update input with saved text + final + interim
+      const newInput = savedInputRef.current + final
+      setInput(newInput)
+      if (sessionId) {
+        onInputChange(sessionId, newInput)
+      }
+    },
+    {
+      lang: "zh-CN",
+      onError: (error) => {
+        console.error("Voice recognition error:", error)
+      }
+    }
+  )
 
   // Sync with external changes (e.g., session switch or clear after send)
   useEffect(() => {
@@ -202,20 +223,49 @@ const ChatInput = memo(function ChatInput({
     }
   }, [sessionId, onInterrupt])
 
+  // Handle voice input button click
+  const handleVoiceClick = useCallback(() => {
+    if (isRecording) {
+      stop()
+    } else {
+      // Save current input before starting recording
+      savedInputRef.current = input
+      start()
+    }
+  }, [isRecording, input, start, stop])
+
   return (
     <div className="border-t bg-background">
       <div className="bg-background overflow-hidden">
         <Textarea
           ref={textareaRef}
-          value={input}
+          value={isRecording ? savedInputRef.current + finalText + interimText : input}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          disabled={isLoading || !isConnected || !canSendMessage}
-          className="w-full resize-none overflow-y-auto border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-2 sm:px-3 pt-2 sm:pt-3 text-base"
+          placeholder={isRecording ? "🎤 Listening..." : placeholder}
+          disabled={isLoading || !isConnected || !canSendMessage || isRecording}
+          className={`w-full resize-none overflow-y-auto border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-2 sm:px-3 pt-2 sm:pt-3 text-base ${isRecording ? "opacity-70" : ""}`}
           style={{ minHeight: "24px" }}
         />
         <div className="flex justify-end px-2 pb-2 gap-2">
+          {/* Voice input button - only show if supported */}
+          {isSupported && !isLoading && (
+            <Button
+              onClick={handleVoiceClick}
+              variant={isRecording ? "destructive" : "outline"}
+              size="icon"
+              disabled={!isConnected || !canSendMessage}
+              className={isRecording ? "animate-pulse" : ""}
+            >
+              {isRecording ? (
+                <Circle className="h-4 w-4 fill-current" />
+              ) : (
+                <Mic className="h-4 w-4" />
+              )}
+            </Button>
+          )}
+
+          {/* Send/Interrupt button */}
           {isLoading ? (
             <Button onClick={handleInterruptClick} variant="destructive" size="icon">
               <StopCircle className="h-4 w-4" />
