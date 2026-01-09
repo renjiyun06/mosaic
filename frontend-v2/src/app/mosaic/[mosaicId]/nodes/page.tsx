@@ -596,7 +596,7 @@ export default function NodesPage() {
 
       {/* Create Node Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="sm:max-w-2xl max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-w-[calc(100vw-2rem)]">
           <DialogHeader>
             <DialogTitle className="text-lg sm:text-xl">创建新节点</DialogTitle>
             <DialogDescription className="text-sm">
@@ -709,7 +709,7 @@ export default function NodesPage() {
 
       {/* Edit Node Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-2xl max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-w-[calc(100vw-2rem)]">
           <DialogHeader>
             <DialogTitle className="text-lg sm:text-xl">编辑节点</DialogTitle>
             <DialogDescription className="text-sm break-words">
