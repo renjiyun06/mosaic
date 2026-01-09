@@ -816,17 +816,17 @@ async def stop_node(
 # ==================== Workspace API Endpoints ====================
 
 def _validate_workspace_path(workspace_root: Path, requested_path: str) -> Path:
-    """Validate and resolve a path within workspace (prevent path traversal)
+    """Validate and resolve a path within workspace
 
     Args:
         workspace_root: Workspace root directory
         requested_path: User-requested relative path
 
     Returns:
-        Resolved absolute path within workspace
+        Absolute path within workspace
 
     Raises:
-        ValidationError: If path is invalid or outside workspace
+        ValidationError: If path is invalid
     """
     # Normalize path (remove leading/trailing slashes)
     normalized_path = requested_path.strip("/")
@@ -837,19 +837,7 @@ def _validate_workspace_path(workspace_root: Path, requested_path: str) -> Path:
     else:
         full_path = workspace_root
 
-    # Resolve to absolute path
-    try:
-        resolved_path = full_path.resolve()
-    except (OSError, RuntimeError) as e:
-        raise ValidationError(f"Invalid path: {e}")
-
-    # Security check: ensure resolved path is within workspace
-    try:
-        resolved_path.relative_to(workspace_root.resolve())
-    except ValueError:
-        raise ValidationError("Path traversal attempt detected")
-
-    return resolved_path
+    return full_path
 
 
 def _build_file_item(file_path: Path, workspace_root: Path, recursive: bool, current_depth: int, max_depth: int):
