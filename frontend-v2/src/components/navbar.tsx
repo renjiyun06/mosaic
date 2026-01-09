@@ -64,7 +64,7 @@ export function Navbar({ onMenuClick, showMenuButton = false }: NavbarProps = {}
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex h-14 items-center">
+      <div className="flex h-11 items-center">
         {/* Mobile: hamburger + logo */}
         <div className="flex items-center px-4 sm:px-6 lg:hidden flex-1">
           {showMenuButton && (
@@ -87,7 +87,7 @@ export function Navbar({ onMenuClick, showMenuButton = false }: NavbarProps = {}
         </div>
 
         {/* Desktop: logo in sidebar area */}
-        <div className="hidden lg:flex items-center w-64 border-r px-4 h-14 flex-shrink-0">
+        <div className="hidden lg:flex items-center w-64 border-r px-4 h-11 flex-shrink-0">
           <Link href="/" className="flex items-center space-x-2">
             <Boxes className="h-6 w-6" />
             <span className="font-bold">Mosaic</span>
