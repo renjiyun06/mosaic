@@ -72,7 +72,6 @@ import {
   FileCode,
   RefreshCw,
   MoreVertical,
-  Search,
   List,
   LayoutList,
   FolderTree,
@@ -440,9 +439,8 @@ export default function ChatPage() {
   // View mode
   const [viewMode, setViewMode] = useState<ViewMode>('chat')
 
-  // Session list mode and search
+  // Session list mode
   const [sessionListMode, setSessionListMode] = useState<SessionListMode>('compact')
-  const [searchQuery, setSearchQuery] = useState('')
   const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null)
 
   // Node and session management
@@ -1117,23 +1115,6 @@ export default function ChatPage() {
     })
   }, [])
 
-  // Filter sessions based on search query
-  const filteredNodes = nodes.map(node => {
-    if (!searchQuery.trim()) return node
-
-    const query = searchQuery.toLowerCase()
-    const filteredSessions = node.sessions.filter(session =>
-      session.session_id.toLowerCase().includes(query) ||
-      session.mode.toLowerCase().includes(query) ||
-      (session.model && session.model.toLowerCase().includes(query))
-    )
-
-    return { ...node, sessions: filteredSessions }
-  }).filter(node => {
-    // Only filter out nodes with no sessions when searching
-    // Always show all nodes when not searching (even if they have no sessions)
-    return !searchQuery.trim() || node.sessions.length > 0
-  })
 
   // Handle copy session ID (referenced from sessions page)
   const handleCopySessionId = async (sessionId: string) => {
@@ -1548,14 +1529,14 @@ export default function ChatPage() {
           )}
 
           {/* Right: View mode toggle */}
-          <div className="flex items-center justify-end px-2 sm:px-4 md:px-6">
+          <div className="flex items-center justify-end pl-2 sm:pl-4 md:pl-6 pr-3">
             <Button
               variant="ghost"
               size="sm"
               className="h-8 text-xs"
               onClick={() => setViewMode(viewMode === 'chat' ? 'workspace' : 'chat')}
             >
-              {viewMode === 'chat' ? '切换到工作区' : '切换到聊天'}
+              {viewMode === 'chat' ? '切换到工作区' : '切换到聊天区'}
             </Button>
           </div>
         </div>
@@ -1736,19 +1717,6 @@ export default function ChatPage() {
           </TooltipProvider>
         </div>
 
-        {/* Search bar */}
-        <div className="px-3 py-2 border-b">
-          <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="搜索会话..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-8 h-8 text-sm"
-            />
-          </div>
-        </div>
-
         {/* Session tree */}
         <div
           className="flex-1 overflow-y-auto"
@@ -1757,23 +1725,14 @@ export default function ChatPage() {
             scrollbarColor: 'hsl(var(--border)) transparent'
           }}
         >
-          {filteredNodes.length === 0 ? (
+          {nodes.length === 0 ? (
             <div className="p-4 text-center text-sm text-muted-foreground">
-              {searchQuery ? (
-                <>
-                  <Search className="h-12 w-12 mx-auto mb-2 opacity-30" />
-                  <p>未找到匹配的会话</p>
-                </>
-              ) : (
-                <>
-                  <Bot className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                  <p>暂无 Claude Code 节点</p>
-                  <p className="text-xs mt-1">请先创建节点</p>
-                </>
-              )}
+              <Bot className="h-12 w-12 mx-auto mb-2 opacity-50" />
+              <p>暂无 Claude Code 节点</p>
+              <p className="text-xs mt-1">请先创建节点</p>
             </div>
           ) : (
-            filteredNodes.map((node) => (
+            nodes.map((node) => (
               <div key={node.node_id} className="border-b last:border-b-0">
                 {/* Node header */}
                 <div
@@ -2089,19 +2048,6 @@ export default function ChatPage() {
             </TooltipProvider>
           </SheetHeader>
 
-          {/* Search bar */}
-          <div className="px-3 py-2 border-b">
-            <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="搜索会话..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 h-8 text-sm"
-              />
-            </div>
-          </div>
-
           {/* Session tree */}
           <div
             className="flex-1 overflow-y-auto"
@@ -2110,23 +2056,14 @@ export default function ChatPage() {
               scrollbarColor: 'hsl(var(--border)) transparent'
             }}
           >
-            {filteredNodes.length === 0 ? (
+            {nodes.length === 0 ? (
               <div className="p-4 text-center text-sm text-muted-foreground">
-                {searchQuery ? (
-                  <>
-                    <Search className="h-12 w-12 mx-auto mb-2 opacity-30" />
-                    <p>未找到匹配的会话</p>
-                  </>
-                ) : (
-                  <>
-                    <Bot className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>暂无 Claude Code 节点</p>
-                    <p className="text-xs mt-1">请先创建节点</p>
-                  </>
-                )}
+                <Bot className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>暂无 Claude Code 节点</p>
+                <p className="text-xs mt-1">请先创建节点</p>
               </div>
             ) : (
-              filteredNodes.map((node) => (
+              nodes.map((node) => (
                 <div key={node.node_id} className="border-b last:border-b-0">
                   {/* Node header */}
                   <div
