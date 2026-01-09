@@ -1710,7 +1710,7 @@ export default function ChatPage() {
             <div className="flex-1 flex overflow-hidden">
               {/* Left: File Tree - Resizable & Collapsible */}
               <div
-                className="border-r bg-background overflow-hidden flex flex-col"
+                className="bg-background overflow-hidden flex flex-col"
                 style={{
                   width: sidebarCollapsed ? '48px' : `${sidebarWidth}px`,
                   minWidth: sidebarCollapsed ? '48px' : `${sidebarWidth}px`,
@@ -1780,13 +1780,18 @@ export default function ChatPage() {
               {/* Resize Handle - Draggable divider */}
               {!sidebarCollapsed && (
                 <div
-                  className="w-px hover:w-0.5 bg-border hover:bg-muted-foreground/50 cursor-col-resize shrink-0"
+                  className="relative shrink-0 cursor-col-resize group"
                   onMouseDown={handleResizeStart}
-                  style={{
-                    width: isResizing ? '2px' : undefined,
-                    backgroundColor: isResizing ? 'hsl(var(--muted-foreground) / 0.5)' : undefined,
-                  }}
-                />
+                  style={{ width: '16px' }}
+                >
+                  <div
+                    className="absolute left-1/2 top-0 bottom-0 -translate-x-1/2 w-px bg-border group-hover:w-0.5 group-hover:bg-muted-foreground/50"
+                    style={{
+                      width: isResizing ? '2px' : undefined,
+                      backgroundColor: isResizing ? 'hsl(var(--muted-foreground) / 0.5)' : undefined,
+                    }}
+                  />
+                </div>
               )}
 
               {/* Right: File Content Viewer */}
