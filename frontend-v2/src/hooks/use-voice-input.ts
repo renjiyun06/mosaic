@@ -35,8 +35,9 @@ export function useVoiceInput(
   const finalTextRef = useRef("")
   const isStoppingRef = useRef(false)
   const isStartingRef = useRef(false)
+  const stopPromiseRef = useRef<Promise<void> | null>(null)
 
-  // Check browser support and initialize SpeechRecognition
+  // Check browser support only, don't create recognition instance here
   useEffect(() => {
     if (typeof window === "undefined") return
 
@@ -51,69 +52,7 @@ export function useVoiceInput(
 
     setIsSupported(true)
 
-    const recognition = new SpeechRecognition()
-    recognition.continuous = continuous
-    recognition.interimResults = interimResults
-    recognition.lang = lang
-    recognition.maxAlternatives = 1
-
-    // Handle speech recognition results
-    recognition.onresult = (event: any) => {
-      let interim = ""
-      let final = ""
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript
-        if (event.results[i].isFinal) {
-          final += transcript
-        } else {
-          interim += transcript
-        }
-      }
-
-      // Update interim text
-      setInterimText(interim)
-
-      // Accumulate final text
-      if (final) {
-        finalTextRef.current += final
-        setFinalText(finalTextRef.current)
-        onTranscriptChange(finalTextRef.current, interim)
-      } else {
-        onTranscriptChange(finalTextRef.current, interim)
-      }
-    }
-
-    // Handle errors
-    recognition.onerror = (event: any) => {
-      console.error("Speech recognition error:", event.error)
-
-      // Don't treat "aborted" as error if we're intentionally stopping
-      if (event.error === "aborted" && isStoppingRef.current) {
-        return
-      }
-
-      const errorMessage = getErrorMessage(event.error)
-      onError?.(errorMessage)
-
-      // Stop recording on error
-      isStartingRef.current = false
-      isStoppingRef.current = false
-      setIsRecording(false)
-      setInterimText("")
-    }
-
-    // Handle recognition end
-    recognition.onend = () => {
-      console.log("Speech recognition ended")
-      isStartingRef.current = false
-      isStoppingRef.current = false
-      setIsRecording(false)
-      setInterimText("")
-    }
-
-    recognitionRef.current = recognition
-
+    // Cleanup on unmount
     return () => {
       if (recognitionRef.current) {
         try {
@@ -121,88 +60,206 @@ export function useVoiceInput(
         } catch (e) {
           // Ignore errors on cleanup
         }
+        recognitionRef.current = null
       }
     }
-  }, [lang, continuous, interimResults, onTranscriptChange, onError])
+  }, [])
+
+  // Stop recording
+  const stop = useCallback(() => {
+    // Return existing promise if already stopping
+    if (stopPromiseRef.current) {
+      return stopPromiseRef.current
+    }
+
+    // Create a promise that resolves when stop is complete
+    stopPromiseRef.current = new Promise<void>((resolve) => {
+      if (!recognitionRef.current) {
+        stopPromiseRef.current = null
+        resolve()
+        return
+      }
+
+      // Create a one-time onend handler
+      const handleStopComplete = () => {
+        console.log("Stop completed via onend")
+
+        // Clear all event handlers after completion to prevent conflicts
+        if (recognitionRef.current) {
+          recognitionRef.current.onresult = null
+          recognitionRef.current.onerror = null
+          recognitionRef.current.onstart = null
+          recognitionRef.current.onend = null
+        }
+
+        // Reset flags
+        isStoppingRef.current = false
+        isStartingRef.current = false
+        setIsRecording(false)
+        setInterimText("")
+
+        // Clear the promise ref
+        stopPromiseRef.current = null
+        resolve()
+      }
+
+      try {
+        isStoppingRef.current = true
+        recognitionRef.current.onend = handleStopComplete
+        recognitionRef.current.stop()
+
+        // Immediately update UI state
+        setIsRecording(false)
+        setInterimText("")
+
+        // Timeout protection in case onend doesn't fire
+        setTimeout(() => {
+          if (stopPromiseRef.current) {
+            console.log("Stop timeout - forcing completion")
+            handleStopComplete()
+          }
+        }, 500)
+      } catch (error: any) {
+        console.error("Failed to stop speech recognition:", error)
+
+        // Clear all event handlers
+        if (recognitionRef.current) {
+          recognitionRef.current.onresult = null
+          recognitionRef.current.onerror = null
+          recognitionRef.current.onstart = null
+          recognitionRef.current.onend = null
+        }
+
+        isStoppingRef.current = false
+        isStartingRef.current = false
+        setIsRecording(false)
+        setInterimText("")
+        stopPromiseRef.current = null
+        resolve()
+      }
+    })
+
+    return stopPromiseRef.current
+  }, [])
 
   // Start recording
-  const start = useCallback(() => {
-    if (!isSupported || !recognitionRef.current) {
+  const start = useCallback(async () => {
+    if (!isSupported) {
       onError?.("Browser does not support speech recognition")
       return
     }
 
-    // Prevent starting if already starting or stopping
-    if (isStartingRef.current || isStoppingRef.current) {
-      console.log("Recognition is busy, please wait")
+    // Prevent starting if already starting
+    if (isStartingRef.current) {
+      console.log("Already starting, please wait")
       return
     }
 
     try {
-      // Force stop any existing recognition session first
-      try {
-        recognitionRef.current.stop()
-      } catch (e) {
-        // Ignore errors from stopping (might not be running)
+      // Wait for any ongoing stop operation to complete
+      if (stopPromiseRef.current) {
+        console.log("Waiting for existing stop to complete...")
+        await stopPromiseRef.current
+        // Wait a bit more after stop completes
+        await new Promise(resolve => setTimeout(resolve, 50))
+      } else if (recognitionRef.current) {
+        // If there's a recognition instance but no stop in progress, clean it up
+        console.log("Cleaning up existing recognition...")
+        try {
+          // Clear all event handlers first to avoid conflicts
+          recognitionRef.current.onresult = null
+          recognitionRef.current.onerror = null
+          recognitionRef.current.onstart = null
+          recognitionRef.current.onend = null
+          recognitionRef.current.stop()
+        } catch (e) {
+          // Ignore errors from stopping
+        }
+        recognitionRef.current = null
+        // Wait for cleanup to complete
+        await new Promise(resolve => setTimeout(resolve, 100))
       }
+
+      // Create a fresh recognition instance to avoid state issues
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+      const recognition = new SpeechRecognition()
+      recognition.continuous = continuous
+      recognition.interimResults = interimResults
+      recognition.lang = lang
+      recognition.maxAlternatives = 1
+
+      // Set up event handlers for the new instance
+      recognition.onresult = (event: any) => {
+        let interim = ""
+        let final = ""
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript
+          if (event.results[i].isFinal) {
+            final += transcript
+          } else {
+            interim += transcript
+          }
+        }
+
+        setInterimText(interim)
+
+        if (final) {
+          finalTextRef.current += final
+          setFinalText(finalTextRef.current)
+          onTranscriptChange(finalTextRef.current, interim)
+        } else {
+          onTranscriptChange(finalTextRef.current, interim)
+        }
+      }
+
+      recognition.onerror = (event: any) => {
+        console.error("Speech recognition error:", event.error)
+
+        if (event.error === "aborted" && isStoppingRef.current) {
+          return
+        }
+
+        const errorMessage = getErrorMessage(event.error)
+        onError?.(errorMessage)
+
+        isStartingRef.current = false
+        isStoppingRef.current = false
+        setIsRecording(false)
+        setInterimText("")
+      }
+
+      recognition.onstart = () => {
+        console.log("Speech recognition started")
+        isStartingRef.current = false
+      }
+
+      recognitionRef.current = recognition
 
       // Reset state
       finalTextRef.current = ""
       setFinalText("")
       setInterimText("")
       isStartingRef.current = true
-      isStoppingRef.current = false
 
-      // Small delay to ensure previous session is fully stopped
-      setTimeout(() => {
-        try {
-          recognitionRef.current.start()
-          setIsRecording(true)
-        } catch (error: any) {
-          console.error("Failed to start speech recognition:", error)
-          isStartingRef.current = false
-          onError?.(error.message || "Failed to start speech recognition")
-          setIsRecording(false)
-        }
-      }, 100)
+      // Try to start the new recognition instance
+      try {
+        recognitionRef.current.start()
+        setIsRecording(true)
+        console.log("Speech recognition started successfully")
+      } catch (error: any) {
+        console.error("Failed to start speech recognition:", error)
+        isStartingRef.current = false
+        onError?.(error.message || "Failed to start speech recognition")
+        setIsRecording(false)
+      }
     } catch (error: any) {
       console.error("Failed to prepare speech recognition:", error)
       isStartingRef.current = false
       onError?.(error.message || "Failed to prepare speech recognition")
       setIsRecording(false)
     }
-  }, [isSupported, onError])
-
-  // Stop recording
-  const stop = useCallback(() => {
-    if (!recognitionRef.current) return
-
-    // Prevent stopping if already stopping
-    if (isStoppingRef.current) {
-      console.log("Already stopping")
-      return
-    }
-
-    try {
-      isStoppingRef.current = true
-      recognitionRef.current.stop()
-
-      // Immediately update UI state to prevent button from getting stuck
-      setIsRecording(false)
-      setInterimText("")
-
-      // Set a timeout to reset flags if onend doesn't fire
-      setTimeout(() => {
-        isStoppingRef.current = false
-        isStartingRef.current = false
-      }, 1000)
-    } catch (error: any) {
-      console.error("Failed to stop speech recognition:", error)
-      isStoppingRef.current = false
-      setIsRecording(false)
-      setInterimText("")
-    }
-  }, [])
+  }, [isSupported, onError, continuous, interimResults, lang, onTranscriptChange])
 
   return {
     isRecording,

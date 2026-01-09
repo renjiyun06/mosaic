@@ -229,13 +229,13 @@ const ChatInput = memo(function ChatInput({
   }, [sessionId, onInterrupt])
 
   // Handle voice input button click
-  const handleVoiceClick = useCallback(() => {
+  const handleVoiceClick = useCallback(async () => {
     if (isRecording) {
       stop()
     } else {
       // Save current input before starting recording
       savedInputRef.current = input
-      start()
+      await start()
     }
   }, [isRecording, input, start, stop])
 
