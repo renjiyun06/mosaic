@@ -54,6 +54,11 @@ import type {
   // SessionRouting types
   SessionRoutingOut,
 
+  // Workspace types
+  WorkspaceInfoOut,
+  WorkspaceFilesOut,
+  WorkspaceFileContentOut,
+
   // Utility types
   PaginatedData
 } from './types'

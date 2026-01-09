@@ -11,7 +11,7 @@
  * - Session creation, close, and archive
  */
 
-import { useState, useEffect, useRef, useCallback, Fragment } from "react"
+import { useState, useEffect, useRef, useCallback, Fragment, memo } from "react"
 import { useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -113,6 +113,265 @@ interface FileNode extends WorkspaceFileItem {
 type ViewMode = 'chat' | 'workspace'
 type SessionListMode = 'detailed' | 'compact'
 
+// ChatInput component - optimized to prevent parent re-renders on input
+interface ChatInputProps {
+  sessionId: string | null
+  initialValue: string
+  isLoading: boolean
+  isConnected: boolean
+  canSendMessage: boolean
+  placeholder: string
+  onSendMessage: (sessionId: string, message: string) => void
+  onInterrupt: (sessionId: string) => void
+  onInputChange: (sessionId: string, value: string) => void
+}
+
+const ChatInput = memo(function ChatInput({
+  sessionId,
+  initialValue,
+  isLoading,
+  isConnected,
+  canSendMessage,
+  placeholder,
+  onSendMessage,
+  onInterrupt,
+  onInputChange,
+}: ChatInputProps) {
+  const [input, setInput] = useState(initialValue)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Sync with external changes (e.g., session switch or clear after send)
+  useEffect(() => {
+    setInput(initialValue)
+  }, [initialValue])
+
+  // Auto-resize textarea based on content (optimized with direct DOM manipulation)
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+
+    // Reset height to auto to get the correct scrollHeight
+    textarea.style.height = "auto"
+
+    // Calculate new height (min 1 line, max 12 lines)
+    const lineHeight = 24 // approximate line height
+    const minHeight = lineHeight * 1 // 1 line for input
+    const maxHeight = lineHeight * 12 // max 12 lines before scroll
+
+    const newHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)
+    textarea.style.height = `${newHeight}px`
+  }, [input])
+
+  // Auto-focus textarea when loading finishes
+  useEffect(() => {
+    if (!isLoading && sessionId && isConnected && textareaRef.current) {
+      textareaRef.current.focus()
+    }
+  }, [isLoading, sessionId, isConnected])
+
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value
+    setInput(value)
+    if (sessionId) {
+      onInputChange(sessionId, value)
+    }
+  }, [sessionId, onInputChange])
+
+  const handleSend = useCallback(() => {
+    if (!input.trim() || !sessionId || !isConnected || !canSendMessage || isLoading) return
+
+    onSendMessage(sessionId, input)
+    setInput("")
+
+    // Reset textarea height
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto"
+    }
+  }, [input, sessionId, isConnected, canSendMessage, isLoading, onSendMessage])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && e.ctrlKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }, [handleSend])
+
+  const handleInterruptClick = useCallback(() => {
+    if (sessionId) {
+      onInterrupt(sessionId)
+    }
+  }, [sessionId, onInterrupt])
+
+  return (
+    <div className="border-t bg-background">
+      <div className="bg-background overflow-hidden">
+        <Textarea
+          ref={textareaRef}
+          value={input}
+          onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          disabled={isLoading || !isConnected || !canSendMessage}
+          className="w-full resize-none overflow-y-auto border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-2 sm:px-3 pt-2 sm:pt-3 text-base"
+          style={{ minHeight: "24px" }}
+        />
+        <div className="flex justify-end px-2 pb-2 gap-2">
+          {isLoading ? (
+            <Button onClick={handleInterruptClick} variant="destructive" size="icon">
+              <StopCircle className="h-4 w-4" />
+            </Button>
+          ) : (
+            <Button
+              onClick={handleSend}
+              disabled={!input.trim() || !isConnected || !canSendMessage}
+              size="icon"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+})
+
+// MessageItem component - optimized with memo to prevent re-renders
+interface MessageItemProps {
+  message: ParsedMessage
+  isCollapsed: boolean
+  onToggleCollapse: (messageId: string) => void
+}
+
+const MessageItem = memo(function MessageItem({
+  message: msg,
+  isCollapsed,
+  onToggleCollapse,
+}: MessageItemProps) {
+  // Don't render assistant_result messages (stats shown in header)
+  if (msg.message_type === MessageType.ASSISTANT_RESULT) {
+    return null
+  }
+
+  const isUser = msg.role === MessageRole.USER
+  const isThinking = msg.message_type === MessageType.ASSISTANT_THINKING
+  const isSystemMessage = msg.message_type === MessageType.SYSTEM_MESSAGE
+  const isToolUse = msg.message_type === MessageType.ASSISTANT_TOOL_USE
+  const isToolOutput = msg.message_type === MessageType.ASSISTANT_TOOL_OUTPUT
+  const isCollapsible = isThinking || isSystemMessage || isToolUse || isToolOutput
+
+  const handleToggle = useCallback(() => {
+    onToggleCollapse(msg.message_id)
+  }, [msg.message_id, onToggleCollapse])
+
+  return (
+    <div
+      className={`flex ${isUser ? "justify-end" : "justify-start"} mb-3 sm:mb-4`}
+    >
+      <div
+        className={`max-w-[85%] sm:max-w-[80%] md:max-w-[70%] rounded-lg ${
+          isUser ? "bg-primary text-primary-foreground" : "bg-muted"
+        } ${isCollapsible ? "px-2 py-1" : "px-3 sm:px-4 py-2"}`}
+      >
+        {isThinking ? (
+          <div>
+            <div
+              className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
+              onClick={handleToggle}
+            >
+              {isCollapsed ? (
+                <ChevronRight className="h-3 w-3 opacity-70" />
+              ) : (
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              )}
+              <span className="text-xs opacity-70">💭 思考中...</span>
+            </div>
+            {!isCollapsed && (
+              <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0">
+                {msg.contentParsed.message}
+              </div>
+            )}
+          </div>
+        ) : isSystemMessage ? (
+          <div>
+            <div
+              className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
+              onClick={handleToggle}
+            >
+              {isCollapsed ? (
+                <ChevronRight className="h-3 w-3 opacity-70" />
+              ) : (
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              )}
+              <span className="text-xs opacity-70">🔔 系统消息</span>
+            </div>
+            {!isCollapsed && (
+              <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0">
+                {msg.contentParsed.message}
+              </div>
+            )}
+          </div>
+        ) : isToolUse ? (
+          <div>
+            <div
+              className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
+              onClick={handleToggle}
+            >
+              {isCollapsed ? (
+                <ChevronRight className="h-3 w-3 opacity-70" />
+              ) : (
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              )}
+              <span className="text-xs opacity-70">🔧 {msg.contentParsed.tool_name}</span>
+            </div>
+            {!isCollapsed && (
+              <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0 font-mono">
+                {JSON.stringify(msg.contentParsed.tool_input, null, 2)}
+              </div>
+            )}
+          </div>
+        ) : isToolOutput ? (
+          <div>
+            <div
+              className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
+              onClick={handleToggle}
+            >
+              {isCollapsed ? (
+                <ChevronRight className="h-3 w-3 opacity-70" />
+              ) : (
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              )}
+              <span className="text-xs opacity-70">
+                📤 {msg.contentParsed?.tool_name || 'Tool'} 结果
+                {(msg.contentParsed?.tool_output === null || msg.contentParsed?.tool_output === undefined) && (
+                  <span className="ml-1 text-xs opacity-50">(空)</span>
+                )}
+              </span>
+            </div>
+            {!isCollapsed && (
+              <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0 font-mono">
+                {(() => {
+                  const output = msg.contentParsed?.tool_output
+                  if (output === undefined || output === null) {
+                    return <span className="text-muted-foreground italic">工具执行完成，无返回输出</span>
+                  }
+                  if (typeof output === 'string') {
+                    return output.trim() || <span className="text-muted-foreground italic">空字符串</span>
+                  }
+                  return JSON.stringify(output, null, 2)
+                })()}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-sm whitespace-pre-wrap break-words">
+            {msg.contentParsed.message}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+})
+
 export default function ChatPage() {
   const params = useParams()
   const { token } = useAuth()
@@ -157,7 +416,6 @@ export default function ChatPage() {
   })
   // Store loading state per session to allow independent message sending
   const [sessionLoadings, setSessionLoadings] = useState<Record<string, boolean>>({})
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Get current session's input and loading state
   const currentInput = activeSessionId ? (sessionInputs[activeSessionId] || "") : ""
@@ -452,10 +710,6 @@ export default function ChatPage() {
 
   // Auto-scroll to bottom
   useEffect(() => {
-    console.log("[Chat] Messages changed, count:", messages.length)
-    if (messages.length > 0) {
-      console.log("[Chat] Message IDs in state:", messages.map(m => `${m.message_id.slice(0, 8)} (seq: ${m.sequence})`))
-    }
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
@@ -599,74 +853,51 @@ export default function ChatPage() {
     }
   }
 
-  const handleSendMessage = () => {
-    const input = currentInput
-    if (!input.trim() || !activeSessionId || !isConnected || currentLoading) return
-
+  // Callback for ChatInput component - send message
+  const handleSendMessage = useCallback((sessionId: string, message: string) => {
     try {
       // Send message via global WebSocket
-      sendMessage(activeSessionId, input)
+      sendMessage(sessionId, message)
       // Clear current session's input
       setSessionInputs(prev => ({
         ...prev,
-        [activeSessionId]: ""
+        [sessionId]: ""
       }))
       // Set current session's loading state
       setSessionLoadings(prev => ({
         ...prev,
-        [activeSessionId]: true
+        [sessionId]: true
       }))
-      // Reset textarea height
-      if (textareaRef.current) {
-        textareaRef.current.style.height = "auto"
-      }
     } catch (error) {
       console.error("Failed to send message:", error)
       setSessionLoadings(prev => ({
         ...prev,
-        [activeSessionId]: false
+        [sessionId]: false
       }))
     }
-  }
+  }, [sendMessage])
 
-  // Auto-resize textarea based on content
-  useEffect(() => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-
-    // Reset height to auto to get the correct scrollHeight
-    textarea.style.height = "auto"
-
-    // Calculate new height (min 1 line, max 12 lines)
-    const lineHeight = 24 // approximate line height
-    const minHeight = lineHeight * 1 // 1 line for input
-    const maxHeight = lineHeight * 12 // max 12 lines before scroll
-
-    const newHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)
-    textarea.style.height = `${newHeight}px`
-  }, [currentInput])
-
-  // Auto-focus textarea when loading finishes
-  useEffect(() => {
-    if (!currentLoading && activeSessionId && isConnected && textareaRef.current) {
-      textareaRef.current.focus()
-    }
-  }, [currentLoading, activeSessionId, isConnected])
-
-  const handleInterrupt = () => {
-    if (!activeSessionId || !isConnected || !currentLoading) return
-
+  // Callback for ChatInput component - interrupt
+  const handleInterrupt = useCallback((sessionId: string) => {
     try {
       // Send interrupt via global WebSocket
-      interrupt(activeSessionId)
+      interrupt(sessionId)
       setSessionLoadings(prev => ({
         ...prev,
-        [activeSessionId]: false
+        [sessionId]: false
       }))
     } catch (error) {
       console.error("Failed to interrupt session:", error)
     }
-  }
+  }, [interrupt])
+
+  // Callback for ChatInput component - track input changes
+  const handleInputChange = useCallback((sessionId: string, value: string) => {
+    setSessionInputs(prev => ({
+      ...prev,
+      [sessionId]: value
+    }))
+  }, [])
 
   const openCreateDialog = (nodeId: string) => {
     setSelectedNodeId(nodeId)
@@ -819,7 +1050,7 @@ export default function ChatPage() {
     currentSessionInfo.nodeStatus === NodeStatus.RUNNING &&
     currentSessionInfo.session.status === SessionStatus.ACTIVE
 
-  const toggleThinkingCollapse = (messageId: string) => {
+  const toggleThinkingCollapse = useCallback((messageId: string) => {
     setCollapsedMessages((prev) => {
       const newSet = new Set(prev)
       if (newSet.has(messageId)) {
@@ -829,7 +1060,7 @@ export default function ChatPage() {
       }
       return newSet
     })
-  }
+  }, [])
 
   // Filter sessions based on search query
   const filteredNodes = nodes.map(node => {
@@ -1178,150 +1409,6 @@ export default function ChatPage() {
     ))
   }
 
-  const renderMessage = (msg: ParsedMessage) => {
-    console.log("[Chat] renderMessage called for:", {
-      message_id: msg.message_id,
-      message_type: msg.message_type,
-      role: msg.role,
-      sequence: msg.sequence
-    })
-
-    // Don't render assistant_result messages (stats shown in header)
-    if (msg.message_type === MessageType.ASSISTANT_RESULT) {
-      console.log("[Chat] Skipping ASSISTANT_RESULT message:", msg.message_id)
-      return null
-    }
-
-    const isUser = msg.role === MessageRole.USER
-    const isThinking = msg.message_type === MessageType.ASSISTANT_THINKING
-    const isSystemMessage = msg.message_type === MessageType.SYSTEM_MESSAGE
-    const isToolUse = msg.message_type === MessageType.ASSISTANT_TOOL_USE
-    const isToolOutput = msg.message_type === MessageType.ASSISTANT_TOOL_OUTPUT
-    const isCollapsible = isThinking || isSystemMessage || isToolUse || isToolOutput
-    const isCollapsed = isCollapsible && collapsedMessages.has(msg.message_id)
-
-    // Debug log for tool_output messages
-    if (isToolOutput) {
-      console.log("[Chat] Rendering tool_output:", {
-        message_id: msg.message_id,
-        tool_name: msg.contentParsed?.tool_name,
-        tool_output_type: typeof msg.contentParsed?.tool_output,
-        tool_output_length: typeof msg.contentParsed?.tool_output === 'string'
-          ? msg.contentParsed.tool_output.length
-          : JSON.stringify(msg.contentParsed?.tool_output || {}).length,
-        payload: msg.contentParsed
-      })
-    }
-
-    return (
-      <div
-        className={`flex ${isUser ? "justify-end" : "justify-start"} mb-3 sm:mb-4`}
-      >
-        <div
-          className={`max-w-[85%] sm:max-w-[80%] md:max-w-[70%] rounded-lg ${
-            isUser ? "bg-primary text-primary-foreground" : "bg-muted"
-          } ${isCollapsible ? "px-2 py-1" : "px-3 sm:px-4 py-2"}`}
-        >
-          {isThinking ? (
-            <div>
-              <div
-                className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
-                onClick={() => toggleThinkingCollapse(msg.message_id)}
-              >
-                {isCollapsed ? (
-                  <ChevronRight className="h-3 w-3 opacity-70" />
-                ) : (
-                  <ChevronDown className="h-3 w-3 opacity-70" />
-                )}
-                <span className="text-xs opacity-70">💭 思考中...</span>
-              </div>
-              {!isCollapsed && (
-                <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0">
-                  {msg.contentParsed.message}
-                </div>
-              )}
-            </div>
-          ) : isSystemMessage ? (
-            <div>
-              <div
-                className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
-                onClick={() => toggleThinkingCollapse(msg.message_id)}
-              >
-                {isCollapsed ? (
-                  <ChevronRight className="h-3 w-3 opacity-70" />
-                ) : (
-                  <ChevronDown className="h-3 w-3 opacity-70" />
-                )}
-                <span className="text-xs opacity-70">🔔 系统消息</span>
-              </div>
-              {!isCollapsed && (
-                <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0">
-                  {msg.contentParsed.message}
-                </div>
-              )}
-            </div>
-          ) : isToolUse ? (
-            <div>
-              <div
-                className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
-                onClick={() => toggleThinkingCollapse(msg.message_id)}
-              >
-                {isCollapsed ? (
-                  <ChevronRight className="h-3 w-3 opacity-70" />
-                ) : (
-                  <ChevronDown className="h-3 w-3 opacity-70" />
-                )}
-                <span className="text-xs opacity-70">🔧 {msg.contentParsed.tool_name}</span>
-              </div>
-              {!isCollapsed && (
-                <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0 font-mono">
-                  {JSON.stringify(msg.contentParsed.tool_input, null, 2)}
-                </div>
-              )}
-            </div>
-          ) : isToolOutput ? (
-            <div>
-              <div
-                className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
-                onClick={() => toggleThinkingCollapse(msg.message_id)}
-              >
-                {isCollapsed ? (
-                  <ChevronRight className="h-3 w-3 opacity-70" />
-                ) : (
-                  <ChevronDown className="h-3 w-3 opacity-70" />
-                )}
-                <span className="text-xs opacity-70">
-                  📤 {msg.contentParsed?.tool_name || 'Tool'} 结果
-                  {(msg.contentParsed?.tool_output === null || msg.contentParsed?.tool_output === undefined) && (
-                    <span className="ml-1 text-xs opacity-50">(空)</span>
-                  )}
-                </span>
-              </div>
-              {!isCollapsed && (
-                <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0 font-mono">
-                  {(() => {
-                    const output = msg.contentParsed?.tool_output
-                    if (output === undefined || output === null) {
-                      return <span className="text-muted-foreground italic">工具执行完成，无返回输出</span>
-                    }
-                    if (typeof output === 'string') {
-                      return output.trim() || <span className="text-muted-foreground italic">空字符串</span>
-                    }
-                    return JSON.stringify(output, null, 2)
-                  })()}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-sm whitespace-pre-wrap break-words">
-              {msg.contentParsed.message}
-            </div>
-          )}
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="flex absolute inset-0 overflow-hidden">
       {/* Mobile session list button - Fixed on right edge */}
@@ -1457,99 +1544,41 @@ export default function ChatPage() {
                 </div>
               ) : (
                 <>
-                  {(() => {
-                    console.log("[Chat] Rendering messages, total count:", messages.length)
-                    console.log("[Chat] Message IDs:", messages.map(m => m.message_id))
-
-                    // Check for tool_output messages
-                    const toolOutputCount = messages.filter(m => m.message_type === MessageType.ASSISTANT_TOOL_OUTPUT).length
-                    if (toolOutputCount > 0) {
-                      console.log(`[Chat] Found ${toolOutputCount} tool_output messages in render queue`)
-                      console.log("[Chat] Tool output messages:", messages
-                        .filter(m => m.message_type === MessageType.ASSISTANT_TOOL_OUTPUT)
-                        .map(m => ({
-                          message_id: m.message_id,
-                          sequence: m.sequence,
-                          message_type: m.message_type,
-                          contentParsed: m.contentParsed
-                        }))
-                      )
-                    }
-
-                    // Check for duplicate message_ids
-                    const ids = messages.map(m => m.message_id)
-                    const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index)
-                    if (duplicates.length > 0) {
-                      console.error("[Chat] DUPLICATE message_ids found:", duplicates)
-                    }
-
-                    return messages.map((msg) => {
-                      console.log("[Chat] Mapping message:", msg.message_id)
-                      // Use message_id as key since it's guaranteed to exist and be unique
-                      return (
-                        <Fragment key={msg.message_id}>
-                          {renderMessage(msg)}
-                        </Fragment>
-                      )
-                    })
-                  })()}
+                  {messages.map((msg) => (
+                    <MessageItem
+                      key={msg.message_id}
+                      message={msg}
+                      isCollapsed={collapsedMessages.has(msg.message_id)}
+                      onToggleCollapse={toggleThinkingCollapse}
+                    />
+                  ))}
                   <div ref={messagesEndRef} />
                 </>
               )}
             </div>
 
             {/* Input Area */}
-            <div className="border-t bg-background">
-              <div className="bg-background overflow-hidden">
-                <Textarea
-                  ref={textareaRef}
-                  value={currentInput}
-                  onChange={(e) => {
-                    if (activeSessionId) {
-                      setSessionInputs(prev => ({
-                        ...prev,
-                        [activeSessionId]: e.target.value
-                      }))
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && e.ctrlKey) {
-                      e.preventDefault()
-                      handleSendMessage()
-                    }
-                  }}
-                  placeholder={
-                    !currentSessionInfo
-                      ? "请选择会话"
-                      : currentSessionInfo.session.status === SessionStatus.CLOSED
-                      ? "会话已关闭，只能查看内容"
-                      : currentSessionInfo.nodeStatus !== NodeStatus.RUNNING
-                      ? "节点未运行，无法发送消息"
-                      : !isConnected
-                      ? "WebSocket 连接中..."
-                      : "输入消息... (Ctrl+Enter发送)"
-                  }
-                  disabled={currentLoading || !isConnected || !canSendMessage}
-                  className="w-full resize-none overflow-y-auto border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-2 sm:px-3 pt-2 sm:pt-3 text-base"
-                  style={{ minHeight: "24px" }}
-                />
-                <div className="flex justify-end px-2 pb-2 gap-2">
-                  {currentLoading ? (
-                    <Button onClick={handleInterrupt} variant="destructive" size="icon">
-                      <StopCircle className="h-4 w-4" />
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={handleSendMessage}
-                      disabled={!currentInput.trim() || !isConnected || !canSendMessage}
-                      size="icon"
-                    >
-                      <Send className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
+            <ChatInput
+              sessionId={activeSessionId}
+              initialValue={currentInput}
+              isLoading={currentLoading}
+              isConnected={isConnected}
+              canSendMessage={!!canSendMessage}
+              placeholder={
+                !currentSessionInfo
+                  ? "请选择会话"
+                  : currentSessionInfo.session.status === SessionStatus.CLOSED
+                  ? "会话已关闭，只能查看内容"
+                  : currentSessionInfo.nodeStatus !== NodeStatus.RUNNING
+                  ? "节点未运行，无法发送消息"
+                  : !isConnected
+                  ? "WebSocket 连接中..."
+                  : "输入消息... (Ctrl+Enter发送)"
+              }
+              onSendMessage={handleSendMessage}
+              onInterrupt={handleInterrupt}
+              onInputChange={handleInputChange}
+            />
           </>
         )
         ) : (

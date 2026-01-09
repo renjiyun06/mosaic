@@ -244,7 +244,7 @@ export default function SessionTopologyPage() {
         source: session.parent_session_id!,
         target: session.session_id,
         type: 'smoothstep',
-        animated: session.status === 'active' || session.status === 'ACTIVE',
+        animated: session.status === SessionStatus.ACTIVE,
         style: {
           stroke: '#94a3b8',
           strokeWidth: 2
