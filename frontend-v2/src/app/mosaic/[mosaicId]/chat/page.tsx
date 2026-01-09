@@ -520,6 +520,11 @@ export default function ChatPage() {
   const [closingSession, setClosingSession] = useState<{ sessionId: string; nodeId: string } | null>(null)
   const [closing, setClosing] = useState(false)
 
+  // Batch archive confirmation dialog state
+  const [batchArchiveDialogOpen, setBatchArchiveDialogOpen] = useState(false)
+  const [batchArchivingNode, setBatchArchivingNode] = useState<{ nodeId: string; closedSessionIds: string[] } | null>(null)
+  const [batchArchiving, setBatchArchiving] = useState(false)
+
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const maxSequenceRef = useRef<number>(0) // Track max sequence number for gap detection
@@ -1132,6 +1137,69 @@ export default function ChatPage() {
       }
     } catch (error) {
       console.error("Failed to archive session:", error)
+    }
+  }
+
+  const openBatchArchiveDialog = (nodeId: string) => {
+    const node = nodes.find(n => n.node_id === nodeId)
+    if (!node) return
+
+    const closedSessions = node.sessions.filter(s => s.status === SessionStatus.CLOSED)
+    if (closedSessions.length === 0) return
+
+    setBatchArchivingNode({
+      nodeId,
+      closedSessionIds: closedSessions.map(s => s.session_id)
+    })
+    setBatchArchiveDialogOpen(true)
+  }
+
+  const handleBatchArchive = async () => {
+    if (!batchArchivingNode) return
+
+    try {
+      setBatchArchiving(true)
+      const result = await apiClient.batchArchiveSessions(mosaicId, batchArchivingNode.nodeId)
+
+      // Remove archived sessions from current list
+      setNodes((prev) =>
+        prev.map((node) => {
+          if (node.node_id === batchArchivingNode.nodeId) {
+            return {
+              ...node,
+              sessions: node.sessions.filter(
+                (s) => !batchArchivingNode.closedSessionIds.includes(s.session_id)
+              ),
+            }
+          }
+          return node
+        })
+      )
+
+      // Clear input content for archived sessions
+      setSessionInputs(prev => {
+        const newInputs = { ...prev }
+        batchArchivingNode.closedSessionIds.forEach(sessionId => {
+          delete newInputs[sessionId]
+        })
+        return newInputs
+      })
+
+      // If active session was archived, clear selection
+      if (activeSessionId && batchArchivingNode.closedSessionIds.includes(activeSessionId)) {
+        setActiveSessionId(null)
+      }
+
+      // Show result message
+      if (result.failed_sessions.length > 0) {
+        console.warn(`批量归档完成，但有 ${result.failed_sessions.length} 个会话失败`)
+      }
+
+      setBatchArchiveDialogOpen(false)
+    } catch (error) {
+      console.error("Failed to batch archive sessions:", error)
+    } finally {
+      setBatchArchiving(false)
     }
   }
 
@@ -1920,11 +1988,43 @@ export default function ChatPage() {
                       </Tooltip>
                     </TooltipProvider>
 
-                    {/* Session count and create button */}
+                    {/* Session count and buttons */}
                     <div className="flex items-center gap-1 shrink-0">
                       <span className="text-xs text-muted-foreground">
                         {node.sessions.length}
                       </span>
+
+                      {/* Batch archive button - only show if there are closed sessions */}
+                      {(() => {
+                        const closedCount = node.sessions.filter(s => s.status === SessionStatus.CLOSED).length
+                        if (closedCount > 0) {
+                          return (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 w-6 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-100"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      openBatchArchiveDialog(node.node_id)
+                                    }}
+                                  >
+                                    <Archive className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  批量归档已关闭会话
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )
+                        }
+                        return null
+                      })()}
+
+                      {/* Create session button */}
                       <Button
                         variant="ghost"
                         size="sm"
@@ -2154,6 +2254,64 @@ export default function ChatPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Batch Archive Confirmation Dialog */}
+      <Dialog open={batchArchiveDialogOpen} onOpenChange={setBatchArchiveDialogOpen}>
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>批量归档会话</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-4">
+            <p className="text-sm text-muted-foreground">
+              确定要归档 <span className="font-semibold text-foreground">{batchArchivingNode?.nodeId}</span> 节点下的{" "}
+              <span className="font-semibold text-foreground">{batchArchivingNode?.closedSessionIds.length}</span>{" "}
+              个已关闭会话吗？
+            </p>
+            {batchArchivingNode && batchArchivingNode.closedSessionIds.length > 0 && (
+              <div className="bg-muted/50 rounded-md p-3 space-y-1">
+                <p className="text-xs font-medium text-muted-foreground mb-2">会话列表：</p>
+                {batchArchivingNode.closedSessionIds.slice(0, 5).map((sessionId) => (
+                  <p key={sessionId} className="text-xs font-mono text-muted-foreground">
+                    • {sessionId.slice(0, 8)}
+                  </p>
+                ))}
+                {batchArchivingNode.closedSessionIds.length > 5 && (
+                  <p className="text-xs text-muted-foreground">
+                    ... 等 {batchArchivingNode.closedSessionIds.length - 5} 个会话
+                  </p>
+                )}
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground">
+              归档后这些会话将不再显示在列表中。
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setBatchArchiveDialogOpen(false)}
+              disabled={batchArchiving}
+            >
+              取消
+            </Button>
+            <Button
+              variant="default"
+              onClick={handleBatchArchive}
+              disabled={batchArchiving}
+              className="bg-orange-600 hover:bg-orange-700"
+            >
+              {batchArchiving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  归档中...
+                </>
+              ) : (
+                "确认归档"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Mobile Session List Sheet */}
       <Sheet open={sessionSheetOpen} onOpenChange={setSessionSheetOpen}>
         <SheetContent side="right" className="p-0 w-[85vw] sm:w-96" showClose={false}>
@@ -2251,11 +2409,44 @@ export default function ChatPage() {
                         </Tooltip>
                       </TooltipProvider>
 
-                      {/* Session count and create button */}
+                      {/* Session count and buttons */}
                       <div className="flex items-center gap-1 shrink-0">
                         <span className="text-xs text-muted-foreground">
                           {node.sessions.length}
                         </span>
+
+                        {/* Batch archive button - only show if there are closed sessions */}
+                        {(() => {
+                          const closedCount = node.sessions.filter(s => s.status === SessionStatus.CLOSED).length
+                          if (closedCount > 0) {
+                            return (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 w-6 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-100"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        openBatchArchiveDialog(node.node_id)
+                                        setSessionSheetOpen(false)
+                                      }}
+                                    >
+                                      <Archive className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    批量归档已关闭会话
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )
+                          }
+                          return null
+                        })()}
+
+                        {/* Create session button */}
                         <Button
                           variant="ghost"
                           size="sm"

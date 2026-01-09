@@ -623,6 +623,23 @@ class ApiClient {
   }
 
   /**
+   * Batch archive all closed sessions
+   */
+  async batchArchiveSessions(mosaicId: number, nodeId?: string): Promise<{ archived_count: number; failed_sessions: string[] }> {
+    const queryParams = new URLSearchParams()
+    if (nodeId) queryParams.append('node_id', nodeId)
+
+    const url = `/api/mosaics/${mosaicId}/sessions/batch-archive${queryParams.toString() ? '?' + queryParams.toString() : ''}`
+    return request<{ archived_count: number; failed_sessions: string[] }>(url, {
+      method: 'POST',
+      autoToast: {
+        success: false,
+        error: true
+      }
+    })
+  }
+
+  /**
    * List sessions with filters and pagination
    */
   async listSessions(mosaicId: number, nodeId?: string, params?: ListSessionsRequest): Promise<PaginatedData<SessionOut>> {

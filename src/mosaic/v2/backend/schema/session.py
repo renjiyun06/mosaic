@@ -116,3 +116,13 @@ class SessionTopologyResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class BatchArchiveResponse(BaseModel):
+    """Batch archive sessions response"""
+
+    archived_count: int = Field(..., description="Number of sessions successfully archived")
+    failed_sessions: list[str] = Field(default_factory=list, description="List of session IDs that failed to archive")
+
+    class Config:
+        from_attributes = True

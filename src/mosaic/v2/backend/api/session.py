@@ -10,7 +10,7 @@ from sqlalchemy import select, func, text
 from typing import Annotated, Optional
 
 from ..schema.response import SuccessResponse, PaginatedData
-from ..schema.session import CreateSessionRequest, SessionOut, SessionTopologyNode, SessionTopologyResponse
+from ..schema.session import CreateSessionRequest, SessionOut, SessionTopologyNode, SessionTopologyResponse, BatchArchiveResponse
 from ..model import Session, Node, Mosaic
 from ..dep import get_db_session, get_current_user
 from ..model.user import User
@@ -351,6 +351,90 @@ async def archive_session(
     )
 
     return SuccessResponse(data=session_out)
+
+
+@router.post("/batch-archive", response_model=SuccessResponse[BatchArchiveResponse])
+async def batch_archive_sessions(
+    mosaic_id: int,
+    session: SessionDep,
+    current_user: CurrentUserDep,
+    node_id: Optional[str] = Query(None, description="Filter by node ID to archive only closed sessions of this node"),
+):
+    """Batch archive all closed sessions
+
+    Business logic:
+    1. Query all closed sessions for current user in mosaic
+    2. Optionally filter by node_id if provided
+    3. Update all sessions to ARCHIVED status
+    4. Return count of archived sessions
+
+    Query Parameters:
+    - node_id: Optional node ID to only archive sessions from specific node
+
+    Validation Rules:
+    - Only CLOSED sessions will be archived (ACTIVE and ARCHIVED sessions are skipped)
+    - User must own the mosaic
+
+    Returns:
+        BatchArchiveResponse with archived_count and failed_sessions list
+    """
+    logger.info(
+        f"Batch archiving sessions: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"user_id={current_user.id}"
+    )
+
+    # 1. Query all closed sessions
+    stmt = select(Session).where(
+        Session.mosaic_id == mosaic_id,
+        Session.user_id == current_user.id,
+        Session.status == SessionStatus.CLOSED,
+        Session.deleted_at.is_(None)
+    )
+
+    # Apply node_id filter if provided
+    if node_id:
+        stmt = stmt.where(Session.node_id == node_id)
+
+    result = await session.execute(stmt)
+    closed_sessions = result.scalars().all()
+
+    if not closed_sessions:
+        logger.info(f"No closed sessions to archive: mosaic_id={mosaic_id}, node_id={node_id}")
+        return SuccessResponse(data=BatchArchiveResponse(
+            archived_count=0,
+            failed_sessions=[]
+        ))
+
+    # 2. Update all sessions to ARCHIVED
+    archived_count = 0
+    failed_sessions = []
+    now = datetime.now()
+
+    for db_session in closed_sessions:
+        try:
+            db_session.status = SessionStatus.ARCHIVED
+            db_session.updated_at = now
+            archived_count += 1
+        except Exception as e:
+            logger.error(f"Failed to archive session {db_session.session_id}: {e}")
+            failed_sessions.append(db_session.session_id)
+
+    # 3. Commit changes
+    try:
+        await session.flush()
+        logger.info(
+            f"Batch archived {archived_count} sessions: mosaic_id={mosaic_id}, "
+            f"node_id={node_id}, failed={len(failed_sessions)}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to commit batch archive: {e}")
+        raise
+
+    # 4. Construct response
+    return SuccessResponse(data=BatchArchiveResponse(
+        archived_count=archived_count,
+        failed_sessions=failed_sessions
+    ))
 
 
 @router.get("", response_model=SuccessResponse[PaginatedData[SessionOut]])
