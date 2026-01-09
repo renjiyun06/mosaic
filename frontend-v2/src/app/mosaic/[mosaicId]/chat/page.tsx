@@ -201,6 +201,11 @@ const ChatInput = memo(function ChatInput({
   const handleSend = useCallback(() => {
     if (!input.trim() || !sessionId || !isConnected || !canSendMessage || isLoading) return
 
+    // Stop voice recording if it's active
+    if (isRecording) {
+      stop()
+    }
+
     onSendMessage(sessionId, input)
     setInput("")
 
@@ -208,7 +213,7 @@ const ChatInput = memo(function ChatInput({
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto"
     }
-  }, [input, sessionId, isConnected, canSendMessage, isLoading, onSendMessage])
+  }, [input, sessionId, isConnected, canSendMessage, isLoading, isRecording, stop, onSendMessage])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && e.ctrlKey) {
