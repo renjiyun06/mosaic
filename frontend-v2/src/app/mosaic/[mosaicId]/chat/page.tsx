@@ -508,6 +508,13 @@ export default function ChatPage() {
   // Collapsed messages (thinking, system, and tool use messages, by message_id)
   const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set())
 
+  // Session scroll state tracking
+  const [sessionScrollStates, setSessionScrollStates] = useState<Record<string, {
+    scrollTop: number
+    messageCount: number
+    wasAtBottom: boolean
+  }>>({})
+
   // Create session dialog state
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
@@ -527,8 +534,20 @@ export default function ChatPage() {
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const maxSequenceRef = useRef<number>(0) // Track max sequence number for gap detection
   const sessionStartedResolvers = useRef<Map<string, (value: boolean) => void>>(new Map())
+  const sessionMessageCounts = useRef<Record<string, number>>({}) // Track message count per session-view combo
+  const prevActiveSessionId = useRef<string | null>(null)
+  const prevViewMode = useRef<ViewMode>('chat')
+
+  // Utility function to check if user is at bottom of messages
+  const isAtBottom = useCallback(() => {
+    const container = messagesContainerRef.current
+    if (!container) return true
+    const threshold = 100 // Within 100px of bottom counts as "at bottom"
+    return container.scrollHeight - container.scrollTop - container.clientHeight < threshold
+  }, [])
 
   // Load nodes and sessions function
   const loadNodesAndSessions = useCallback(async () => {
@@ -669,6 +688,36 @@ export default function ChatPage() {
     }
   }, [subscribe, loadNodesAndSessions])
 
+  // Save scroll position when switching away from a session or view mode
+  useEffect(() => {
+    const prevSessionId = prevActiveSessionId.current
+    const prevMode = prevViewMode.current
+    const currentSessionId = activeSessionId
+    const currentMode = viewMode
+
+    // Save scroll state if session or view mode changed
+    if (prevSessionId && (prevSessionId !== currentSessionId || prevMode !== currentMode)) {
+      const container = messagesContainerRef.current
+      if (container) {
+        const stateKey = `${prevSessionId}-${prevMode}`
+        const messageCount = sessionMessageCounts.current[stateKey] || 0
+
+        setSessionScrollStates(prev => ({
+          ...prev,
+          [stateKey]: {
+            scrollTop: container.scrollTop,
+            messageCount: messageCount,
+            wasAtBottom: isAtBottom()
+          }
+        }))
+      }
+    }
+
+    // Update refs for next comparison
+    prevActiveSessionId.current = currentSessionId
+    prevViewMode.current = currentMode
+  }, [activeSessionId, viewMode, isAtBottom])
+
   // Subscribe to WebSocket messages for active session
   useEffect(() => {
     if (!activeSessionId) return
@@ -790,12 +839,50 @@ export default function ChatPage() {
     }
   }, [sessionInputs, mosaicId])
 
-  // Auto-scroll to bottom when messages change or when switching back to chat view
+  // Track message count for current session-view combo
   useEffect(() => {
-    if (viewMode === 'chat') {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    if (!activeSessionId) return
+    const stateKey = `${activeSessionId}-${viewMode}`
+    sessionMessageCounts.current[stateKey] = messages.length
+  }, [messages.length, activeSessionId, viewMode])
+
+  // Smart auto-scroll: restore position or scroll to bottom based on session state
+  useEffect(() => {
+    if (!activeSessionId) return
+
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    const stateKey = `${activeSessionId}-${viewMode}`
+    const savedState = sessionScrollStates[stateKey]
+
+    // If no saved state (first time entering this session-view combo), scroll to bottom
+    if (!savedState) {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+      })
+      return
     }
-  }, [messages, viewMode])
+
+    // If message count increased (new messages arrived), always scroll to bottom
+    if (messages.length > savedState.messageCount) {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+      })
+    } else if (messages.length === savedState.messageCount) {
+      // Same number of messages (just switching back), restore scroll position
+      requestAnimationFrame(() => {
+        if (container) {
+          container.scrollTop = savedState.scrollTop
+        }
+      })
+    } else {
+      // Message count decreased (messages deleted?), scroll to bottom for safety
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+      })
+    }
+  }, [messages, viewMode, activeSessionId, sessionScrollStates])
 
   // Cleanup pending session_started resolvers on unmount
   useEffect(() => {
@@ -1720,7 +1807,7 @@ export default function ChatPage() {
           ) : (
             <>
               {/* Messages Area */}
-              <div className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">
+              <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">
               {messages.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-muted-foreground">
                   <div className="text-center">
