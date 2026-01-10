@@ -11,7 +11,7 @@ from typing import Annotated, Optional
 
 from ..schema.response import SuccessResponse, PaginatedData
 from ..schema.session import CreateSessionRequest, SessionOut, SessionTopologyNode, SessionTopologyResponse, BatchArchiveResponse
-from ..model import Session, Node, Mosaic
+from ..model import Session, Node, Mosaic, SessionRouting
 from ..dep import get_db_session, get_current_user
 from ..model.user import User
 from ..exception import NotFoundError, PermissionError, ValidationError
@@ -515,7 +515,38 @@ async def list_sessions(
         f"Found {len(sessions)} sessions (total={total}, page={page}/{total_pages})"
     )
 
-    # 6. Build response list
+    # 6. Build response list with parent-child relationship info
+    session_ids = [s.session_id for s in sessions]
+
+    # 6.1 Batch query parent session mapping (remote -> local)
+    parent_map = {}
+    if session_ids:
+        parent_map_stmt = select(
+            SessionRouting.remote_session_id,
+            SessionRouting.local_session_id
+        ).where(
+            SessionRouting.remote_session_id.in_(session_ids),
+            SessionRouting.mosaic_id == mosaic_id,
+            SessionRouting.deleted_at.is_(None)
+        )
+        parent_result = await session.execute(parent_map_stmt)
+        parent_map = {row[0]: row[1] for row in parent_result.all()}
+
+    # 6.2 Batch query child session count (local -> count(remote))
+    child_count_map = {}
+    if session_ids:
+        child_count_stmt = select(
+            SessionRouting.local_session_id,
+            func.count(SessionRouting.remote_session_id)
+        ).where(
+            SessionRouting.local_session_id.in_(session_ids),
+            SessionRouting.mosaic_id == mosaic_id,
+            SessionRouting.deleted_at.is_(None)
+        ).group_by(SessionRouting.local_session_id)
+        child_result = await session.execute(child_count_stmt)
+        child_count_map = {row[0]: row[1] for row in child_result.all()}
+
+    # 6.3 Build response list with parent-child info
     session_list = [
         SessionOut(
             id=s.id,
@@ -533,7 +564,9 @@ async def list_sessions(
             created_at=s.created_at,
             updated_at=s.updated_at,
             last_activity_at=s.last_activity_at,
-            closed_at=s.closed_at
+            closed_at=s.closed_at,
+            parent_session_id=parent_map.get(s.session_id),
+            child_count=child_count_map.get(s.session_id, 0)
         )
         for s in sessions
     ]

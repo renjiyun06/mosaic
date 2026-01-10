@@ -79,6 +79,7 @@ import {
   Circle,
   Menu,
   Mic,
+  Network,
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
@@ -107,6 +108,12 @@ interface NodeWithSessions extends NodeOut {
   expanded: boolean
 }
 
+// Session tree node (for tree view)
+interface SessionTreeNode extends SessionOut {
+  children: SessionTreeNode[]
+  depth: number
+}
+
 // Workspace file tree types (extend WorkspaceFileItem with expanded state)
 interface FileNode extends WorkspaceFileItem {
   expanded?: boolean
@@ -114,6 +121,7 @@ interface FileNode extends WorkspaceFileItem {
 
 type ViewMode = 'chat' | 'workspace'
 type SessionListMode = 'detailed' | 'compact'
+type SessionViewMode = 'tree' | 'grouped'
 
 // ChatInput component - optimized to prevent parent re-renders on input
 interface ChatInputProps {
@@ -442,6 +450,8 @@ export default function ChatPage() {
 
   // Session list mode
   const [sessionListMode, setSessionListMode] = useState<SessionListMode>('compact')
+  const [sessionViewMode, setSessionViewMode] = useState<SessionViewMode>('grouped')
+  const [treeExpandedSessions, setTreeExpandedSessions] = useState<Set<string>>(new Set())
   const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null)
 
   // Node and session management
@@ -1201,6 +1211,55 @@ export default function ChatPage() {
     )
   }
 
+  // Toggle tree session expansion
+  const toggleTreeSession = (sessionId: string) => {
+    setTreeExpandedSessions((prev) => {
+      const newSet = new Set(prev)
+      if (newSet.has(sessionId)) {
+        newSet.delete(sessionId)
+      } else {
+        newSet.add(sessionId)
+      }
+      return newSet
+    })
+  }
+
+  // Build session tree from flat session list
+  const buildSessionTree = (sessions: SessionOut[]): SessionTreeNode[] => {
+    const sessionMap = new Map<string, SessionTreeNode>()
+
+    // Create tree nodes for all sessions
+    sessions.forEach(session => {
+      sessionMap.set(session.session_id, {
+        ...session,
+        children: [],
+        depth: 0
+      })
+    })
+
+    const roots: SessionTreeNode[] = []
+
+    // Build parent-child relationships
+    sessions.forEach(session => {
+      const node = sessionMap.get(session.session_id)!
+      if (session.parent_session_id) {
+        const parent = sessionMap.get(session.parent_session_id)
+        if (parent) {
+          parent.children.push(node)
+          node.depth = parent.depth + 1
+        } else {
+          // Parent not in current session list, treat as root
+          roots.push(node)
+        }
+      } else {
+        // No parent, this is a root session
+        roots.push(node)
+      }
+    })
+
+    return roots
+  }
+
   const handleArchiveSession = async (sessionId: string, nodeId: string) => {
     try {
       await apiClient.archiveSession(mosaicId, nodeId, sessionId)
@@ -1535,6 +1594,190 @@ export default function ChatPage() {
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+    )
+  }
+
+  // Session tree node component (recursive)
+  const SessionTreeNodeComponent = ({
+    session,
+    depth,
+    onSelect,
+    isLast = false,
+  }: {
+    session: SessionTreeNode
+    depth: number
+    onSelect: (sessionId: string) => void
+    isLast?: boolean
+  }) => {
+    const isExpanded = treeExpandedSessions.has(session.session_id)
+    const isActive = activeSessionId === session.session_id
+    const hasChildren = session.child_count > 0
+
+    return (
+      <div>
+        {/* Session item */}
+        <div
+          className={`group relative cursor-pointer hover:bg-muted/50 transition-colors ${
+            isActive
+              ? "bg-primary/10 border-l-3 border-l-primary"
+              : "border-l-3 border-l-transparent"
+          }`}
+          onClick={() => onSelect(session.session_id)}
+        >
+          {/* Tree lines for children (not root) */}
+          {depth > 0 && (
+            <>
+              {/* Vertical line */}
+              <div
+                className="absolute top-0 bottom-0 w-px bg-border"
+                style={{ left: `${(depth - 1) * 16 + 16}px` }}
+              >
+                {isLast && <div className="absolute top-3 left-0 w-px h-full bg-background" />}
+              </div>
+              {/* Horizontal line */}
+              <div
+                className="absolute top-3 h-px bg-border"
+                style={{
+                  left: `${(depth - 1) * 16 + 16}px`,
+                  width: '12px'
+                }}
+              />
+            </>
+          )}
+
+          {sessionListMode === 'detailed' ? (
+            /* Detailed mode */
+            <div className="pr-3 py-2" style={{ paddingLeft: `${depth * 16 + 12}px` }}>
+              {/* Line 1: Expand button + Root badge + Session ID + Status + Menu */}
+              <div className="flex items-center gap-2 mb-1">
+                {/* Expand/collapse button for sessions with children */}
+                {hasChildren ? (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleTreeSession(session.session_id)
+                    }}
+                    className="shrink-0"
+                  >
+                    {isExpanded ? (
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </button>
+                ) : (
+                  <div className="w-3.5" />
+                )}
+
+                {/* Root badge if no parent */}
+                {!session.parent_session_id && (
+                  <Badge variant="outline" className="text-xs h-5 px-1.5 shrink-0">
+                    根
+                  </Badge>
+                )}
+
+                <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span
+                  className={`font-mono text-xs truncate ${
+                    isActive ? "font-semibold" : "text-muted-foreground"
+                  }`}
+                  title={session.session_id}
+                >
+                  {session.session_id.slice(0, 8)}
+                </span>
+                <Badge
+                  variant={
+                    session.status === SessionStatus.ACTIVE
+                      ? "default"
+                      : "secondary"
+                  }
+                  className="text-xs h-5 px-1.5"
+                >
+                  {session.status === SessionStatus.ACTIVE && "活跃"}
+                  {session.status === SessionStatus.CLOSED && "已关闭"}
+                </Badge>
+                <div className="ml-auto">
+                  <SessionActionMenu session={session} nodeId={session.node_id} />
+                </div>
+              </div>
+
+              {/* Line 2: Node ID + Mode + Model */}
+              <div style={{ paddingLeft: hasChildren ? '14px' : '0px' }} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className="text-amber-600 font-medium">{session.node_id}</span>
+                <span>·</span>
+                <span>{session.mode}</span>
+                <span>·</span>
+                <span>{session.model || 'sonnet'}</span>
+              </div>
+            </div>
+          ) : (
+            /* Compact mode */
+            <div className="pr-3 py-1.5" style={{ paddingLeft: `${depth * 16 + 12}px` }}>
+              <div className="flex items-center gap-2">
+                {/* Expand/collapse button */}
+                {hasChildren ? (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleTreeSession(session.session_id)
+                    }}
+                    className="shrink-0"
+                  >
+                    {isExpanded ? (
+                      <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                    )}
+                  </button>
+                ) : (
+                  <div className="w-3" />
+                )}
+
+                {/* Root badge */}
+                {!session.parent_session_id && (
+                  <Badge variant="outline" className="text-xs h-4 px-1 shrink-0">
+                    根
+                  </Badge>
+                )}
+
+                <MessageSquare className="h-3 w-3 shrink-0 text-muted-foreground" />
+                <span
+                  className={`font-mono text-xs truncate ${
+                    isActive ? "font-semibold" : "text-muted-foreground"
+                  }`}
+                  title={session.session_id}
+                >
+                  {session.session_id.slice(0, 8)}
+                </span>
+                <span className="text-xs text-amber-600 font-medium truncate">
+                  {session.node_id}
+                </span>
+                <Circle
+                  className={`h-1.5 w-1.5 shrink-0 ml-auto ${
+                    session.status === SessionStatus.ACTIVE
+                      ? 'fill-blue-500 text-blue-500'
+                      : 'fill-gray-400 text-gray-400'
+                  }`}
+                />
+                <div>
+                  <SessionActionMenu session={session} nodeId={session.node_id} />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Recursively render children */}
+        {isExpanded && session.children.map((child, index) => (
+          <SessionTreeNodeComponent
+            key={child.session_id}
+            session={child}
+            depth={depth + 1}
+            onSelect={onSelect}
+            isLast={index === session.children.length - 1}
+          />
+        ))}
+      </div>
     )
   }
 
@@ -1992,30 +2235,65 @@ export default function ChatPage() {
 
       {/* Right: Session List (desktop only) */}
       <div className="w-80 border-l flex-col bg-background hidden md:flex">
-        {/* Header with mode toggle */}
+        {/* Header with view and mode toggle */}
         <div className="h-11 border-b px-3 flex items-center justify-between shrink-0">
           <span className="text-sm font-medium">会话</span>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 p-0"
-                  onClick={() => setSessionListMode(mode => mode === 'detailed' ? 'compact' : 'detailed')}
-                >
-                  {sessionListMode === 'detailed' ? (
-                    <LayoutList className="h-4 w-4" />
-                  ) : (
-                    <List className="h-4 w-4" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {sessionListMode === 'detailed' ? '切换到紧凑模式' : '切换到详细模式'}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <div className="flex items-center gap-1">
+            {/* View mode toggle (tree/grouped) */}
+            <TooltipProvider>
+              <div className="inline-flex rounded border p-0.5 gap-0.5">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={sessionViewMode === 'tree' ? 'default' : 'ghost'}
+                      size="sm"
+                      className="h-6 w-6 p-0"
+                      onClick={() => setSessionViewMode('tree')}
+                    >
+                      <Network className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>树形视图</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={sessionViewMode === 'grouped' ? 'default' : 'ghost'}
+                      size="sm"
+                      className="h-6 w-6 p-0"
+                      onClick={() => setSessionViewMode('grouped')}
+                    >
+                      <FolderTree className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>节点分组</TooltipContent>
+                </Tooltip>
+              </div>
+            </TooltipProvider>
+
+            {/* List mode toggle (detailed/compact) */}
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    onClick={() => setSessionListMode(mode => mode === 'detailed' ? 'compact' : 'detailed')}
+                  >
+                    {sessionListMode === 'detailed' ? (
+                      <LayoutList className="h-4 w-4" />
+                    ) : (
+                      <List className="h-4 w-4" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {sessionListMode === 'detailed' ? '切换到紧凑模式' : '切换到详细模式'}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         </div>
 
         {/* Session tree */}
@@ -2032,7 +2310,33 @@ export default function ChatPage() {
               <p>暂无 Claude Code 节点</p>
               <p className="text-xs mt-1">请先创建节点</p>
             </div>
+          ) : sessionViewMode === 'tree' ? (
+            /* Tree view */
+            (() => {
+              // Get all sessions from all nodes
+              const allSessions = nodes.flatMap(node => node.sessions)
+              // Build tree structure
+              const treeRoots = buildSessionTree(allSessions)
+
+              return treeRoots.length === 0 ? (
+                <div className="p-4 text-center text-sm text-muted-foreground">
+                  <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>暂无会话</p>
+                </div>
+              ) : (
+                treeRoots.map((rootSession, index) => (
+                  <SessionTreeNodeComponent
+                    key={rootSession.session_id}
+                    session={rootSession}
+                    depth={0}
+                    onSelect={setActiveSessionId}
+                    isLast={index === treeRoots.length - 1}
+                  />
+                ))
+              )
+            })()
           ) : (
+            /* Grouped view (current behavior) */
             nodes.map((node) => (
               <div key={node.node_id} className="border-b last:border-b-0">
                 {/* Node header */}

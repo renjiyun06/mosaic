@@ -357,6 +357,8 @@ export interface SessionOut {
   updated_at: string
   last_activity_at: string
   closed_at: string | null
+  parent_session_id: string | null
+  child_count: number
 }
 
 export interface SessionTopologyNode {

@@ -79,6 +79,16 @@ class SessionOut(BaseModel):
     last_activity_at: Optional[datetime] = Field(None, description="Last message activity time")
     closed_at: Optional[datetime] = Field(None, description="When session was closed")
 
+    # Parent-child relationship (for tree view)
+    parent_session_id: Optional[str] = Field(
+        None,
+        description="Parent session ID (from session_routing where this session is remote)"
+    )
+    child_count: int = Field(
+        0,
+        description="Number of direct child sessions (count from session_routing where this session is local)"
+    )
+
     class Config:
         from_attributes = True
 
