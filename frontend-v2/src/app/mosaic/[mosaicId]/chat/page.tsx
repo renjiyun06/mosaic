@@ -1915,7 +1915,7 @@ export default function ChatPage() {
             </>
           ) : (
             <>
-              <span className="w-4" />
+              <span className="w-4 shrink-0" />
               {node.name.endsWith('.tsx') || node.name.endsWith('.ts') || node.name.endsWith('.jsx') || node.name.endsWith('.js') ? (
                 <FileCode className="h-4 w-4 shrink-0 text-blue-500" />
               ) : node.name.endsWith('.json') ? (
@@ -1927,7 +1927,7 @@ export default function ChatPage() {
               )}
             </>
           )}
-          <span className="text-sm truncate">{node.name}</span>
+          <span className="text-sm whitespace-nowrap">{node.name}</span>
         </div>
         {node.type === 'directory' && node.expanded && node.children && (
           <div>{renderFileTree(node.children, nodeId, level + 1)}</div>
@@ -2160,7 +2160,7 @@ export default function ChatPage() {
 
                 {/* File Tree Content */}
                 {!sidebarCollapsed && (
-                  <div className="py-2 overflow-y-auto flex-1">
+                  <div className="py-2 overflow-auto flex-1">
                     {workspaceLoading ? (
                       <div className="p-4 text-center text-sm text-muted-foreground">
                         <Loader2 className="h-5 w-5 sm:h-6 sm:w-6 animate-spin mx-auto mb-2" />
