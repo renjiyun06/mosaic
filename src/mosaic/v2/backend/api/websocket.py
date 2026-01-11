@@ -206,6 +206,83 @@ async def websocket_user_endpoint(
                         "message": f"Failed to interrupt: {str(e)}"
                     })
 
+            elif message_type == "terminal_start":
+                # Start terminal session
+                try:
+                    # Build workspace path
+                    instance_path = websocket.app.state.instance_path
+                    workspace_path = instance_path / "users" / str(current_user.id) / str(node.mosaic_id) / str(node.id)
+
+                    await runtime_manager.start_terminal(
+                        node=node,
+                        session=session,
+                        user_id=current_user.id,
+                        workspace_path=workspace_path
+                    )
+                    logger.info(f"Terminal started: session_id={session_id}")
+                except Exception as e:
+                    logger.error(f"Failed to start terminal: {e}", exc_info=True)
+                    await websocket.send_json({
+                        "session_id": session_id,
+                        "type": "error",
+                        "message": f"Failed to start terminal: {str(e)}"
+                    })
+
+            elif message_type == "terminal_input":
+                # Send terminal input
+                terminal_data = data.get("data")
+                if terminal_data is None:
+                    await websocket.send_json({
+                        "session_id": session_id,
+                        "type": "error",
+                        "message": "Missing terminal data"
+                    })
+                    continue
+
+                try:
+                    await runtime_manager.send_terminal_input(
+                        session=session,
+                        data=terminal_data
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send terminal input: {e}", exc_info=True)
+                    await websocket.send_json({
+                        "session_id": session_id,
+                        "type": "error",
+                        "message": f"Failed to send terminal input: {str(e)}"
+                    })
+
+            elif message_type == "terminal_resize":
+                # Resize terminal
+                cols = data.get("cols")
+                rows = data.get("rows")
+                if cols is None or rows is None:
+                    await websocket.send_json({
+                        "session_id": session_id,
+                        "type": "error",
+                        "message": "Missing cols or rows"
+                    })
+                    continue
+
+                try:
+                    await runtime_manager.resize_terminal(
+                        session=session,
+                        cols=cols,
+                        rows=rows
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to resize terminal: {e}", exc_info=True)
+                    # Don't send error to client for resize failures (non-critical)
+
+            elif message_type == "terminal_stop":
+                # Stop terminal
+                try:
+                    await runtime_manager.stop_terminal(session=session)
+                    logger.info(f"Terminal stopped: session_id={session_id}")
+                except Exception as e:
+                    logger.error(f"Failed to stop terminal: {e}", exc_info=True)
+                    # Don't send error to client for stop failures (session may be closing)
+
             else:
                 logger.warning(f"Unknown message type from user {current_user.id}: {message_type}")
                 await websocket.send_json({

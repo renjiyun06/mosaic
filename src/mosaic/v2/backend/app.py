@@ -108,18 +108,19 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
     app.state.config = config
     app.state.instance_path = instance_path
 
+    # ==================== WebSocket Configuration ====================
+
+    # Create UserMessageBroker singleton (must be created before RuntimeManager)
+    app.state.user_message_broker = UserMessageBroker.create_instance()
+
     # ==================== Runtime Manager Configuration ====================
 
     # Create RuntimeManager singleton with dependencies
     app.state.runtime_manager = RuntimeManager.create_instance(
         async_session_factory=async_session_factory,
-        config=config
+        config=config,
+        user_message_broker=app.state.user_message_broker
     )
-
-    # ==================== WebSocket Configuration ====================
-
-    # Create UserMessageBroker singleton
-    app.state.user_message_broker = UserMessageBroker.create_instance()
 
     # ==================== CORS Configuration ====================
 

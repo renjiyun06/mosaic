@@ -55,16 +55,18 @@ class RuntimeManager:
 
     _instance: Optional['RuntimeManager'] = None
 
-    def __init__(self, async_session_factory, config: dict):
+    def __init__(self, async_session_factory, config: dict, user_message_broker):
         """
         Initialize runtime manager.
 
         Args:
             async_session_factory: AsyncSession factory from app.state
             config: Configuration dict from app.state
+            user_message_broker: UserMessageBroker instance for WebSocket communication
         """
         self.async_session_factory = async_session_factory
         self.config = config
+        self.user_message_broker = user_message_broker
 
         # Runtime state
         self._started = False
@@ -84,13 +86,18 @@ class RuntimeManager:
         self._starting_count = 0  # Number of mosaics currently starting
         self._all_started_event: Optional[asyncio.Event] = None  # Set in start()
 
+        # Terminal manager (runs in main event loop)
+        from ..terminal import TerminalManager
+        self.terminal_manager = TerminalManager(user_message_broker)
+
         logger.info("RuntimeManager initialized")
 
     @classmethod
     def create_instance(
         cls,
         async_session_factory,
-        config: dict
+        config: dict,
+        user_message_broker
     ) -> 'RuntimeManager':
         """
         Create and store the singleton instance.
@@ -98,6 +105,7 @@ class RuntimeManager:
         Args:
             async_session_factory: AsyncSession factory from app.state
             config: Configuration dict from app.state
+            user_message_broker: UserMessageBroker instance
 
         Returns:
             Created RuntimeManager instance
@@ -108,7 +116,7 @@ class RuntimeManager:
         if cls._instance is not None:
             raise RuntimeAlreadyStartedError("RuntimeManager already initialized")
 
-        cls._instance = cls(async_session_factory, config)
+        cls._instance = cls(async_session_factory, config, user_message_broker)
         return cls._instance
 
     # ========== Manager Lifecycle ==========
@@ -1220,3 +1228,125 @@ class RuntimeManager:
                 self._thread_loops.pop(current_thread, None)
 
             logger.info(f"Event loop stopped and cleaned up: {current_thread.name}")
+
+    # ========== Terminal Operations ==========
+
+    async def start_terminal(
+        self,
+        node: 'Node',
+        session: 'Session',
+        user_id: int,
+        workspace_path,
+        timeout: float = 10.0
+    ) -> None:
+        """
+        Start a terminal session for workspace mode.
+
+        Delegates to TerminalManager for actual PTY management.
+
+        Args:
+            node: Node model object (validated by FastAPI layer)
+            session: Session model object (validated by FastAPI layer)
+            user_id: User database ID (for message routing)
+            workspace_path: Path to node's workspace directory
+            timeout: Maximum wait time in seconds
+
+        Note:
+            FastAPI layer must validate node and session existence/permissions before calling.
+        """
+        logger.info(
+            f"[Terminal] Start request: session_id={session.session_id}, "
+            f"node_id={node.node_id}, user_id={user_id}, workspace_path={workspace_path}"
+        )
+
+        # Delegate to TerminalManager
+        await self.terminal_manager.start_terminal(
+            session_id=session.session_id,
+            workspace_path=workspace_path,
+            user_id=user_id
+        )
+
+    async def send_terminal_input(
+        self,
+        session: 'Session',
+        data: str
+    ) -> None:
+        """
+        Send user input to terminal session.
+
+        Delegates to TerminalManager for actual PTY I/O.
+
+        Args:
+            session: Session model object (validated by FastAPI layer)
+            data: User input data (keystrokes)
+
+        Note:
+            FastAPI layer must validate session existence/permissions before calling.
+        """
+        logger.debug(
+            f"[Terminal] Input received: session_id={session.session_id}, "
+            f"data_length={len(data)}, data_repr={repr(data[:50])}"
+        )
+
+        # Delegate to TerminalManager
+        await self.terminal_manager.send_input(
+            session_id=session.session_id,
+            data=data
+        )
+
+    async def resize_terminal(
+        self,
+        session: 'Session',
+        cols: int,
+        rows: int
+    ) -> None:
+        """
+        Resize terminal window.
+
+        Delegates to TerminalManager for actual PTY ioctl.
+
+        Args:
+            session: Session model object (validated by FastAPI layer)
+            cols: Terminal columns
+            rows: Terminal rows
+
+        Note:
+            FastAPI layer must validate session existence/permissions before calling.
+        """
+        logger.info(
+            f"[Terminal] Resize request: session_id={session.session_id}, "
+            f"cols={cols}, rows={rows}"
+        )
+
+        # Delegate to TerminalManager
+        await self.terminal_manager.resize_terminal(
+            session_id=session.session_id,
+            cols=cols,
+            rows=rows
+        )
+
+    async def stop_terminal(
+        self,
+        session: 'Session',
+        timeout: float = 5.0
+    ) -> None:
+        """
+        Stop a terminal session.
+
+        Delegates to TerminalManager for actual PTY cleanup.
+
+        Args:
+            session: Session model object (validated by FastAPI layer)
+            timeout: Maximum wait time in seconds
+
+        Note:
+            FastAPI layer must validate session existence/permissions before calling.
+        """
+        logger.info(
+            f"[Terminal] Stop request: session_id={session.session_id}"
+        )
+
+        # Delegate to TerminalManager
+        await self.terminal_manager.stop_terminal(
+            session_id=session.session_id
+        )
