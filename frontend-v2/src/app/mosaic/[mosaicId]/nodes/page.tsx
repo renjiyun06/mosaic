@@ -42,7 +42,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 const NODE_TYPE_LABELS: Record<NodeType, string> = {
   [NodeType.CLAUDE_CODE]: 'Claude Code',
   [NodeType.SCHEDULER]: 'Scheduler',
-  [NodeType.EMAIL]: 'Email'
+  [NodeType.EMAIL]: 'Email',
+  [NodeType.AGGREGATOR]: 'Aggregator'
 }
 
 export default function NodesPage() {
