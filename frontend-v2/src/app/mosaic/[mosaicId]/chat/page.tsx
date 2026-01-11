@@ -456,7 +456,15 @@ export default function ChatPage() {
 
   // Node and session management
   const [nodes, setNodes] = useState<NodeWithSessions[]>([])
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      const saved = localStorage.getItem(`mosaic-${mosaicId}-active-session`)
+      return saved || null
+    } catch (error) {
+      return null
+    }
+  })
   const [messages, setMessages] = useState<ParsedMessage[]>([])
 
   // Workspace state
@@ -559,6 +567,22 @@ export default function ChatPage() {
     return container.scrollHeight - container.scrollTop - container.clientHeight < threshold
   }, [])
 
+  // Wrapper function to set active session and persist to localStorage
+  const selectSession = useCallback((sessionId: string | null) => {
+    setActiveSessionId(sessionId)
+    if (typeof window !== 'undefined') {
+      try {
+        if (sessionId) {
+          localStorage.setItem(`mosaic-${mosaicId}-active-session`, sessionId)
+        } else {
+          localStorage.removeItem(`mosaic-${mosaicId}-active-session`)
+        }
+      } catch (error) {
+        console.error("Failed to save active session to localStorage:", error)
+      }
+    }
+  }, [mosaicId])
+
   // Load nodes and sessions function
   const loadNodesAndSessions = useCallback(async () => {
     try {
@@ -609,21 +633,42 @@ export default function ChatPage() {
 
       setNodes(nodesWithSessions)
 
-      // Auto-select first active session
-      if (!activeSessionId) {
-        const allSessions = nodesWithSessions.flatMap((n) => n.sessions)
+      // Auto-select session (prioritize saved session, then first active session)
+      const allSessions = nodesWithSessions.flatMap((n) => n.sessions)
+
+      // 1. Check if there's a saved session selection
+      const savedSessionId = typeof window !== 'undefined'
+        ? localStorage.getItem(`mosaic-${mosaicId}-active-session`)
+        : null
+
+      let shouldSetSession = false
+      let targetSessionId = null
+
+      // 2. If saved session exists and is still available (not archived), restore it
+      if (savedSessionId && allSessions.some(s => s.session_id === savedSessionId)) {
+        targetSessionId = savedSessionId
+        shouldSetSession = true
+      } else {
+        // 3. Otherwise, select first active session or first session
         const activeSession = allSessions.find((s) => s.status === SessionStatus.ACTIVE)
         if (activeSession) {
-          setActiveSessionId(activeSession.session_id)
+          targetSessionId = activeSession.session_id
+          shouldSetSession = true
         } else if (allSessions.length > 0) {
           // If no active session, select first one (to view history)
-          setActiveSessionId(allSessions[0].session_id)
+          targetSessionId = allSessions[0].session_id
+          shouldSetSession = true
         }
+      }
+
+      // 4. Only update if needed (avoid unnecessary re-renders)
+      if (shouldSetSession && targetSessionId !== activeSessionId) {
+        selectSession(targetSessionId)
       }
     } catch (error) {
       console.error("Failed to load nodes and sessions:", error)
     }
-  }, [mosaicId, activeSessionId])
+  }, [mosaicId, activeSessionId, selectSession])
 
   // Mobile detection effect
   useEffect(() => {
@@ -732,6 +777,9 @@ export default function ChatPage() {
   useEffect(() => {
     if (!activeSessionId) return
 
+    // Wait until nodes are loaded before loading messages
+    if (nodes.length === 0) return
+
     // Load message history from database
     loadMessages(activeSessionId)
 
@@ -834,7 +882,7 @@ export default function ChatPage() {
     return () => {
       unsubscribe()
     }
-  }, [activeSessionId, subscribe])
+  }, [activeSessionId, nodes, subscribe])
 
   // Save session inputs to localStorage whenever they change
   useEffect(() => {
@@ -1011,6 +1059,12 @@ export default function ChatPage() {
 
   const loadMessages = async (sessionId: string) => {
     try {
+      // Safety check: ensure nodes are loaded
+      if (nodes.length === 0) {
+        console.warn("loadMessages called but nodes not yet loaded, skipping...")
+        return
+      }
+
       // Find the session's node_id
       let nodeId: string | null = null
       for (const node of nodes) {
@@ -1191,7 +1245,7 @@ export default function ChatPage() {
       }
 
       // Activate the new session and close dialog
-      setActiveSessionId(newSession.session_id)
+      selectSession(newSession.session_id)
       setCreateDialogOpen(false)
     } catch (error) {
       console.error("Failed to create session:", error)
@@ -1281,7 +1335,7 @@ export default function ChatPage() {
 
       // If it was active, clear selection
       if (activeSessionId === sessionId) {
-        setActiveSessionId(null)
+        selectSession(null)
       }
     } catch (error) {
       console.error("Failed to archive session:", error)
@@ -1335,7 +1389,7 @@ export default function ChatPage() {
 
       // If active session was archived, clear selection
       if (activeSessionId && batchArchivingNode.closedSessionIds.includes(activeSessionId)) {
-        setActiveSessionId(null)
+        selectSession(null)
       }
 
       // Show result message
@@ -2329,7 +2383,7 @@ export default function ChatPage() {
                     key={rootSession.session_id}
                     session={rootSession}
                     depth={0}
-                    onSelect={setActiveSessionId}
+                    onSelect={selectSession}
                     isLast={index === treeRoots.length - 1}
                   />
                 ))
@@ -2454,7 +2508,7 @@ export default function ChatPage() {
                                 ? "bg-primary/10 border-l-3 border-l-primary"
                                 : "border-l-3 border-l-transparent"
                             }`}
-                            onClick={() => setActiveSessionId(session.session_id)}
+                            onClick={() => selectSession(session.session_id)}
                           >
                             {/* Tree line */}
                             <div className="absolute left-5 top-0 bottom-0 w-px bg-border">
@@ -2878,7 +2932,7 @@ export default function ChatPage() {
                                   : "border-l-3 border-l-transparent"
                               }`}
                               onClick={() => {
-                                setActiveSessionId(session.session_id)
+                                selectSession(session.session_id)
                                 setSessionSheetOpen(false)
                               }}
                             >
