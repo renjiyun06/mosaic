@@ -370,7 +370,9 @@ export default function NodesPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                       <Box className="h-4 w-4 text-blue-500 shrink-0" />
-                      <CardTitle className="text-base font-mono truncate">{node.node_id}</CardTitle>
+                      <CardTitle className="text-base font-mono truncate" title={node.node_id}>
+                        {node.node_id}
+                      </CardTitle>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       {isRunning ? (
@@ -479,7 +481,7 @@ export default function NodesPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-center">节点 ID</TableHead>
+                  <TableHead className="text-left">节点 ID</TableHead>
                   <TableHead className="text-center">类型</TableHead>
                   <TableHead className="text-center">状态</TableHead>
                   <TableHead className="text-center">活跃会话</TableHead>
@@ -496,10 +498,12 @@ export default function NodesPage() {
 
                   return (
                     <TableRow key={node.id}>
-                      <TableCell className="text-center">
-                        <div className="flex items-center gap-2 justify-center">
-                          <Box className="h-4 w-4 text-blue-500" />
-                          <span className="font-medium font-mono">{node.node_id}</span>
+                      <TableCell className="text-left">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Box className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                          <span className="font-medium font-mono truncate block max-w-[20ch]" title={node.node_id}>
+                            {node.node_id}
+                          </span>
                         </div>
                       </TableCell>
                       <TableCell className="text-center">
@@ -528,7 +532,10 @@ export default function NodesPage() {
                           {node.auto_start ? "是" : "否"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-center max-w-xs truncate text-sm text-muted-foreground">
+                      <TableCell className={cn(
+                        "max-w-xs truncate text-sm text-muted-foreground",
+                        node.description ? "text-left" : "text-center"
+                      )}>
                         {node.description || "—"}
                       </TableCell>
                       <TableCell className="text-center text-sm text-muted-foreground">
