@@ -2344,79 +2344,87 @@ export default function ChatPage() {
       {/* Middle: Main Content Area */}
       <div className="flex-1 flex flex-col bg-muted/20 min-w-0">
         {/* Tab Switcher + Header */}
-        <div className="border-b bg-background flex items-center justify-between shrink-0 h-11">
-          {/* Left: Session/Workspace info */}
+        <div className="border-b bg-background flex items-center justify-between shrink-0 h-11 px-3 sm:px-4">
+          {/* Left: Session info - Node and Session ID */}
           {viewMode === 'chat' ? (
-            currentSessionInfo && (
-              <div className="flex items-center gap-2 sm:gap-3 md:gap-4 px-3 sm:px-4 md:px-6 overflow-hidden">
-                {/* Session path */}
-                <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+            currentSessionInfo ? (
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                {/* Node and Session ID */}
+                <div className="flex items-center gap-1.5 min-w-0">
                   <span className="text-xs sm:text-sm font-mono text-muted-foreground truncate">
-                    <span className="hidden sm:inline">{currentSessionInfo.nodeId}</span>
-                    <span className="sm:inline hidden mx-1">/</span>
+                    {currentSessionInfo.nodeId}
+                    <span className="mx-1">/</span>
                     {activeSessionId?.slice(0, 8)}
                   </span>
-                  <Badge variant="outline" className="text-xs shrink-0 hidden sm:inline-flex">
+                  {/* WebSocket status */}
+                  {currentSessionInfo.session.status === SessionStatus.ACTIVE && (
+                    <div
+                      className={`h-2 w-2 rounded-full shrink-0 ${
+                        isConnected ? "bg-green-500" : "bg-red-500"
+                      }`}
+                    />
+                  )}
+                </div>
+
+                {/* Show badges only on desktop */}
+                <div className="hidden sm:flex items-center gap-1.5">
+                  <Badge variant="outline" className="text-xs shrink-0">
                     {currentSessionInfo.session.mode}
                   </Badge>
                   {currentSessionInfo.session.model && (
-                    <Badge variant="outline" className="text-xs shrink-0 hidden md:inline-flex">
+                    <Badge variant="outline" className="text-xs shrink-0">
                       {currentSessionInfo.session.model}
                     </Badge>
                   )}
                 </div>
-
-                {/* WebSocket status */}
-                {currentSessionInfo.session.status === SessionStatus.ACTIVE && (
-                  <div className="flex items-center shrink-0">
-                    <div
-                      className={`h-2 w-2 rounded-full ${
-                        isConnected ? "bg-green-500" : "bg-red-500"
-                      }`}
-                    />
-                  </div>
-                )}
-
-                {/* Usage statistics */}
-                {sessionStats && (
-                  <div className="flex items-center gap-2 sm:gap-3 md:gap-4 text-xs text-muted-foreground">
-                    {sessionStats.total_cost_usd !== undefined && (
-                      <div className="flex items-center gap-1">
-                        <span>💰</span>
-                        <span className="font-mono">
-                          ${sessionStats.total_cost_usd.toFixed(4)}
-                        </span>
-                      </div>
-                    )}
-                    {(sessionStats.total_input_tokens !== undefined ||
-                      sessionStats.total_output_tokens !== undefined) && (
-                      <div className="flex items-center gap-1">
-                        <span>📊</span>
-                        <span className="font-mono">
-                          {sessionStats.total_input_tokens?.toLocaleString() || 0}↑
-                          <span className="mx-0.5">/</span>
-                          {sessionStats.total_output_tokens?.toLocaleString() || 0}↓
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <span className="text-xs sm:text-sm text-muted-foreground truncate">
+                  请选择会话
+                </span>
               </div>
             )
           ) : (
-            <div className="flex items-center gap-2 px-3">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               <span className="text-xs sm:text-sm text-muted-foreground truncate">
                 {currentSessionInfo ? `节点: ${currentSessionInfo.nodeId}` : '请选择会话'}
               </span>
             </div>
           )}
 
-          {/* Right: View mode toggle */}
-          <div className="flex items-center justify-end pl-3 sm:pl-4 md:pl-6 pr-3">
+          {/* Right: Usage statistics and View mode toggle */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Usage statistics */}
+            {sessionStats && currentSessionInfo && viewMode === 'chat' && (
+              <div className="flex items-center gap-2 sm:gap-3 text-xs text-muted-foreground">
+                {sessionStats.total_cost_usd !== undefined && (
+                  <div className="flex items-center gap-1">
+                    <span>💰</span>
+                    <span className="font-mono">
+                      ${sessionStats.total_cost_usd.toFixed(4)}
+                    </span>
+                  </div>
+                )}
+                {(sessionStats.total_input_tokens !== undefined ||
+                  sessionStats.total_output_tokens !== undefined) && (
+                  <div className="flex items-center gap-1">
+                    <span>📊</span>
+                    <span className="font-mono">
+                      {sessionStats.total_input_tokens?.toLocaleString() || 0}↑
+                      <span className="mx-0.5">/</span>
+                      {sessionStats.total_output_tokens?.toLocaleString() || 0}↓
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* View mode toggle - Hidden on mobile */}
             <Button
               variant="outline"
               size="sm"
-              className="h-8 text-xs"
+              className="h-8 text-xs hidden sm:inline-flex"
               onClick={() => setViewMode(viewMode === 'chat' ? 'workspace' : 'chat')}
             >
               {viewMode === 'chat' ? '切换到工作区' : '切换到聊天区'}
