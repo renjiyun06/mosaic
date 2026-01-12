@@ -1016,11 +1016,18 @@ export default function ChatPage() {
       return
     }
 
-    // If message count increased (new messages arrived), always scroll to bottom
+    // If message count increased (new messages arrived), only scroll to bottom if user is currently at bottom
     if (messages.length > savedState.messageCount) {
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-      })
+      // Check current scroll position in real-time to see if user is at bottom
+      const currentlyAtBottom = isAtBottom()
+
+      // Only auto-scroll if user is currently at bottom
+      if (currentlyAtBottom) {
+        requestAnimationFrame(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+        })
+      }
+      // If user is not at bottom, don't scroll - they're reading history
     } else if (messages.length === savedState.messageCount) {
       // Same number of messages (just switching back), restore scroll position
       requestAnimationFrame(() => {
@@ -1034,7 +1041,7 @@ export default function ChatPage() {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
       })
     }
-  }, [messages, viewMode, activeSessionId, sessionScrollStates])
+  }, [messages, viewMode, activeSessionId, sessionScrollStates, isAtBottom])
 
   // Cleanup pending session_started resolvers on unmount
   useEffect(() => {
