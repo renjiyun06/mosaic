@@ -870,27 +870,30 @@ export default function ChatPage() {
         })
       }
 
-      // Handle terminal messages (use ref instead of state for immediate access)
-      if (wsMessage.message_type === 'terminal_output' && terminalInstanceRef.current) {
+      // Handle terminal messages - ALWAYS intercept, regardless of terminal instance
+      // These messages should NEVER appear in chat area
+      if (wsMessage.message_type === 'terminal_output') {
         console.log('[Terminal] Received terminal_output:', wsMessage.payload?.data)
-        // Write output to terminal
-        if (wsMessage.payload?.data) {
+        // Write output to terminal only if instance exists
+        if (terminalInstanceRef.current && wsMessage.payload?.data) {
           terminalInstanceRef.current.write(wsMessage.payload.data)
         }
-        return // Don't add to message list
+        return // Always intercept - don't add to message list
       }
 
-      if (wsMessage.message_type === 'terminal_status' && terminalInstanceRef.current) {
+      if (wsMessage.message_type === 'terminal_status') {
         console.log('[Terminal] Received terminal_status:', wsMessage.payload)
-        // Handle terminal status messages
-        if (wsMessage.payload?.status === 'started') {
-          terminalInstanceRef.current.writeln('\r\nTerminal connected.')
-        } else if (wsMessage.payload?.status === 'stopped') {
-          terminalInstanceRef.current.writeln('\r\nTerminal disconnected.')
-        } else if (wsMessage.payload?.status === 'error' && wsMessage.payload?.message) {
-          terminalInstanceRef.current.writeln(`\r\n\x1b[31mError: ${wsMessage.payload.message}\x1b[0m`)
+        // Handle terminal status messages only if instance exists
+        if (terminalInstanceRef.current) {
+          if (wsMessage.payload?.status === 'started') {
+            terminalInstanceRef.current.writeln('\r\nTerminal connected.')
+          } else if (wsMessage.payload?.status === 'stopped') {
+            terminalInstanceRef.current.writeln('\r\nTerminal disconnected.')
+          } else if (wsMessage.payload?.status === 'error' && wsMessage.payload?.message) {
+            terminalInstanceRef.current.writeln(`\r\n\x1b[31mError: ${wsMessage.payload.message}\x1b[0m`)
+          }
         }
-        return // Don't add to message list
+        return // Always intercept - don't add to message list
       }
 
       // Skip notification messages (they are for logic only, not for display)
@@ -1247,9 +1250,20 @@ export default function ChatPage() {
       })
     }
 
-    // Cleanup when leaving workspace mode or collapsing terminal
-    return () => {
-      if (terminal && (viewMode !== 'workspace' || terminalCollapsed)) {
+    // Cleanup when conditions no longer met - check current values
+    // This cleanup will run when the effect re-runs or component unmounts
+    // IMPORTANT: Only cleanup if we actually have a terminal to clean up
+    if (terminal) {
+      // Check current conditions - if any are false, we should cleanup
+      const shouldKeepTerminal = viewMode === 'workspace' && !terminalCollapsed && activeSessionId
+
+      if (!shouldKeepTerminal) {
+        console.log('[Terminal] Cleaning up terminal, reason:', {
+          viewMode,
+          terminalCollapsed,
+          activeSessionId
+        })
+
         // Send terminal_stop message
         if (activeSessionId) {
           sendRaw({
@@ -1264,7 +1278,9 @@ export default function ChatPage() {
         setFitAddon(null)
       }
     }
-  }, [viewMode, terminalCollapsed, activeSessionId, sendRaw])
+
+    // No cleanup function needed - cleanup is handled above
+  }, [viewMode, terminalCollapsed, activeSessionId, terminal, sendRaw])
 
   // Handle terminal resize
   useEffect(() => {
