@@ -66,7 +66,7 @@ export function Navbar({ onMenuClick, showMenuButton = false }: NavbarProps = {}
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="flex h-11 items-center">
         {/* Mobile: hamburger + logo */}
-        <div className="flex items-center px-4 sm:px-6 lg:hidden flex-1">
+        <div className="flex items-center px-3 sm:px-6 lg:hidden flex-1">
           {showMenuButton && (
             <Button
               variant="ghost"
@@ -95,7 +95,7 @@ export function Navbar({ onMenuClick, showMenuButton = false }: NavbarProps = {}
         </div>
 
         {/* Right side content */}
-        <div className="flex flex-1 items-center justify-end space-x-1 sm:space-x-2 px-4 sm:px-6 lg:px-6">
+        <div className="flex flex-1 items-center justify-end space-x-1 sm:space-x-2 px-3 sm:px-6 lg:px-6">
           {currentMosaic && mosaics.length > 0 && (
             <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>

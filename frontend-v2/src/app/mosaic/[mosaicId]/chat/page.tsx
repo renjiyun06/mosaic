@@ -2334,7 +2334,7 @@ export default function ChatPage() {
       {isMobile && (
         <button
           onClick={() => setSessionSheetOpen(true)}
-          className="fixed right-0 top-1/2 -translate-y-1/2 z-40 bg-background/80 backdrop-blur border border-border rounded-l-md shadow-sm px-1.5 py-3 hover:bg-muted/80 transition-colors md:hidden flex items-center"
+          className="fixed right-0 top-1/2 -translate-y-1/2 z-40 bg-background/80 backdrop-blur border border-border rounded-l-md shadow-sm px-1.5 py-2 hover:bg-muted/80 transition-colors md:hidden flex items-center"
           style={{ writingMode: 'vertical-rl' }}
         >
           <span className="text-xs text-muted-foreground">会话列表</span>
@@ -2348,7 +2348,7 @@ export default function ChatPage() {
           {/* Left: Session/Workspace info */}
           {viewMode === 'chat' ? (
             currentSessionInfo && (
-              <div className="flex items-center gap-2 sm:gap-3 md:gap-4 px-2 sm:px-4 md:px-6 overflow-hidden">
+              <div className="flex items-center gap-2 sm:gap-3 md:gap-4 px-3 sm:px-4 md:px-6 overflow-hidden">
                 {/* Session path */}
                 <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                   <span className="text-xs sm:text-sm font-mono text-muted-foreground truncate">
@@ -2404,7 +2404,7 @@ export default function ChatPage() {
               </div>
             )
           ) : (
-            <div className="flex items-center gap-2 px-2">
+            <div className="flex items-center gap-2 px-3">
               <span className="text-xs sm:text-sm text-muted-foreground truncate">
                 {currentSessionInfo ? `节点: ${currentSessionInfo.nodeId}` : '请选择会话'}
               </span>
@@ -2412,9 +2412,9 @@ export default function ChatPage() {
           )}
 
           {/* Right: View mode toggle */}
-          <div className="flex items-center justify-end pl-2 sm:pl-4 md:pl-6 pr-3">
+          <div className="flex items-center justify-end pl-3 sm:pl-4 md:pl-6 pr-3">
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               className="h-8 text-xs"
               onClick={() => setViewMode(viewMode === 'chat' ? 'workspace' : 'chat')}
