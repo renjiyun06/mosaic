@@ -533,9 +533,10 @@ export default function NodesPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className={cn(
-                        "max-w-xs truncate text-sm text-muted-foreground",
-                        node.description ? "text-left" : "text-center"
-                      )}>
+                        "truncate text-sm text-muted-foreground",
+                        node.description ? "text-left max-w-[20ch]" : "text-center"
+                      )}
+                      title={node.description || undefined}>
                         {node.description || "—"}
                       </TableCell>
                       <TableCell className="text-center text-sm text-muted-foreground">
