@@ -104,6 +104,7 @@ import {
 } from "@/lib/types"
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { SerializeAddon } from '@xterm/addon-serialize'
 import '@xterm/xterm/css/xterm.css'
 
 interface ParsedMessage extends MessageOut {
@@ -503,11 +504,15 @@ export default function ChatPage() {
   const terminalResizeStartY = useRef<number>(0)
   const terminalResizeStartHeight = useRef<number>(0)
 
-  // XTerm terminal instance and addons
-  const [terminal, setTerminal] = useState<Terminal | null>(null)
-  const terminalInstanceRef = useRef<Terminal | null>(null)  // Add ref for immediate access
-  const [fitAddon, setFitAddon] = useState<FitAddon | null>(null)
+  // XTerm terminal instances map (session_id -> {terminal, fitAddon, serializeAddon, serializedContent})
+  const terminalsMapRef = useRef<Map<string, {
+    terminal: Terminal | null,
+    fitAddon: FitAddon | null,
+    serializeAddon: SerializeAddon | null,
+    serializedContent: string  // Store serialized terminal content for recreation
+  }>>(new Map())
   const terminalRef = useRef<HTMLDivElement>(null)
+  const currentAttachedTerminalRef = useRef<string | null>(null) // Track which terminal is currently attached to DOM
 
   // Workspace sidebar state (resizable & collapsible)
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -861,36 +866,54 @@ export default function ChatPage() {
       // Update max sequence number
       maxSequenceRef.current = Math.max(maxSequenceRef.current, wsMessage.sequence)
 
-      // Debug: Log all terminal-related messages
-      if (wsMessage.message_type === 'terminal_output' || wsMessage.message_type === 'terminal_status') {
-        console.log('[Terminal] Received WebSocket message:', {
-          message_type: wsMessage.message_type,
-          payload: wsMessage.payload,
-          terminal_exists: !!terminalInstanceRef.current
-        })
-      }
-
       // Handle terminal messages - ALWAYS intercept, regardless of terminal instance
       // These messages should NEVER appear in chat area
+      // Route messages to the correct terminal instance based on session_id
       if (wsMessage.message_type === 'terminal_output') {
-        console.log('[Terminal] Received terminal_output:', wsMessage.payload?.data)
-        // Write output to terminal only if instance exists
-        if (terminalInstanceRef.current && wsMessage.payload?.data) {
-          terminalInstanceRef.current.write(wsMessage.payload.data)
+        console.log('[Terminal] Received terminal_output:', {
+          session_id: wsMessage.session_id,
+          data_length: wsMessage.payload?.data?.length
+        })
+
+        // Route to the terminal instance for this session
+        const sessionId = wsMessage.session_id
+        if (sessionId && wsMessage.payload?.data) {
+          const terminalData = terminalsMapRef.current.get(sessionId)
+          if (terminalData && terminalData.terminal) {
+            // Write directly to terminal (serialization will capture everything)
+            terminalData.terminal.write(wsMessage.payload.data)
+          }
         }
         return // Always intercept - don't add to message list
       }
 
       if (wsMessage.message_type === 'terminal_status') {
-        console.log('[Terminal] Received terminal_status:', wsMessage.payload)
-        // Handle terminal status messages only if instance exists
-        if (terminalInstanceRef.current) {
-          if (wsMessage.payload?.status === 'started') {
-            terminalInstanceRef.current.writeln('\r\nTerminal connected.')
-          } else if (wsMessage.payload?.status === 'stopped') {
-            terminalInstanceRef.current.writeln('\r\nTerminal disconnected.')
-          } else if (wsMessage.payload?.status === 'error' && wsMessage.payload?.message) {
-            terminalInstanceRef.current.writeln(`\r\n\x1b[31mError: ${wsMessage.payload.message}\x1b[0m`)
+        console.log('[Terminal] Received terminal_status:', {
+          session_id: wsMessage.session_id,
+          status: wsMessage.payload?.status
+        })
+
+        // Route to the terminal instance for this session
+        const sessionId = wsMessage.session_id
+        if (sessionId) {
+          const terminalData = terminalsMapRef.current.get(sessionId)
+          if (terminalData) {
+            if (wsMessage.payload?.status === 'started') {
+              const msg = '\r\nTerminal connected.\r\n'
+              if (terminalData.terminal) {
+                terminalData.terminal.write(msg)
+              }
+            } else if (wsMessage.payload?.status === 'stopped') {
+              const msg = '\r\nTerminal disconnected.\r\n'
+              if (terminalData.terminal) {
+                terminalData.terminal.write(msg)
+              }
+            } else if (wsMessage.payload?.status === 'error' && wsMessage.payload?.message) {
+              const msg = `\r\n\x1b[31mError: ${wsMessage.payload.message}\x1b[0m\r\n`
+              if (terminalData.terminal) {
+                terminalData.terminal.write(msg)
+              }
+            }
           }
         }
         return // Always intercept - don't add to message list
@@ -1188,15 +1211,27 @@ export default function ChatPage() {
     }
   }, [terminalCollapsed, mosaicId])
 
-  // Initialize XTerm terminal when in workspace mode
+  // Initialize XTerm terminal when in workspace mode (multi-instance support)
   useEffect(() => {
-    // Only initialize when:
-    // 1. In workspace mode
-    // 2. Terminal is not collapsed
-    // 3. Terminal ref is available
-    // 4. Terminal not yet created
-    // 5. Has active session
-    if (viewMode === 'workspace' && !terminalCollapsed && terminalRef.current && !terminal && activeSessionId) {
+    // Handle terminal creation and visibility
+    if (viewMode === 'workspace' && !terminalCollapsed && terminalRef.current && activeSessionId) {
+
+      // Get or create terminal data for this session
+      let terminalData = terminalsMapRef.current.get(activeSessionId)
+
+      if (!terminalData) {
+        // First time - initialize terminal data structure
+        terminalData = {
+          terminal: null,
+          fitAddon: null,
+          serializeAddon: null,
+          serializedContent: ''
+        }
+        terminalsMapRef.current.set(activeSessionId, terminalData)
+      }
+
+      console.log('[Terminal] Creating fresh terminal instance for session:', activeSessionId)
+
       const term = new Terminal({
         cursorBlink: true,
         fontSize: 14,
@@ -1212,97 +1247,111 @@ export default function ChatPage() {
       })
 
       const fit = new FitAddon()
+      const serialize = new SerializeAddon()
       term.loadAddon(fit)
+      term.loadAddon(serialize)
 
+      // Clear the container and open terminal
+      terminalRef.current.innerHTML = ''
       term.open(terminalRef.current)
       fit.fit()
 
-      // Display welcome message
-      term.writeln('Welcome to Mosaic Terminal')
-      term.writeln('Waiting for connection...')
-      term.writeln('')
+      // Restore serialized content if exists
+      if (terminalData.serializedContent) {
+        console.log('[Terminal] Restoring serialized content, length:', terminalData.serializedContent.length)
+        term.write(terminalData.serializedContent)
+      } else {
+        // Display welcome message for new terminals
+        term.writeln('Welcome to Mosaic Terminal')
+        term.writeln('Waiting for connection...')
+        term.writeln('')
+      }
 
-      // Handle user input
+      // Handle user input - capture session ID in closure
+      const sessionId = activeSessionId
       term.onData((data) => {
-        // Send to backend via WebSocket
-        if (activeSessionId) {
-          console.log('[Terminal] Sending terminal_input, data length:', data.length)
+        console.log('[Terminal] Sending terminal_input, session:', sessionId, 'data length:', data.length)
+        sendRaw({
+          session_id: sessionId,
+          type: 'terminal_input',
+          data: data
+        })
+      })
+
+      // Update terminal data
+      terminalData.terminal = term
+      terminalData.fitAddon = fit
+      terminalData.serializeAddon = serialize
+
+      // Update current attached terminal
+      currentAttachedTerminalRef.current = activeSessionId
+
+      // Send terminal_start message if this is the first terminal for this session
+      if (!terminalData.serializedContent) {
+        console.log('[Terminal] Sending terminal_start for session:', activeSessionId)
+        sendRaw({
+          session_id: activeSessionId,
+          type: 'terminal_start'
+        })
+
+        // Send initial newline to trigger bash prompt display
+        setTimeout(() => {
           sendRaw({
             session_id: activeSessionId,
             type: 'terminal_input',
-            data: data
+            data: '\r'
           })
-        }
-      })
+        }, 200)
+      }
 
-      setTerminal(term)
-      terminalInstanceRef.current = term  // Store in ref for immediate access
-      setFitAddon(fit)
-
-      // Send terminal_start message to backend
-      console.log('[Terminal] Sending terminal_start:', {
-        session_id: activeSessionId,
-        type: 'terminal_start'
-      })
-      sendRaw({
-        session_id: activeSessionId,
-        type: 'terminal_start'
-      })
+      term.focus()
     }
 
-    // Cleanup when conditions no longer met - check current values
-    // This cleanup will run when the effect re-runs or component unmounts
-    // IMPORTANT: Only cleanup if we actually have a terminal to clean up
-    if (terminal) {
-      // Check current conditions - if any are false, we should cleanup
-      const shouldKeepTerminal = viewMode === 'workspace' && !terminalCollapsed && activeSessionId
+    // Cleanup function - save serialized content and dispose terminal when DOM unmounts
+    return () => {
+      if (activeSessionId && currentAttachedTerminalRef.current === activeSessionId) {
+        const terminalData = terminalsMapRef.current.get(activeSessionId)
+        if (terminalData && terminalData.terminal && terminalData.serializeAddon) {
+          console.log('[Terminal] Saving serialized content and disposing terminal for session:', activeSessionId)
 
-      if (!shouldKeepTerminal) {
-        console.log('[Terminal] Cleaning up terminal, reason:', {
-          viewMode,
-          terminalCollapsed,
-          activeSessionId
-        })
+          // Save current terminal serialized content
+          terminalData.serializedContent = terminalData.serializeAddon.serialize()
 
-        // Send terminal_stop message
-        if (activeSessionId) {
-          sendRaw({
-            session_id: activeSessionId,
-            type: 'terminal_stop'
-          })
+          // Dispose the terminal
+          terminalData.terminal.dispose()
+          terminalData.terminal = null
+          terminalData.fitAddon = null
+          terminalData.serializeAddon = null
         }
-
-        terminal.dispose()
-        setTerminal(null)
-        terminalInstanceRef.current = null  // Clear ref as well
-        setFitAddon(null)
+        currentAttachedTerminalRef.current = null
       }
     }
+  }, [viewMode, terminalCollapsed, activeSessionId, sendRaw])
 
-    // No cleanup function needed - cleanup is handled above
-  }, [viewMode, terminalCollapsed, activeSessionId, terminal, sendRaw])
-
-  // Handle terminal resize
+  // Handle terminal resize (multi-instance support)
   useEffect(() => {
-    if (terminal && fitAddon && !terminalCollapsed) {
-      // Small delay to ensure DOM is updated
-      const timeoutId = setTimeout(() => {
-        fitAddon.fit()
+    if (viewMode === 'workspace' && !terminalCollapsed && activeSessionId) {
+      const terminalData = terminalsMapRef.current.get(activeSessionId)
+      if (terminalData && terminalData.terminal && terminalData.fitAddon) {
+        // Small delay to ensure DOM is updated
+        const timeoutId = setTimeout(() => {
+          if (terminalData.fitAddon && terminalData.terminal) {
+            terminalData.fitAddon.fit()
 
-        // Notify backend of new size
-        if (activeSessionId) {
-          sendRaw({
-            session_id: activeSessionId,
-            type: 'terminal_resize',
-            cols: terminal.cols,
-            rows: terminal.rows
-          })
-        }
-      }, 100)
+            // Notify backend of new size
+            sendRaw({
+              session_id: activeSessionId,
+              type: 'terminal_resize',
+              cols: terminalData.terminal.cols,
+              rows: terminalData.terminal.rows
+            })
+          }
+        }, 100)
 
-      return () => clearTimeout(timeoutId)
+        return () => clearTimeout(timeoutId)
+      }
     }
-  }, [terminalHeight, terminalCollapsed, terminal, fitAddon, activeSessionId, sendRaw])
+  }, [terminalHeight, terminalCollapsed, viewMode, activeSessionId, sendRaw])
 
   // Load workspace when switching to workspace view or when active session changes
   useEffect(() => {
@@ -1568,9 +1617,39 @@ export default function ChatPage() {
     return roots
   }
 
+  // Cleanup terminal instance for a session
+  const cleanupTerminalForSession = (sessionId: string) => {
+    const terminalData = terminalsMapRef.current.get(sessionId)
+    if (terminalData) {
+      console.log('[Terminal] Cleaning up terminal for session:', sessionId)
+
+      // Send terminal_stop to backend
+      sendRaw({
+        session_id: sessionId,
+        type: 'terminal_stop'
+      })
+
+      // Dispose terminal instance if exists
+      if (terminalData.terminal) {
+        terminalData.terminal.dispose()
+      }
+
+      // Remove from map completely
+      terminalsMapRef.current.delete(sessionId)
+
+      // Clear current attached terminal ref if it's this session
+      if (currentAttachedTerminalRef.current === sessionId) {
+        currentAttachedTerminalRef.current = null
+      }
+    }
+  }
+
   const handleArchiveSession = async (sessionId: string, nodeId: string) => {
     try {
       await apiClient.archiveSession(mosaicId, nodeId, sessionId)
+
+      // Cleanup terminal instance for this session
+      cleanupTerminalForSession(sessionId)
 
       // Remove from current list
       setNodes((prev) =>
@@ -1616,6 +1695,11 @@ export default function ChatPage() {
     try {
       setBatchArchiving(true)
       const result = await apiClient.batchArchiveSessions(mosaicId, batchArchivingNode.nodeId)
+
+      // Cleanup terminal instances for all archived sessions
+      batchArchivingNode.closedSessionIds.forEach(sessionId => {
+        cleanupTerminalForSession(sessionId)
+      })
 
       // Remove archived sessions from current list
       setNodes((prev) =>
@@ -2583,11 +2667,43 @@ export default function ChatPage() {
                         size="sm"
                         className="h-6 w-6 p-0"
                         onClick={() => {
-                          if (terminal) {
-                            terminal.clear()
+                          if (activeSessionId) {
+                            const terminalData = terminalsMapRef.current.get(activeSessionId)
+                            if (terminalData) {
+                              // 1. Stop the backend terminal process
+                              console.log('[Terminal] Restarting terminal for session:', activeSessionId)
+                              sendRaw({
+                                session_id: activeSessionId,
+                                type: 'terminal_stop'
+                              })
+
+                              // 2. Clear serialized content and display
+                              terminalData.serializedContent = ''
+                              if (terminalData.terminal) {
+                                terminalData.terminal.clear()
+                                terminalData.terminal.writeln('Terminal restarting...')
+                              }
+
+                              // 3. Restart terminal after a short delay
+                              setTimeout(() => {
+                                sendRaw({
+                                  session_id: activeSessionId,
+                                  type: 'terminal_start'
+                                })
+
+                                // Send initial newline to trigger bash prompt display
+                                setTimeout(() => {
+                                  sendRaw({
+                                    session_id: activeSessionId,
+                                    type: 'terminal_input',
+                                    data: '\r'
+                                  })
+                                }, 200)
+                              }, 100)
+                            }
                           }
                         }}
-                        title="Clear terminal"
+                        title="Clear and restart terminal"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
@@ -2606,14 +2722,16 @@ export default function ChatPage() {
                     </div>
                   </div>
 
-                  {/* Terminal Content */}
-                  {!terminalCollapsed && (
-                    <div
-                      ref={terminalRef}
-                      className="flex-1 overflow-hidden"
-                      style={{ height: '100%', width: '100%' }}
-                    />
-                  )}
+                  {/* Terminal Content - Always rendered but visibility controlled by CSS */}
+                  <div
+                    ref={terminalRef}
+                    className="flex-1 overflow-hidden"
+                    style={{
+                      height: '100%',
+                      width: '100%',
+                      display: terminalCollapsed ? 'none' : 'block'
+                    }}
+                  />
                 </div>
               </div>
             </div>
