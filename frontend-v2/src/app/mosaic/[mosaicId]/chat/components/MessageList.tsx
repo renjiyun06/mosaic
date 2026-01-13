@@ -63,6 +63,10 @@ export function MessageList({
     <div
       ref={messagesContainerRef}
       className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6"
+      style={{
+        scrollbarWidth: 'thin',
+        scrollbarColor: 'hsl(var(--border)) transparent'
+      }}
     >
       {messages.length === 0 ? (
         <div className="flex items-center justify-center h-full text-muted-foreground">

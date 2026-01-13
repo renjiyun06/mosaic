@@ -668,7 +668,13 @@ export function WorkspaceView({
 
         {/* File Tree Content */}
         {!sidebarCollapsed && (
-          <div className="py-2 overflow-auto flex-1">
+          <div
+            className="py-2 overflow-auto flex-1"
+            style={{
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'hsl(var(--border)) transparent'
+            }}
+          >
             {workspaceLoading ? (
               <div className="p-4 text-center text-sm text-muted-foreground">
                 <Loader2 className="h-5 w-5 sm:h-6 sm:w-6 animate-spin mx-auto mb-2" />
@@ -728,7 +734,13 @@ export function WorkspaceView({
                 </div>
               </div>
               {/* File content */}
-              <div className="flex-1 overflow-auto">
+              <div
+                className="flex-1 overflow-auto"
+                style={{
+                  scrollbarWidth: 'thin',
+                  scrollbarColor: 'hsl(var(--border)) transparent'
+                }}
+              >
                 <pre className="p-2 sm:p-3 md:p-4 text-xs sm:text-sm font-mono">
                   <code>{selectedFile.content}</code>
                 </pre>
