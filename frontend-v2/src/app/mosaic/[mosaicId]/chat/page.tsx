@@ -814,12 +814,38 @@ export default function ChatPage() {
     prevViewMode.current = currentMode
   }, [activeSessionId, viewMode, isAtBottom])
 
+  // Handle nodes loading completion - load messages when nodes first become available
+  // This handles the case where activeSessionId is restored from localStorage before nodes load
+  const prevNodesLength = useRef(0)
+  useEffect(() => {
+    // Detect when nodes change from empty to non-empty (first load only)
+    const nodesJustLoaded = prevNodesLength.current === 0 && nodes.length > 0
+    prevNodesLength.current = nodes.length
+
+    // If nodes just loaded and we have an active session without messages, load them
+    if (nodesJustLoaded && activeSessionId) {
+      setSessionLoadings(prev => ({
+        ...prev,
+        [activeSessionId]: true
+      }))
+      loadMessages(activeSessionId)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes.length, activeSessionId])
+
   // Subscribe to WebSocket messages for active session
   useEffect(() => {
     if (!activeSessionId) return
 
     // Wait until nodes are loaded before loading messages
     if (nodes.length === 0) return
+
+    // Immediately clear messages and show loading state when switching sessions
+    setMessages([])
+    setSessionLoadings(prev => ({
+      ...prev,
+      [activeSessionId]: true
+    }))
 
     // Load message history from database
     loadMessages(activeSessionId)
@@ -976,7 +1002,7 @@ export default function ChatPage() {
     return () => {
       unsubscribe()
     }
-  }, [activeSessionId, nodes, subscribe])
+  }, [activeSessionId, subscribe])
 
   // Save session inputs to localStorage whenever they change
   useEffect(() => {
@@ -1011,7 +1037,7 @@ export default function ChatPage() {
     // If no saved state (first time entering this session-view combo), scroll to bottom
     if (!savedState) {
       requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+        messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
       })
       return
     }
@@ -2460,10 +2486,17 @@ export default function ChatPage() {
               <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6">
               {messages.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-muted-foreground">
-                  <div className="text-center">
-                    <MessageSquare className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 mx-auto mb-3 sm:mb-4 opacity-30" />
-                    <p className="text-sm sm:text-base">发送消息开始对话</p>
-                  </div>
+                  {currentLoading ? (
+                    <div className="text-center">
+                      <Loader2 className="h-8 w-8 sm:h-10 sm:w-10 md:h-12 md:w-12 animate-spin mx-auto mb-2" />
+                      <p className="text-sm sm:text-base">正在加载消息...</p>
+                    </div>
+                  ) : (
+                    <div className="text-center">
+                      <MessageSquare className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 mx-auto mb-3 sm:mb-4 opacity-30" />
+                      <p className="text-sm sm:text-base">发送消息开始对话</p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <>
