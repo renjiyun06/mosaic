@@ -625,7 +625,8 @@ export default function ChatPage() {
   }, [mosaicId])
 
   // Load nodes and sessions function
-  const loadNodesAndSessions = useCallback(async () => {
+  // autoSelectSession: whether to automatically select a session when no session is active
+  const loadNodesAndSessions = useCallback(async (autoSelectSession = true) => {
     try {
       // Load all nodes
       const nodesData = await apiClient.listNodes(mosaicId)
@@ -674,42 +675,46 @@ export default function ChatPage() {
 
       setNodes(nodesWithSessions)
 
-      // Auto-select session (prioritize saved session, then first active session)
-      const allSessions = nodesWithSessions.flatMap((n) => n.sessions)
+      // Only auto-select session if the flag is true
+      if (autoSelectSession) {
+        // Auto-select session (prioritize saved session, then first active session)
+        const allSessions = nodesWithSessions.flatMap((n) => n.sessions)
 
-      // 1. Check if there's a saved session selection
-      const savedSessionId = typeof window !== 'undefined'
-        ? localStorage.getItem(`mosaic-${mosaicId}-active-session`)
-        : null
+        // 1. Check if there's a saved session selection
+        const savedSessionId = typeof window !== 'undefined'
+          ? localStorage.getItem(`mosaic-${mosaicId}-active-session`)
+          : null
 
-      let shouldSetSession = false
-      let targetSessionId = null
+        let shouldSetSession = false
+        let targetSessionId = null
 
-      // 2. If saved session exists and is still available (not archived), restore it
-      if (savedSessionId && allSessions.some(s => s.session_id === savedSessionId)) {
-        targetSessionId = savedSessionId
-        shouldSetSession = true
-      } else {
-        // 3. Otherwise, select first active session or first session
-        const activeSession = allSessions.find((s) => s.status === SessionStatus.ACTIVE)
-        if (activeSession) {
-          targetSessionId = activeSession.session_id
+        // 2. If saved session exists and is still available (not archived), restore it
+        if (savedSessionId && allSessions.some(s => s.session_id === savedSessionId)) {
+          targetSessionId = savedSessionId
           shouldSetSession = true
-        } else if (allSessions.length > 0) {
-          // If no active session, select first one (to view history)
-          targetSessionId = allSessions[0].session_id
-          shouldSetSession = true
+        } else if (!activeSessionId) {
+          // 3. Only select a new session if no session is currently active
+          // This prevents auto-selection after archiving
+          const activeSession = allSessions.find((s) => s.status === SessionStatus.ACTIVE)
+          if (activeSession) {
+            targetSessionId = activeSession.session_id
+            shouldSetSession = true
+          } else if (allSessions.length > 0) {
+            // If no active session, select first one (to view history)
+            targetSessionId = allSessions[0].session_id
+            shouldSetSession = true
+          }
         }
-      }
 
-      // 4. Only update if needed (avoid unnecessary re-renders)
-      if (shouldSetSession && targetSessionId !== activeSessionId) {
-        selectSession(targetSessionId)
+        // 4. Only update if needed (avoid unnecessary re-renders)
+        if (shouldSetSession && targetSessionId !== activeSessionId) {
+          selectSession(targetSessionId)
+        }
       }
     } catch (error) {
       console.error("Failed to load nodes and sessions:", error)
     }
-  }, [mosaicId, activeSessionId, selectSession])
+  }, [mosaicId, selectSession])
 
   // Mobile detection effect
   useEffect(() => {
