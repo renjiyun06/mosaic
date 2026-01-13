@@ -579,6 +579,11 @@ export default function ChatPage() {
     wasAtBottom: boolean
   }>>({})
 
+  // Track scroll restoration and message updates
+  const justSwitchedSessionRef = useRef<boolean>(false)
+  const prevMessageCountRef = useRef<number>(0)
+  const hasInitiallyScrolledRef = useRef<Record<string, boolean>>({}) // Track if we've done initial scroll for each session-view combo
+
   // Create session dialog state
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
@@ -808,16 +813,35 @@ export default function ChatPage() {
       if (container) {
         const stateKey = `${prevSessionId}-${prevMode}`
         const messageCount = sessionMessageCounts.current[stateKey] || 0
+        const scrollTop = container.scrollTop
+        const wasAtBottom = isAtBottom()
+
+        console.log(`[Scroll Save] Saving scroll state for ${stateKey}:`, {
+          scrollTop,
+          messageCount,
+          wasAtBottom
+        })
 
         setSessionScrollStates(prev => ({
           ...prev,
           [stateKey]: {
-            scrollTop: container.scrollTop,
-            messageCount: messageCount,
-            wasAtBottom: isAtBottom()
+            scrollTop,
+            messageCount,
+            wasAtBottom
           }
         }))
+
+        // Clear the initialized flag for the session we're leaving
+        // This ensures proper re-initialization when we come back
+        delete hasInitiallyScrolledRef.current[stateKey]
       }
+    }
+
+    // Mark that we just switched sessions
+    if (currentSessionId && (prevSessionId !== currentSessionId || prevMode !== currentMode)) {
+      justSwitchedSessionRef.current = true
+      prevMessageCountRef.current = 0 // Reset message count for new session
+      console.log(`[Session Switch] Switched to ${currentSessionId}-${currentMode}`)
     }
 
     // Update refs for next comparison
@@ -1035,7 +1059,7 @@ export default function ChatPage() {
     sessionMessageCounts.current[stateKey] = messages.length
   }, [messages.length, activeSessionId, viewMode])
 
-  // Smart auto-scroll: restore position or scroll to bottom based on session state
+  // Handle scroll restoration when switching sessions or initial load
   useEffect(() => {
     if (!activeSessionId) return
 
@@ -1043,42 +1067,127 @@ export default function ChatPage() {
     if (!container) return
 
     const stateKey = `${activeSessionId}-${viewMode}`
+
+    // Check if we need to handle initial scroll for this session
+    const needsInitialScroll = !hasInitiallyScrolledRef.current[stateKey] && messages.length > 0
+
+    // Skip if we haven't switched sessions and already initialized
+    if (!justSwitchedSessionRef.current && !needsInitialScroll) return
+
+    // Wait for messages to load
+    if (messages.length === 0) return
+
     const savedState = sessionScrollStates[stateKey]
 
-    // If no saved state (first time entering this session-view combo), scroll to bottom
-    if (!savedState) {
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
-      })
-      return
-    }
+    // We have messages loaded, time to restore or initialize scroll
+    justSwitchedSessionRef.current = false // Reset the flag
+    hasInitiallyScrolledRef.current[stateKey] = true // Mark this session as initialized
 
-    // If message count increased (new messages arrived), only scroll to bottom if user is currently at bottom
-    if (messages.length > savedState.messageCount) {
-      // Check current scroll position in real-time to see if user is at bottom
-      const currentlyAtBottom = isAtBottom()
+    console.log(`[Scroll Restore] Processing scroll for ${stateKey}, message count: ${messages.length}, has saved state: ${!!savedState}`)
 
-      // Only auto-scroll if user is currently at bottom
-      if (currentlyAtBottom) {
+    if (savedState) {
+      console.log(`[Scroll Restore] Restoring scroll for ${stateKey}:`, savedState)
+
+      // Check if new messages arrived while we were away
+      if (messages.length > savedState.messageCount && savedState.wasAtBottom) {
+        // User was at bottom before, scroll to bottom to see new messages
+        console.log(`[Scroll Restore] User was at bottom, showing new messages`)
         requestAnimationFrame(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
+          requestAnimationFrame(() => {
+            if (container) {
+              container.scrollTop = container.scrollHeight
+            }
+            setTimeout(() => {
+              if (container) {
+                container.scrollTop = container.scrollHeight
+              }
+            }, 50)
+          })
+        })
+      } else {
+        // Restore exact scroll position
+        console.log(`[Scroll Restore] Restoring to saved position: ${savedState.scrollTop}`)
+        requestAnimationFrame(() => {
+          if (container) {
+            container.scrollTop = savedState.scrollTop
+          }
+          // Double-check after a delay
+          setTimeout(() => {
+            if (container && Math.abs(container.scrollTop - savedState.scrollTop) > 10) {
+              console.log(`[Scroll Restore] Re-applying scroll position`)
+              container.scrollTop = savedState.scrollTop
+            }
+          }, 100)
         })
       }
-      // If user is not at bottom, don't scroll - they're reading history
-    } else if (messages.length === savedState.messageCount) {
-      // Same number of messages (just switching back), restore scroll position
-      requestAnimationFrame(() => {
-        if (container) {
-          container.scrollTop = savedState.scrollTop
-        }
-      })
     } else {
-      // Message count decreased (messages deleted?), scroll to bottom for safety
+      // First time in this session, scroll to bottom
+      console.log(`[Scroll Restore] First time in session, scrolling to bottom`)
       requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+        requestAnimationFrame(() => {
+          if (container) {
+            container.scrollTop = container.scrollHeight
+          }
+          setTimeout(() => {
+            if (container) {
+              container.scrollTop = container.scrollHeight
+            }
+          }, 50)
+        })
       })
     }
-  }, [messages, viewMode, activeSessionId, sessionScrollStates, isAtBottom])
+
+    // Update the message count tracker
+    prevMessageCountRef.current = messages.length
+  }, [messages.length, activeSessionId, viewMode, sessionScrollStates])
+
+  // Handle auto-scroll for new messages in the current session
+  useEffect(() => {
+    if (!activeSessionId) return
+
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    const stateKey = `${activeSessionId}-${viewMode}`
+
+    // Skip if we haven't done initial scroll yet (still loading)
+    if (!hasInitiallyScrolledRef.current[stateKey]) return
+
+    // Skip if we just switched sessions (handled by the other effect)
+    if (justSwitchedSessionRef.current) return
+
+    // Check if we have new messages (and not just cleared messages)
+    const hasNewMessages = messages.length > prevMessageCountRef.current && prevMessageCountRef.current > 0
+
+    if (hasNewMessages) {
+      // Check if user is currently at bottom
+      const currentlyAtBottom = isAtBottom()
+
+      console.log(`[New Message] New message detected in current session. At bottom: ${currentlyAtBottom}`)
+
+      if (currentlyAtBottom) {
+        // User is at bottom, auto-scroll to show new message
+        console.log(`[New Message] Auto-scrolling to bottom`)
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (container) {
+              container.scrollTop = container.scrollHeight
+            }
+            setTimeout(() => {
+              if (container) {
+                container.scrollTop = container.scrollHeight
+              }
+            }, 50)
+          })
+        })
+      } else {
+        console.log(`[New Message] User is scrolled up, not auto-scrolling`)
+      }
+    }
+
+    // Update the message count tracker
+    prevMessageCountRef.current = messages.length
+  }, [messages, activeSessionId, viewMode, isAtBottom])
 
   // Cleanup pending session_started resolvers on unmount
   useEffect(() => {
