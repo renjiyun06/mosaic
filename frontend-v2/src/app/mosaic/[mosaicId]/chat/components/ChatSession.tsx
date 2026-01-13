@@ -160,7 +160,15 @@ export function ChatSession({
         created_at: wsMessage.timestamp,
       }
 
-      setMessages((prev) => [...prev, newMessage])
+      // Add message with deduplication check
+      setMessages((prev) => {
+        // Check if message already exists (prevent duplicates in race conditions)
+        if (prev.some(msg => msg.message_id === wsMessage.message_id)) {
+          console.log("[ChatSession] Duplicate message detected, skipping:", wsMessage.message_id)
+          return prev
+        }
+        return [...prev, newMessage]
+      })
 
       // Collapse thinking, system, and tool messages by default
       if (
