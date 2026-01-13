@@ -25,6 +25,7 @@ import { Loader2, MessageSquare, ChevronLeft, ChevronRight, Copy, Check, X } fro
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
 import { SessionStatus, type NodeOut, type SessionOut } from "@/lib/types"
+import { SessionViewDialog } from "@/components/session-view-dialog"
 
 // Session status display configuration
 const SESSION_STATUS_CONFIG: Record<SessionStatus, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -63,6 +64,10 @@ export default function SessionsPage() {
 
   // Copy state
   const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null)
+
+  // Session view dialog state
+  const [viewDialogOpen, setViewDialogOpen] = useState(false)
+  const [selectedSession, setSelectedSession] = useState<{ sessionId: string; nodeId: string } | null>(null)
 
   // Mobile detection effect
   useEffect(() => {
@@ -205,6 +210,12 @@ export default function SessionsPage() {
     return `${sessionId.substring(0, 8)}...${sessionId.substring(sessionId.length - 8)}`
   }
 
+  // Handle session ID click to open view dialog
+  const handleSessionIdClick = (sessionId: string, nodeId: string) => {
+    setSelectedSession({ sessionId, nodeId })
+    setViewDialogOpen(true)
+  }
+
   // Loading nodes state
   if (loadingNodes) {
     return (
@@ -332,7 +343,10 @@ export default function SessionsPage() {
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
-                    <CardTitle className="text-base font-mono text-sm break-all">
+                    <CardTitle
+                      className="text-base font-mono text-sm break-all cursor-pointer hover:text-primary transition-colors"
+                      onClick={() => handleSessionIdClick(session.session_id, session.node_id)}
+                    >
                       {session.session_id}
                     </CardTitle>
                   </div>
@@ -428,7 +442,12 @@ export default function SessionsPage() {
                     <TableRow key={session.id}>
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-2">
-                          <span className="font-mono text-sm">{truncateSessionId(session.session_id)}</span>
+                          <span
+                            className="font-mono text-sm cursor-pointer hover:text-primary transition-colors"
+                            onClick={() => handleSessionIdClick(session.session_id, session.node_id)}
+                          >
+                            {truncateSessionId(session.session_id)}
+                          </span>
                           <button
                             onClick={() => handleCopySessionId(session.session_id)}
                             className="text-muted-foreground hover:text-foreground transition-colors"
@@ -526,6 +545,15 @@ export default function SessionsPage() {
           </div>
         </div>
       )}
+
+      {/* Session View Dialog */}
+      <SessionViewDialog
+        open={viewDialogOpen}
+        onOpenChange={setViewDialogOpen}
+        mosaicId={Number(mosaicId)}
+        sessionId={selectedSession?.sessionId || null}
+        nodeId={selectedSession?.nodeId}
+      />
     </div>
   )
 }
