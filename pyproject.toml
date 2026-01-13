@@ -29,6 +29,7 @@ dependencies = [
     "sqlmodel>=0.0.22",
     "tomli>=2.0.0",
     "tomli-w>=1.0.0",
+    "twikit>=2.3.3",
     "uvicorn>=0.38.0",
     "youtube-transcript-api>=1.2.3",
     "yt-dlp>=2025.12.8",
