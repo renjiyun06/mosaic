@@ -1061,7 +1061,7 @@ export default function ChatPage() {
       // Only auto-scroll if user is currently at bottom
       if (currentlyAtBottom) {
         requestAnimationFrame(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+          messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
         })
       }
       // If user is not at bottom, don't scroll - they're reading history
