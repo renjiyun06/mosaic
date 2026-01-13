@@ -20,53 +20,40 @@ export function MessageList({
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const prevMessageCountRef = useRef<number>(0)
-  const hasScrolledWithContentRef = useRef<boolean>(false)
+  const autoScrollEnabledRef = useRef<boolean>(true)
+
+  // Monitor user scroll behavior to update auto-scroll state
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    const handleScroll = () => {
+      const isNearBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight < 100
+
+      // Enable auto-scroll when user scrolls near bottom, disable when scrolling up
+      autoScrollEnabledRef.current = isNearBottom
+    }
+
+    container.addEventListener("scroll", handleScroll)
+    return () => container.removeEventListener("scroll", handleScroll)
+  }, [])
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
-    console.log('[MessageList] useEffect triggered', {
-      isVisible,
-      messagesLength: messages.length,
-      prevMessageCount: prevMessageCountRef.current,
-      hasScrolledWithContent: hasScrolledWithContentRef.current
-    })
+    if (!isVisible) return
 
-    // Only scroll when visible
-    if (!isVisible) {
-      console.log('[MessageList] Not visible, skipping scroll')
-      return
-    }
-
-    const container = messagesContainerRef.current
-    if (!container) {
-      console.log('[MessageList] Container not found')
-      return
-    }
-
-    const isAtBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight < 100
-
-    console.log('[MessageList] Scroll check', {
-      isAtBottom,
-      scrollHeight: container.scrollHeight,
-      scrollTop: container.scrollTop,
-      clientHeight: container.clientHeight,
-      shouldScroll: isAtBottom || messages.length > prevMessageCountRef.current
-    })
-
-    // Scroll to bottom only if user is near bottom AND there are new messages
-    if (messages.length > prevMessageCountRef.current && isAtBottom) {
-      // First time scroll with actual content: instant (no animation)
-      // Subsequent scrolls: smooth animation
-      // Note: Only count as "scrolled" if there are actual messages
-      const behavior = (hasScrolledWithContentRef.current || messages.length === 0) ? "smooth" : "instant"
-      console.log('[MessageList] Scrolling with behavior:', behavior)
-      messagesEndRef.current?.scrollIntoView({ behavior })
-
-      // Only mark as scrolled if we have actual messages
-      if (messages.length > 0) {
-        hasScrolledWithContentRef.current = true
-      }
+    // Only scroll when auto-scroll is enabled and there are new messages
+    if (
+      messages.length > prevMessageCountRef.current &&
+      autoScrollEnabledRef.current
+    ) {
+      // First load: instant scroll (no animation)
+      // Subsequent messages: smooth scroll
+      const isFirstLoad = prevMessageCountRef.current === 0
+      messagesEndRef.current?.scrollIntoView({
+        behavior: isFirstLoad ? "instant" : "smooth",
+      })
     }
 
     prevMessageCountRef.current = messages.length
