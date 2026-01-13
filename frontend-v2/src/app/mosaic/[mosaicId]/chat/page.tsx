@@ -481,6 +481,11 @@ export default function ChatPage() {
   const [workspaceLoading, setWorkspaceLoading] = useState(false)
   const [fileContentLoading, setFileContentLoading] = useState(false)
 
+  // Per-node workspace state tracking (to preserve selectedFile when switching sessions/nodes)
+  const [nodeWorkspaceStates, setNodeWorkspaceStates] = useState<Record<string, {
+    selectedFile: { path: string; content: string; language: string | null } | null
+  }>>({})
+
   // Terminal panel state (for workspace mode)
   const [terminalHeight, setTerminalHeight] = useState<number>(() => {
     if (typeof window === 'undefined') return 300
@@ -599,6 +604,7 @@ export default function ChatPage() {
   const sessionMessageCounts = useRef<Record<string, number>>({}) // Track message count per session-view combo
   const prevActiveSessionId = useRef<string | null>(null)
   const prevViewMode = useRef<ViewMode>('chat')
+  const prevNodeId = useRef<string | null>(null) // Track previous node ID for workspace state
 
   // Utility function to check if user is at bottom of messages
   const isAtBottom = useCallback(() => {
@@ -1391,12 +1397,62 @@ export default function ChatPage() {
     }
   }, [terminalHeight, terminalCollapsed, viewMode, activeSessionId, sendRaw])
 
-  // Load workspace when switching to workspace view or when active session changes
+  // Save workspace state when switching away from a node
   useEffect(() => {
-    if (viewMode === 'workspace' && currentSessionInfo) {
-      loadWorkspace(currentSessionInfo.nodeId)
+    // Find current node ID from active session
+    let currentNodeId: string | null = null
+    if (activeSessionId) {
+      for (const node of nodes) {
+        const session = node.sessions.find((s) => s.session_id === activeSessionId)
+        if (session) {
+          currentNodeId = node.node_id
+          break
+        }
+      }
     }
-  }, [viewMode, activeSessionId])
+
+    const prevNode = prevNodeId.current
+
+    // Save previous node's selectedFile state if node changed
+    if (prevNode && prevNode !== currentNodeId) {
+      // Save the current selectedFile before switching
+      setNodeWorkspaceStates(prev => ({
+        ...prev,
+        [prevNode]: { selectedFile }
+      }))
+    }
+
+    // Update ref for next comparison
+    prevNodeId.current = currentNodeId
+  }, [activeSessionId, nodes, selectedFile])
+
+  // Load workspace and restore state when switching to workspace view or when active session changes
+  useEffect(() => {
+    if (viewMode !== 'workspace' || !activeSessionId) return
+
+    // Find node ID from active session
+    let nodeId: string | null = null
+    for (const node of nodes) {
+      const session = node.sessions.find((s) => s.session_id === activeSessionId)
+      if (session) {
+        nodeId = node.node_id
+        break
+      }
+    }
+
+    if (nodeId) {
+      loadWorkspace(nodeId)
+
+      // Restore this node's selectedFile state if available
+      const savedState = nodeWorkspaceStates[nodeId]
+      if (savedState?.selectedFile) {
+        setSelectedFile(savedState.selectedFile)
+      } else {
+        // Clear selectedFile when switching to a node with no saved state
+        setSelectedFile(null)
+      }
+    }
+  }, [viewMode, activeSessionId, nodes])
 
   const loadMessages = async (sessionId: string) => {
     try {
