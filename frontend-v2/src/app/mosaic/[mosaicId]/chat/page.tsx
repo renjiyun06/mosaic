@@ -583,6 +583,7 @@ export default function ChatPage() {
   const justSwitchedSessionRef = useRef<boolean>(false)
   const prevMessageCountRef = useRef<number>(0)
   const hasInitiallyScrolledRef = useRef<Record<string, boolean>>({}) // Track if we've done initial scroll for each session-view combo
+  const messagesJustClearedRef = useRef<boolean>(false) // Track if messages were just cleared to prevent saving invalid scroll
 
   // Create session dialog state
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -810,7 +811,8 @@ export default function ChatPage() {
     // Save scroll state if session or view mode changed
     if (prevSessionId && (prevSessionId !== currentSessionId || prevMode !== currentMode)) {
       const container = messagesContainerRef.current
-      if (container) {
+      // Don't save if messages were just cleared (would save invalid position)
+      if (container && !messagesJustClearedRef.current) {
         const stateKey = `${prevSessionId}-${prevMode}`
         const messageCount = sessionMessageCounts.current[stateKey] || 0
         const scrollTop = container.scrollTop
@@ -875,7 +877,40 @@ export default function ChatPage() {
     // Wait until nodes are loaded before loading messages
     if (nodes.length === 0) return
 
-    // Immediately clear messages and show loading state when switching sessions
+    // Before clearing messages, ensure scroll position is saved
+    // This prevents race condition where setMessages([]) resets scroll before it's saved
+    const prevSessionId = prevActiveSessionId.current
+    const prevMode = prevViewMode.current
+    if (prevSessionId && prevSessionId !== activeSessionId) {
+      const container = messagesContainerRef.current
+      if (container) {
+        const stateKey = `${prevSessionId}-${prevMode}`
+        const messageCount = sessionMessageCounts.current[stateKey] || 0
+        const scrollTop = container.scrollTop
+        const wasAtBottom = isAtBottom()
+
+        // Only save if we have a valid scroll position (not already reset)
+        if (scrollTop > 0 || wasAtBottom || messageCount > 0) {
+          console.log(`[Scroll Save - Pre-clear] Emergency save for ${stateKey}:`, {
+            scrollTop,
+            messageCount,
+            wasAtBottom
+          })
+
+          setSessionScrollStates(prev => ({
+            ...prev,
+            [stateKey]: {
+              scrollTop,
+              messageCount,
+              wasAtBottom
+            }
+          }))
+        }
+      }
+    }
+
+    // Now safe to clear messages and show loading state
+    messagesJustClearedRef.current = true // Set flag to prevent invalid scroll save
     setMessages([])
     setSessionLoadings(prev => ({
       ...prev,
@@ -884,6 +919,11 @@ export default function ChatPage() {
 
     // Load message history from database
     loadMessages(activeSessionId)
+
+    // Reset the flag after a small delay (after other effects have run)
+    setTimeout(() => {
+      messagesJustClearedRef.current = false
+    }, 0)
 
     // Reset session stats and collapsed messages when switching sessions
     setSessionStats(null)
