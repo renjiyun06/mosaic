@@ -20,6 +20,7 @@ from ..schema.node import (
     WorkspaceInfoOut,
     WorkspaceFilesOut,
     WorkspaceFileContentOut,
+    CodeServerStatusOut,
 )
 from ..model import Mosaic, Node, Session
 from ..dep import get_db_session, get_current_user
@@ -1409,3 +1410,357 @@ async def get_workspace_file_content(
 
     logger.info(f"File content retrieved: path={path}, size={file_size}, truncated={truncated}")
     return SuccessResponse(data=file_content_out)
+
+
+# ==================== Code Server API Endpoints ====================
+
+@router.post("/{node_id}/code-server/start", response_model=SuccessResponse[CodeServerStatusOut])
+async def start_code_server(
+    mosaic_id: int,
+    node_id: str,
+    req: Request,
+    session: SessionDep,
+    current_user: CurrentUserDep,
+):
+    """Start code-server instance for a node
+
+    API Layer responsibilities:
+    1. Verify node exists and user has permission (ownership check)
+    2. Construct workspace path: {instance_path}/users/{user_id}/{mosaic_id}/{node.id}/
+    3. Call CodeServerManager.get_or_create_instance(node.id, workspace_path)
+    4. Return instance information (port, url, status, started_at, ref_count)
+
+    Returns:
+        CodeServerStatusOut: Instance information with port, url, status, timestamp, and ref_count
+
+    Raises:
+        NotFoundError: Node not found or deleted
+        PermissionError: Current user doesn't own this mosaic
+        InternalError: Failed to start code-server (from manager)
+
+    Notes:
+    - Business logic handled by CodeServerManager
+    - Instances are shared per node with reference counting
+    - See CodeServerManager.get_or_create_instance() for detailed logic
+    """
+    logger.info(
+        f"Starting code-server: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"user_id={current_user.id}"
+    )
+
+    # 1. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Query node
+    node_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.node_id == node_id,
+        Node.deleted_at.is_(None)
+    )
+    node_result = await session.execute(node_stmt)
+    node = node_result.scalar_one_or_none()
+
+    if not node:
+        logger.warning(f"Node not found: mosaic_id={mosaic_id}, node_id={node_id}")
+        raise NotFoundError("Node not found")
+
+    # 3. Construct workspace path
+    instance_path = req.app.state.instance_path
+    workspace_path = instance_path / "users" / str(current_user.id) / str(mosaic_id) / str(node.id)
+
+    # 4. Get CodeServerManager from app state
+    code_server_manager = req.app.state.code_server_manager
+
+    # 5. Get external host from config (for building public-facing URLs)
+    code_server_config = req.app.state.config.get('code_server', {})
+    external_host = code_server_config.get('external_host', 'localhost')
+
+    # 6. Call manager to get or create instance
+    try:
+        instance = await code_server_manager.get_or_create_instance(node, workspace_path)
+        logger.info(
+            f"Code-server instance started: node_db_id={node.id}, port={instance.port}, "
+            f"ref_count={instance.ref_count}"
+        )
+
+        # 7. Build response with external host (public-facing URL)
+        status_out = CodeServerStatusOut(
+            status=instance.status,
+            port=instance.port,
+            url=f"http://{external_host}:{instance.port}",
+            started_at=instance.started_at,
+            ref_count=instance.ref_count
+        )
+
+        return SuccessResponse(data=status_out)
+
+    except RuntimeError as e:
+        logger.error(f"Failed to start code-server: {e}")
+        raise InternalError(f"Failed to start code-server: {e}")
+
+
+@router.post("/{node_id}/code-server/stop", response_model=SuccessResponse[None])
+async def stop_code_server(
+    mosaic_id: int,
+    node_id: str,
+    req: Request,
+    session: SessionDep,
+    current_user: CurrentUserDep,
+):
+    """Stop code-server instance for a node
+
+    API Layer responsibilities:
+    1. Verify node exists and user has permission (ownership check)
+    2. Call CodeServerManager.release_instance(node.id)
+    3. Return success response
+
+    Returns:
+        SuccessResponse[None]: Empty success response
+
+    Raises:
+        NotFoundError: Node not found or deleted
+        PermissionError: Current user doesn't own this mosaic
+
+    Notes:
+    - Business logic handled by CodeServerManager
+    - Operation is idempotent (safe to call multiple times)
+    - Uses reference counting (see CodeServerManager.release_instance())
+    """
+    logger.info(
+        f"Stopping code-server: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"user_id={current_user.id}"
+    )
+
+    # 1. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Query node
+    node_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.node_id == node_id,
+        Node.deleted_at.is_(None)
+    )
+    node_result = await session.execute(node_stmt)
+    node = node_result.scalar_one_or_none()
+
+    if not node:
+        logger.warning(f"Node not found: mosaic_id={mosaic_id}, node_id={node_id}")
+        raise NotFoundError("Node not found")
+
+    # 3. Get CodeServerManager from app state
+    code_server_manager = req.app.state.code_server_manager
+
+    # 4. Release instance (decrement ref_count, auto-stop if reaches 0)
+    await code_server_manager.release_instance(node)
+    logger.info(f"Code-server instance released: node_db_id={node.id}")
+
+    return SuccessResponse(data=None)
+
+
+@router.post("/{node_id}/code-server/force-stop", response_model=SuccessResponse[None])
+async def force_stop_code_server(
+    mosaic_id: int,
+    node_id: str,
+    req: Request,
+    session: SessionDep,
+    current_user: CurrentUserDep,
+):
+    """Force stop code-server instance for a node
+
+    API Layer responsibilities:
+    1. Verify node exists and user has permission (ownership check)
+    2. Call CodeServerManager.stop_instance(node.id, force=True)
+    3. Return success response
+
+    Returns:
+        SuccessResponse[None]: Empty success response
+
+    Raises:
+        NotFoundError: Node not found or deleted
+        PermissionError: Current user doesn't own this mosaic
+
+    Notes:
+    - Business logic handled by CodeServerManager
+    - Force stops the instance regardless of ref_count
+    - Operation is idempotent (safe to call multiple times)
+    - Use this when you want to immediately shutdown the instance
+    """
+    logger.info(
+        f"Force stopping code-server: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"user_id={current_user.id}"
+    )
+
+    # 1. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Query node
+    node_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.node_id == node_id,
+        Node.deleted_at.is_(None)
+    )
+    node_result = await session.execute(node_stmt)
+    node = node_result.scalar_one_or_none()
+
+    if not node:
+        logger.warning(f"Node not found: mosaic_id={mosaic_id}, node_id={node_id}")
+        raise NotFoundError("Node not found")
+
+    # 3. Get CodeServerManager from app state
+    code_server_manager = req.app.state.code_server_manager
+
+    # 4. Force stop instance (ignore ref_count)
+    await code_server_manager.stop_instance(node, force=True)
+    logger.info(f"Code-server instance force stopped: node_db_id={node.id}")
+
+    return SuccessResponse(data=None)
+
+
+@router.get("/{node_id}/code-server/status", response_model=SuccessResponse[CodeServerStatusOut])
+async def get_code_server_status(
+    mosaic_id: int,
+    node_id: str,
+    req: Request,
+    session: SessionDep,
+    current_user: CurrentUserDep,
+):
+    """Get code-server instance status for a node
+
+    API Layer responsibilities:
+    1. Verify node exists and user has permission (ownership check)
+    2. Call CodeServerManager.get_instance_status(node.id)
+    3. Return status information (or 'stopped' if not found)
+
+    Returns:
+        CodeServerStatusOut: Status, port, url, timestamps, ref_count
+
+    Raises:
+        NotFoundError: Node not found or deleted
+        PermissionError: Current user doesn't own this mosaic
+
+    Notes:
+    - Business logic handled by CodeServerManager
+    - Read-only operation, doesn't modify state
+    - See CodeServerManager.get_instance_status() for detailed logic
+    """
+    logger.info(
+        f"Getting code-server status: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"user_id={current_user.id}"
+    )
+
+    # 1. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Query node
+    node_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.node_id == node_id,
+        Node.deleted_at.is_(None)
+    )
+    node_result = await session.execute(node_stmt)
+    node = node_result.scalar_one_or_none()
+
+    if not node:
+        logger.warning(f"Node not found: mosaic_id={mosaic_id}, node_id={node_id}")
+        raise NotFoundError("Node not found")
+
+    # 3. Get CodeServerManager from app state
+    code_server_manager = req.app.state.code_server_manager
+
+    # 4. Get external host from config (for building public-facing URLs)
+    code_server_config = req.app.state.config.get('code_server', {})
+    external_host = code_server_config.get('external_host', 'localhost')
+
+    # 5. Query instance status
+    status_dict = code_server_manager.get_instance_status(node)
+
+    # 6. Build response
+    if status_dict is None:
+        # Instance not found, return 'stopped' status
+        status_out = CodeServerStatusOut(
+            status="stopped",
+            port=None,
+            url=None,
+            started_at=None,
+            ref_count=0
+        )
+        logger.info(f"Code-server not running: node_db_id={node.id}")
+    else:
+        # Instance exists, return its status with external host (public-facing URL)
+        status_out = CodeServerStatusOut(
+            status=status_dict['status'],
+            port=status_dict['port'],
+            url=f"http://{external_host}:{status_dict['port']}",
+            started_at=status_dict['started_at'],
+            ref_count=status_dict['ref_count']
+        )
+        logger.info(
+            f"Code-server status retrieved: node_db_id={node.id}, "
+            f"status={status_dict['status']}, ref_count={status_dict['ref_count']}"
+        )
+
+    return SuccessResponse(data=status_out)

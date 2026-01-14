@@ -141,3 +141,20 @@ class WorkspaceFileContentOut(BaseModel):
     truncated: bool = Field(..., description="Whether content was truncated due to size limit")
     mime_type: str | None = Field(None, description="MIME type")
     language: str | None = Field(None, description="Programming language (inferred from extension)")
+
+
+# ==================== Code Server Schemas ====================
+
+class CodeServerStatusOut(BaseModel):
+    """Code server instance information and status
+
+    Used for both starting instances and querying status.
+    When instance is running, all fields are populated.
+    When instance is stopped, port/url/started_at are None.
+    """
+
+    status: str = Field(..., description="Instance status: 'running', 'stopped', 'starting', 'error'")
+    port: int | None = Field(None, description="Port number (null if not running)")
+    url: str | None = Field(None, description="Full URL to access code-server (null if not running)")
+    started_at: datetime | None = Field(None, description="Timestamp when instance was started (null if not running)")
+    ref_count: int = Field(0, description="Number of active connections/sessions using this instance")

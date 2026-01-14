@@ -88,6 +88,10 @@ import {
   ArrowDown,
   Coins,
   BarChart3,
+  Play,
+  Square,
+  Power,
+  Code2,
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
@@ -105,6 +109,7 @@ import {
   type SessionOut,
   type MessageOut,
   type WorkspaceFileItem,
+  type CodeServerStatus,
 } from "@/lib/types"
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -209,6 +214,12 @@ export default function ChatPage() {
   const [batchArchiveDialogOpen, setBatchArchiveDialogOpen] = useState(false)
   const [batchArchivingNode, setBatchArchivingNode] = useState<{ nodeId: string; closedSessionIds: string[] } | null>(null)
   const [batchArchiving, setBatchArchiving] = useState(false)
+
+  // Code-server state - Per node
+  const [nodeCodeServerStatus, setNodeCodeServerStatus] = useState<Record<string, CodeServerStatus>>({})
+  const [nodeCodeServerUrl, setNodeCodeServerUrl] = useState<Record<string, string | null>>({})
+  const [nodeCodeServerRefCount, setNodeCodeServerRefCount] = useState<Record<string, number | null>>({})
+  const [nodeCodeServerLoading, setNodeCodeServerLoading] = useState<Record<string, boolean>>({})
 
   // Refs
   const sessionStartedResolvers = useRef<Map<string, (value: boolean) => void>>(new Map())
@@ -320,6 +331,66 @@ export default function ChatPage() {
       console.error("Failed to load nodes and sessions:", error)
     }
   }, [mosaicId, selectSession])
+
+  // Code-server control functions
+  const handleStartCodeServer = useCallback(async (nodeId: string) => {
+    try {
+      setNodeCodeServerLoading(prev => ({ ...prev, [nodeId]: true }))
+      setNodeCodeServerStatus(prev => ({ ...prev, [nodeId]: 'starting' }))
+
+      const result = await apiClient.startCodeServer(mosaicId, nodeId)
+
+      setNodeCodeServerStatus(prev => ({ ...prev, [nodeId]: result.status }))
+      setNodeCodeServerUrl(prev => ({ ...prev, [nodeId]: result.url }))
+      setNodeCodeServerRefCount(prev => ({ ...prev, [nodeId]: result.ref_count }))
+
+      console.log('[ChatPage] Code-server started:', result)
+    } catch (error) {
+      console.error('[ChatPage] Failed to start code-server:', error)
+      setNodeCodeServerStatus(prev => ({ ...prev, [nodeId]: 'stopped' }))
+      setNodeCodeServerUrl(prev => ({ ...prev, [nodeId]: null }))
+      setNodeCodeServerRefCount(prev => ({ ...prev, [nodeId]: null }))
+    } finally {
+      setNodeCodeServerLoading(prev => ({ ...prev, [nodeId]: false }))
+    }
+  }, [mosaicId])
+
+  const handleStopCodeServer = useCallback(async (nodeId: string) => {
+    try {
+      setNodeCodeServerLoading(prev => ({ ...prev, [nodeId]: true }))
+      await apiClient.stopCodeServer(mosaicId, nodeId)
+
+      // Query status after stopping
+      const status = await apiClient.getCodeServerStatus(mosaicId, nodeId)
+      setNodeCodeServerStatus(prev => ({ ...prev, [nodeId]: status.status }))
+      setNodeCodeServerUrl(prev => ({ ...prev, [nodeId]: status.url }))
+      setNodeCodeServerRefCount(prev => ({ ...prev, [nodeId]: status.ref_count }))
+
+      console.log('[ChatPage] Code-server stopped (released reference):', status)
+    } catch (error) {
+      console.error('[ChatPage] Failed to stop code-server:', error)
+    } finally {
+      setNodeCodeServerLoading(prev => ({ ...prev, [nodeId]: false }))
+    }
+  }, [mosaicId])
+
+  const handleForceStopCodeServer = useCallback(async (nodeId: string) => {
+    try {
+      setNodeCodeServerLoading(prev => ({ ...prev, [nodeId]: true }))
+      await apiClient.forceStopCodeServer(mosaicId, nodeId)
+
+      // Update local state
+      setNodeCodeServerStatus(prev => ({ ...prev, [nodeId]: 'stopped' }))
+      setNodeCodeServerUrl(prev => ({ ...prev, [nodeId]: null }))
+      setNodeCodeServerRefCount(prev => ({ ...prev, [nodeId]: null }))
+
+      console.log('[ChatPage] Code-server force stopped')
+    } catch (error) {
+      console.error('[ChatPage] Failed to force stop code-server:', error)
+    } finally {
+      setNodeCodeServerLoading(prev => ({ ...prev, [nodeId]: false }))
+    }
+  }, [mosaicId])
 
   // Mobile detection effect
   useEffect(() => {
@@ -715,7 +786,24 @@ export default function ChatPage() {
     currentSessionInfo.nodeStatus === NodeStatus.RUNNING &&
     currentSessionInfo.session.status === SessionStatus.ACTIVE
 
+  // Load code-server status when switching to workspace view
+  useEffect(() => {
+    const loadCodeServerStatus = async (nodeId: string) => {
+      try {
+        const status = await apiClient.getCodeServerStatus(mosaicId, nodeId)
+        setNodeCodeServerStatus(prev => ({ ...prev, [nodeId]: status.status }))
+        setNodeCodeServerUrl(prev => ({ ...prev, [nodeId]: status.url }))
+        setNodeCodeServerRefCount(prev => ({ ...prev, [nodeId]: status.ref_count }))
+        console.log('[ChatPage] Code-server status loaded:', status)
+      } catch (error) {
+        console.error('[ChatPage] Failed to load code-server status:', error)
+      }
+    }
 
+    if (viewMode === 'workspace' && currentSessionInfo?.nodeId) {
+      loadCodeServerStatus(currentSessionInfo.nodeId)
+    }
+  }, [viewMode, mosaicId, currentSessionInfo?.nodeId])
 
   // Handle copy session ID (referenced from sessions page)
   const handleCopySessionId = async (sessionId: string) => {
@@ -1126,15 +1214,98 @@ export default function ChatPage() {
               </div>
             )
           ) : (
-            <div className="flex items-center gap-2 min-w-0 flex-1">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              {/* Node ID */}
               <span className="text-xs sm:text-sm text-muted-foreground truncate">
                 {currentSessionInfo ? `节点: ${currentSessionInfo.nodeId}` : '请选择会话'}
               </span>
+
+              {/* Code-Server Status */}
+              {currentSessionInfo && (() => {
+                const nodeId = currentSessionInfo.nodeId
+                const status = nodeCodeServerStatus[nodeId] || 'stopped'
+                const refCount = nodeCodeServerRefCount[nodeId]
+
+                return (
+                  <div className="hidden sm:flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <div
+                        className={`w-2 h-2 rounded-full ${
+                          status === 'running'
+                            ? 'bg-green-500'
+                            : status === 'starting'
+                            ? 'bg-yellow-500 animate-pulse'
+                            : 'bg-gray-400'
+                        }`}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {status === 'running' ? 'Code-Server 运行中' : status === 'starting' ? 'Code-Server 启动中' : 'Code-Server 已停止'}
+                      </span>
+                    </div>
+                    {refCount !== null && refCount > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        ({refCount} 引用)
+                      </span>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           )}
 
           {/* Right: View mode toggle */}
           <div className="flex items-center gap-2 sm:gap-3">
+            {/* Code-Server controls (workspace mode only) */}
+            {viewMode === 'workspace' && currentSessionInfo && (() => {
+              const nodeId = currentSessionInfo.nodeId
+              const status = nodeCodeServerStatus[nodeId] || 'stopped'
+              const loading = nodeCodeServerLoading[nodeId] || false
+
+              return (
+                <>
+                  {status === 'stopped' ? (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => handleStartCodeServer(nodeId)}
+                      disabled={loading}
+                      className="h-7 text-xs"
+                    >
+                      {loading ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <Play className="h-3.5 w-3.5 mr-1.5" />
+                      )}
+                      启动
+                    </Button>
+                  ) : (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleStopCodeServer(nodeId)}
+                        disabled={loading || status === 'starting'}
+                        className="h-7 text-xs"
+                      >
+                        <Square className="h-3.5 w-3.5 mr-1.5" />
+                        释放引用
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleForceStopCodeServer(nodeId)}
+                        disabled={loading || status === 'starting'}
+                        className="h-7 text-xs"
+                      >
+                        <Power className="h-3.5 w-3.5 mr-1.5" />
+                        强制关闭
+                      </Button>
+                    </>
+                  )}
+                </>
+              )
+            })()}
+
             {/* Usage statistics */}
             {viewMode === 'chat' && currentStats && (
               <div className="hidden lg:flex items-center gap-3 text-xs text-muted-foreground border-r pr-3">
@@ -1242,6 +1413,8 @@ export default function ChatPage() {
                     nodeId={sessionInfo.nodeId}
                     mosaicId={mosaicId}
                     isVisible={sessionId === activeSessionId}
+                    codeServerStatus={nodeCodeServerStatus[sessionInfo.nodeId] || 'stopped'}
+                    codeServerUrl={nodeCodeServerUrl[sessionInfo.nodeId] || null}
                   />
                 ) : null
               })}

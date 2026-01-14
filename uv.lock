@@ -1007,6 +1007,7 @@ name = "mosaic"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "aiosqlite" },
     { name = "apscheduler" },
     { name = "bcrypt" },
@@ -1040,6 +1041,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.13.3" },
     { name = "aiosqlite", specifier = ">=0.21.0" },
     { name = "apscheduler", specifier = ">=3.11.1" },
     { name = "bcrypt", specifier = ">=3.2.0,<4.0.0" },

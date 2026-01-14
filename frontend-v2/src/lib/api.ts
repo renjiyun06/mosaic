@@ -59,6 +59,9 @@ import type {
   WorkspaceFilesOut,
   WorkspaceFileContentOut,
 
+  // CodeServer types
+  CodeServerStatusOut,
+
   // Image types
   UploadImageResponse,
 
@@ -422,6 +425,78 @@ class ApiClient {
       {
         method: 'GET',
         context: 'node.workspace.content',
+        autoToast: {
+          success: false,
+          error: true
+        }
+      }
+    )
+  }
+
+  // ========================================================================
+  // Code-Server API
+  // ========================================================================
+
+  /**
+   * Start code-server instance for a node
+   */
+  async startCodeServer(mosaicId: number, nodeId: string): Promise<CodeServerStatusOut> {
+    return request<CodeServerStatusOut>(
+      `/api/mosaics/${mosaicId}/nodes/${nodeId}/code-server/start`,
+      {
+        method: 'POST',
+        context: 'node.codeserver.start',
+        autoToast: {
+          success: false,
+          error: true
+        }
+      }
+    )
+  }
+
+  /**
+   * Stop code-server instance for a node (release reference)
+   */
+  async stopCodeServer(mosaicId: number, nodeId: string): Promise<null> {
+    return request<null>(
+      `/api/mosaics/${mosaicId}/nodes/${nodeId}/code-server/stop`,
+      {
+        method: 'POST',
+        context: 'node.codeserver.stop',
+        autoToast: {
+          success: false,
+          error: true
+        }
+      }
+    )
+  }
+
+  /**
+   * Force stop code-server instance for a node (ignore ref_count)
+   */
+  async forceStopCodeServer(mosaicId: number, nodeId: string): Promise<null> {
+    return request<null>(
+      `/api/mosaics/${mosaicId}/nodes/${nodeId}/code-server/force-stop`,
+      {
+        method: 'POST',
+        context: 'node.codeserver.forcestop',
+        autoToast: {
+          success: false,
+          error: true
+        }
+      }
+    )
+  }
+
+  /**
+   * Get code-server instance status for a node
+   */
+  async getCodeServerStatus(mosaicId: number, nodeId: string): Promise<CodeServerStatusOut> {
+    return request<CodeServerStatusOut>(
+      `/api/mosaics/${mosaicId}/nodes/${nodeId}/code-server/status`,
+      {
+        method: 'GET',
+        context: 'node.codeserver.status',
         autoToast: {
           success: false,
           error: true

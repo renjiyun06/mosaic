@@ -29,6 +29,7 @@ from .api import (
 from .api.websocket import router as websocket_router
 from .runtime.manager import RuntimeManager
 from .websocket import UserMessageBroker
+from .code_server.manager import CodeServerManager
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +67,19 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
         # 2. Start runtime manager
         await app.state.runtime_manager.start()
 
+        # 3. Start code-server manager
+        await app.state.code_server_manager.start()
+
         yield  # Application is running
 
         # Shutdown
         # 1. Disconnect all WebSocket connections
         await app.state.user_message_broker.disconnect_all_users()
 
-        # 2. Clean up runtime manager
+        # 2. Stop code-server manager (stop all instances)
+        await app.state.code_server_manager.stop()
+
+        # 3. Clean up runtime manager
         await app.state.runtime_manager.stop()
 
     # Create FastAPI application with lifespan
@@ -121,6 +128,38 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
         async_session_factory=async_session_factory,
         config=config,
         user_message_broker=app.state.user_message_broker
+    )
+
+    # ==================== Code Server Manager Configuration ====================
+
+    # Get code-server settings from config (required, no defaults)
+    code_server_config = config.get('code_server')
+    if not code_server_config:
+        raise ValueError("Missing required configuration: [code_server]")
+
+    bind_host = code_server_config.get('bind_host')
+    external_host = code_server_config.get('external_host')
+    port_range_start = code_server_config.get('port_range_start')
+    port_range_end = code_server_config.get('port_range_end')
+    binary = code_server_config.get('binary')
+
+    if not all([
+        bind_host is not None,
+        external_host is not None,
+        port_range_start is not None,
+        port_range_end is not None,
+        binary is not None
+    ]):
+        raise ValueError(
+            "Missing required code_server configuration fields: "
+            "bind_host, external_host, port_range_start, port_range_end, binary"
+        )
+
+    # Create CodeServerManager for managing code-server instances
+    app.state.code_server_manager = CodeServerManager(
+        host=bind_host,
+        port_range=(port_range_start, port_range_end),
+        code_server_binary=binary
     )
 
     # ==================== CORS Configuration ====================

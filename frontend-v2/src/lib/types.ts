@@ -441,3 +441,15 @@ export interface UploadImageResponse {
   width: number | null
   height: number | null
 }
+
+// ==================== CodeServer Types ====================
+
+export type CodeServerStatus = 'starting' | 'running' | 'stopping' | 'stopped'
+
+export interface CodeServerStatusOut {
+  status: CodeServerStatus
+  port: number | null
+  url: string | null
+  started_at: string | null
+  ref_count: number | null
+}
