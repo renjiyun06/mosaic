@@ -117,6 +117,7 @@ max_threads = 4  # Number of worker threads for mosaic instances
         SessionRouting,
         Event,
         Message,
+        Image,
     )
 
     # Create database engine

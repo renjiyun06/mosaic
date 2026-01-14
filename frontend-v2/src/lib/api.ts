@@ -59,6 +59,9 @@ import type {
   WorkspaceFilesOut,
   WorkspaceFileContentOut,
 
+  // Image types
+  UploadImageResponse,
+
   // Utility types
   PaginatedData
 } from './types'
@@ -813,6 +816,29 @@ class ApiClient {
     const url = `/api/mosaics/${mosaicId}/session-routings${queryString ? `?${queryString}` : ''}`
 
     return request<PaginatedData<SessionRoutingOut>>(url, {
+      autoToast: {
+        success: false,
+        error: true
+      }
+    })
+  }
+
+  // ========================================================================
+  // Image API
+  // ========================================================================
+
+  /**
+   * Upload image file
+   * Returns full URLs for original image and thumbnail
+   */
+  async uploadImage(file: File): Promise<UploadImageResponse> {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    return request<UploadImageResponse>('/api/images/upload', {
+      method: 'POST',
+      body: formData,
+      isFormData: true,
       autoToast: {
         success: false,
         error: true

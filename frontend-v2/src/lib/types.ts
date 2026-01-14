@@ -428,3 +428,16 @@ export interface SessionRoutingOut {
   remote_session_id: string
   created_at: string
 }
+
+// ==================== Image Types ====================
+
+export interface UploadImageResponse {
+  image_id: string
+  url: string
+  thumbnail_url: string | null
+  filename: string
+  mime_type: string
+  file_size: number
+  width: number | null
+  height: number | null
+}

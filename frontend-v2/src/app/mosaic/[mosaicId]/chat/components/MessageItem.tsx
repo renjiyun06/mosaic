@@ -1,6 +1,8 @@
-import { useCallback, memo } from "react"
-import { ChevronRight, ChevronDown } from "lucide-react"
+import { useCallback, memo, useState } from "react"
+import { ChevronRight, ChevronDown, X } from "lucide-react"
 import { MessageRole, MessageType, type MessageOut } from "@/lib/types"
+import Image from "next/image"
+import { Button } from "@/components/ui/button"
 
 interface ParsedMessage extends MessageOut {
   contentParsed: any
@@ -12,11 +14,85 @@ interface MessageItemProps {
   onToggleCollapse: (messageId: string) => void
 }
 
+// Parse message content to extract images
+interface MessagePart {
+  type: 'text' | 'image'
+  content: string
+}
+
+function parseMessageContent(text: string): MessagePart[] {
+  const parts: MessagePart[] = []
+  // Match both formats: ![](url) and ![🖼️ filename](url)
+  const imageRegex = /!\[([^\]]*)\]\((https?:\/\/[^\)]+)\)/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = imageRegex.exec(text)) !== null) {
+    // Add text before image
+    if (match.index > lastIndex) {
+      const textContent = text.substring(lastIndex, match.index).trim()
+      if (textContent) {
+        parts.push({ type: 'text', content: textContent })
+      }
+    }
+
+    // Add image (URL is in group 2)
+    parts.push({ type: 'image', content: match[2] })
+    lastIndex = imageRegex.lastIndex
+  }
+
+  // Add remaining text
+  if (lastIndex < text.length) {
+    const textContent = text.substring(lastIndex).trim()
+    if (textContent) {
+      parts.push({ type: 'text', content: textContent })
+    }
+  }
+
+  // If no parts were added, return original text as single text part
+  if (parts.length === 0 && text.trim()) {
+    parts.push({ type: 'text', content: text })
+  }
+
+  return parts
+}
+
+// Image lightbox component
+function ImageLightbox({ imageUrl, onClose }: { imageUrl: string; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <Button
+        variant="ghost"
+        size="icon"
+        className="absolute top-4 right-4 text-white hover:bg-white/20"
+        onClick={onClose}
+      >
+        <X className="h-6 w-6" />
+      </Button>
+      <div className="relative max-w-[90vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+        <Image
+          src={imageUrl}
+          alt="Full size image"
+          width={1200}
+          height={1200}
+          className="object-contain max-w-full max-h-[90vh]"
+          unoptimized
+        />
+      </div>
+    </div>
+  )
+}
+
 export const MessageItem = memo(function MessageItem({
   message: msg,
   isCollapsed,
   onToggleCollapse,
 }: MessageItemProps) {
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null)
+
   // Don't render assistant_result messages (stats shown in header)
   if (msg.message_type === MessageType.ASSISTANT_RESULT) {
     return null
@@ -32,6 +108,39 @@ export const MessageItem = memo(function MessageItem({
   const handleToggle = useCallback(() => {
     onToggleCollapse(msg.message_id)
   }, [msg.message_id, onToggleCollapse])
+
+  // Render message content with images
+  const renderMessageContent = (content: string) => {
+    const parts = parseMessageContent(content)
+
+    return (
+      <div className="space-y-2">
+        {parts.map((part, index) => {
+          if (part.type === 'text') {
+            return (
+              <div key={index} className="whitespace-pre-wrap break-words">
+                {part.content}
+              </div>
+            )
+          } else {
+            return (
+              <div key={index} className="my-2">
+                <Image
+                  src={part.content}
+                  alt="Uploaded image"
+                  width={300}
+                  height={300}
+                  className="rounded cursor-pointer hover:opacity-90 transition-opacity max-w-full h-auto"
+                  onClick={() => setLightboxImage(part.content)}
+                  unoptimized
+                />
+              </div>
+            )
+          }
+        })}
+      </div>
+    )
+  }
 
   return (
     <div
@@ -56,8 +165,8 @@ export const MessageItem = memo(function MessageItem({
               <span className="text-xs opacity-70">💭 思考中...</span>
             </div>
             {!isCollapsed && (
-              <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0">
-                {msg.contentParsed.message}
+              <div className="text-sm px-2 pb-1 pt-0">
+                {renderMessageContent(msg.contentParsed.message)}
               </div>
             )}
           </div>
@@ -75,8 +184,8 @@ export const MessageItem = memo(function MessageItem({
               <span className="text-xs opacity-70">🔔 系统消息</span>
             </div>
             {!isCollapsed && (
-              <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0">
-                {msg.contentParsed.message}
+              <div className="text-sm px-2 pb-1 pt-0">
+                {renderMessageContent(msg.contentParsed.message)}
               </div>
             )}
           </div>
@@ -133,11 +242,16 @@ export const MessageItem = memo(function MessageItem({
             )}
           </div>
         ) : (
-          <div className="text-sm whitespace-pre-wrap break-words">
-            {msg.contentParsed.message}
+          <div className="text-sm">
+            {renderMessageContent(msg.contentParsed.message)}
           </div>
         )}
       </div>
+
+      {/* Image lightbox */}
+      {lightboxImage && (
+        <ImageLightbox imageUrl={lightboxImage} onClose={() => setLightboxImage(null)} />
+      )}
     </div>
   )
 })

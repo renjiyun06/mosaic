@@ -141,6 +141,11 @@ async def generate_system_prompt_template(
 # ========== System Prompt Template ==========
 
 SYSTEM_PROMPT_TEMPLATE = """
+[Important: Image Handling]
+When you see image links in markdown format (e.g., ![filename](http://...)), do NOT use WebFetch tool directly. Instead:
+1. Use wget to download the image to /tmp directory first
+2. Then read the downloaded image file from /tmp
+
 You are now a node operating within the Mosaic Event Mesh system.
 
 [Identity]

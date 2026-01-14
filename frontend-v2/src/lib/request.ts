@@ -17,7 +17,8 @@ import { getErrorMessage, getContextErrorMessage } from './error-messages'
  */
 export interface RequestOptions extends Omit<RequestInit, 'body'> {
   auth?: boolean           // Whether to include auth token (default: true)
-  body?: any               // Request body (will be JSON.stringify)
+  body?: any               // Request body (will be JSON.stringify unless isFormData is true)
+  isFormData?: boolean     // Whether body is FormData (skip JSON.stringify and Content-Type)
   context?: string         // Context key for context-specific error messages
   autoToast?: {
     success?: boolean | string  // Auto show success toast
@@ -183,13 +184,18 @@ export async function request<T>(
     context,
     headers = {},
     body,
+    isFormData = false,
     ...fetchOptions
   } = options
 
   // 1. Build headers
   const finalHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(headers as Record<string, string>)
+  }
+
+  // Only set Content-Type if not FormData (browser will set it automatically for FormData)
+  if (!isFormData) {
+    finalHeaders['Content-Type'] = 'application/json'
   }
 
   // 2. Add auth token if needed
@@ -200,15 +206,27 @@ export async function request<T>(
     }
   }
 
+  // 3. Prepare request body
+  let requestBody: BodyInit | undefined
+  if (body) {
+    if (isFormData) {
+      // For FormData, pass as-is (don't stringify)
+      requestBody = body as FormData
+    } else {
+      // For JSON, stringify
+      requestBody = JSON.stringify(body)
+    }
+  }
+
   try {
-    // 3. Make request
+    // 4. Make request
     const response = await fetch(API_BASE_URL + url, {
       ...fetchOptions,
       headers: finalHeaders,
-      body: body ? JSON.stringify(body) : undefined
+      body: requestBody
     })
 
-    // 4. Check if response is JSON (backend should always return JSON)
+    // 5. Check if response is JSON (backend should always return JSON)
     const contentType = response.headers.get('content-type')
     if (!contentType?.includes('application/json')) {
       throw new ApiError(
@@ -218,10 +236,10 @@ export async function request<T>(
       )
     }
 
-    // 5. Parse JSON response
+    // 6. Parse JSON response
     const data: ApiResponse<T> = await response.json()
 
-    // 6. Check success field (NOT HTTP status!)
+    // 7. Check success field (NOT HTTP status!)
     if (data.success) {
       // Success case
       if (autoToast.success) {
@@ -257,7 +275,7 @@ export async function request<T>(
     }
 
   } catch (error) {
-    // 7. Handle exceptions
+    // 8. Handle exceptions
 
     // If already an ApiError, just handle and rethrow
     if (error instanceof ApiError) {
