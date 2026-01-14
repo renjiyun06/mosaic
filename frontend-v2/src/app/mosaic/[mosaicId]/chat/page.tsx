@@ -92,6 +92,8 @@ import {
   Square,
   Power,
   Code2,
+  Copy,
+  Check,
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
@@ -220,6 +222,7 @@ export default function ChatPage() {
   const [nodeCodeServerUrl, setNodeCodeServerUrl] = useState<Record<string, string | null>>({})
   const [nodeCodeServerRefCount, setNodeCodeServerRefCount] = useState<Record<string, number | null>>({})
   const [nodeCodeServerLoading, setNodeCodeServerLoading] = useState<Record<string, boolean>>({})
+  const [copiedCodeServerUrl, setCopiedCodeServerUrl] = useState<string | null>(null)
 
   // Refs
   const sessionStartedResolvers = useRef<Map<string, (value: boolean) => void>>(new Map())
@@ -391,6 +394,19 @@ export default function ChatPage() {
       setNodeCodeServerLoading(prev => ({ ...prev, [nodeId]: false }))
     }
   }, [mosaicId])
+
+  const handleCopyCodeServerUrl = useCallback(async (nodeId: string) => {
+    const url = nodeCodeServerUrl[nodeId]
+    if (!url) return
+
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedCodeServerUrl(nodeId)
+      setTimeout(() => setCopiedCodeServerUrl(null), 2000)
+    } catch (error) {
+      console.error('[ChatPage] Failed to copy code-server URL:', error)
+    }
+  }, [nodeCodeServerUrl])
 
   // Mobile detection effect
   useEffect(() => {
@@ -1260,6 +1276,8 @@ export default function ChatPage() {
               const nodeId = currentSessionInfo.nodeId
               const status = nodeCodeServerStatus[nodeId] || 'stopped'
               const loading = nodeCodeServerLoading[nodeId] || false
+              const url = nodeCodeServerUrl[nodeId]
+              const isCopied = copiedCodeServerUrl === nodeId
 
               return (
                 <>
@@ -1280,6 +1298,32 @@ export default function ChatPage() {
                     </Button>
                   ) : (
                     <>
+                      {/* Copy URL button */}
+                      {url && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleCopyCodeServerUrl(nodeId)}
+                                disabled={status === 'starting'}
+                                className="h-7 text-xs"
+                              >
+                                {isCopied ? (
+                                  <Check className="h-3.5 w-3.5 mr-1.5 text-green-600" />
+                                ) : (
+                                  <Copy className="h-3.5 w-3.5 mr-1.5" />
+                                )}
+                                {isCopied ? '已复制' : '复制地址'}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              复制 Code-Server 地址到剪贴板
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
                       <Button
                         variant="outline"
                         size="sm"
