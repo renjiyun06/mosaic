@@ -277,15 +277,15 @@ export default function TopologyPage() {
   }
 
   return (
-    <div className="flex flex-col h-full space-y-3 sm:space-y-4 md:space-y-6 overflow-auto">
+    <div className="flex flex-col h-full space-y-3 sm:space-y-4 md:space-y-6">
       <div className="flex-shrink-0">
         <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">拓扑可视化</h1>
         <p className="text-muted-foreground mt-1 text-sm sm:text-base">查看节点和连接关系</p>
       </div>
 
-      <Card className="flex-1 flex flex-col min-h-0">
-        <CardContent className="p-0 flex-1">
-          <div className="h-full">
+      <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        <CardContent className="p-0 flex-1 overflow-hidden">
+          <div className="h-full overflow-hidden">
             <ReactFlow
               nodes={topologyNodes}
               edges={topologyEdges}
@@ -298,7 +298,7 @@ export default function TopologyPage() {
               className="bg-background touchdevice-flow"
               minZoom={0.1}
               maxZoom={2}
-              panOnScroll={true}
+              panOnScroll={false}
               panOnDrag={true}
               zoomOnScroll={true}
               zoomOnPinch={true}
@@ -311,8 +311,8 @@ export default function TopologyPage() {
                 showZoom={true}
                 showFitView={true}
                 showInteractive={false}
-                position="bottom-right"
-                className="!bottom-2 sm:!bottom-4 !right-2 sm:!right-4"
+                position="bottom-left"
+                className="!bottom-2 sm:!bottom-4 !left-2 sm:!left-4"
               />
               {/* MiniMap only visible on larger screens */}
               <MiniMap
