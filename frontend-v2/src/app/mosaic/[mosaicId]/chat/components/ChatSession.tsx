@@ -211,7 +211,7 @@ export function ChatSession({
       }
 
       if (!nodeId) {
-        console.error("Node not found for session:", sessionId)
+        console.warn("[ChatSession] Node not found for session:", sessionId, "- session may be archived or deleted")
         return
       }
 

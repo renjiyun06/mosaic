@@ -165,15 +165,8 @@ export default function ChatPage() {
 
   // Node and session management
   const [nodes, setNodes] = useState<NodeWithSessions[]>([])
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null
-    try {
-      const saved = localStorage.getItem(`mosaic-${mosaicId}-active-session`)
-      return saved || null
-    } catch (error) {
-      return null
-    }
-  })
+  // Initialize as null - will be validated and set after loading nodes
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
 
   // Lazy-loaded sessions (懒加载会话集合)
   const [loadedSessions, setLoadedSessions] = useState<Set<string>>(new Set())
@@ -311,8 +304,29 @@ export default function ChatPage() {
         if (savedSessionId && allSessions.some(s => s.session_id === savedSessionId)) {
           targetSessionId = savedSessionId
           shouldSetSession = true
+        } else if (savedSessionId) {
+          // Saved session is invalid (archived or deleted), clean up localStorage
+          console.log('[ChatPage] Saved session no longer available, cleaning up localStorage:', savedSessionId)
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.removeItem(`mosaic-${mosaicId}-active-session`)
+            } catch (error) {
+              console.error('[ChatPage] Failed to clean up localStorage:', error)
+            }
+          }
+
+          // Select a new session
+          const activeSession = allSessions.find((s) => s.status === SessionStatus.ACTIVE)
+          if (activeSession) {
+            targetSessionId = activeSession.session_id
+            shouldSetSession = true
+          } else if (allSessions.length > 0) {
+            // If no active session, select first one (to view history)
+            targetSessionId = allSessions[0].session_id
+            shouldSetSession = true
+          }
         } else if (!activeSessionId) {
-          // 3. Only select a new session if no session is currently active
+          // 3. No saved session, only select if no session is currently active
           // This prevents auto-selection after archiving
           const activeSession = allSessions.find((s) => s.status === SessionStatus.ACTIVE)
           if (activeSession) {
