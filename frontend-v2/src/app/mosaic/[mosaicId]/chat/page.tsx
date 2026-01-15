@@ -1281,37 +1281,6 @@ export default function ChatPage() {
               <span className="text-xs sm:text-sm text-muted-foreground truncate">
                 {currentSessionInfo ? `节点: ${currentSessionInfo.nodeId}` : '请选择会话'}
               </span>
-
-              {/* Code-Server Status */}
-              {currentSessionInfo && (() => {
-                const nodeId = currentSessionInfo.nodeId
-                const status = nodeCodeServerStatus[nodeId] || 'stopped'
-                const refCount = nodeCodeServerRefCount[nodeId]
-
-                return (
-                  <div className="hidden sm:flex items-center gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <div
-                        className={`w-2 h-2 rounded-full ${
-                          status === 'running'
-                            ? 'bg-green-500'
-                            : status === 'starting'
-                            ? 'bg-yellow-500 animate-pulse'
-                            : 'bg-gray-400'
-                        }`}
-                      />
-                      <span className="text-xs text-muted-foreground">
-                        {status === 'running' ? 'Code-Server 运行中' : status === 'starting' ? 'Code-Server 启动中' : 'Code-Server 已停止'}
-                      </span>
-                    </div>
-                    {refCount !== null && refCount > 0 && (
-                      <span className="text-xs text-muted-foreground">
-                        ({refCount} 引用)
-                      </span>
-                    )}
-                  </div>
-                )
-              })()}
             </div>
           )}
 
@@ -1518,7 +1487,7 @@ export default function ChatPage() {
         {/* Header with view and mode toggle */}
         <div className="h-11 border-b px-3 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">会话</span>
+            <span className="text-sm font-medium">会话列表</span>
             {/* Connection status indicator */}
             <TooltipProvider>
               <Tooltip>
@@ -2006,7 +1975,7 @@ export default function ChatPage() {
 
           <SheetHeader className="h-11 border-b px-3 flex flex-row items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
-              <SheetTitle className="text-sm font-medium">会话</SheetTitle>
+              <SheetTitle className="text-sm font-medium">会话列表</SheetTitle>
               {/* Connection status indicator */}
               <TooltipProvider>
                 <Tooltip>
