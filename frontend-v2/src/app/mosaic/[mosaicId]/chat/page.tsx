@@ -1716,8 +1716,8 @@ export default function ChatPage() {
                             onClick={() => selectSession(session.session_id)}
                           >
                             {/* Tree line - VSCode style */}
-                            <div className={`absolute left-[17px] ${isFirst ? '-top-[10px]' : 'top-0'} bottom-0 w-px bg-muted-foreground/30`}>
-                              {isLast && <div className="absolute top-5 left-0 w-px h-full bg-background" />}
+                            <div className={`absolute left-[17px] ${isFirst ? '-top-[10px]' : 'top-0'} ${isFirst && isLast ? 'h-[30px]' : 'bottom-0'} w-px bg-muted-foreground/30`}>
+                              {isLast && !isFirst && <div className="absolute top-5 left-0 w-px h-full bg-background" />}
                             </div>
                             <div className="absolute left-[17px] top-5 w-3 h-px bg-muted-foreground/30" />
 
@@ -2139,8 +2139,8 @@ export default function ChatPage() {
                               }}
                             >
                               {/* Tree line - VSCode style */}
-                              <div className={`absolute left-[17px] ${isFirst ? '-top-[10px]' : 'top-0'} bottom-0 w-px bg-muted-foreground/30`}>
-                                {isLast && <div className="absolute top-5 left-0 w-px h-full bg-background" />}
+                              <div className={`absolute left-[17px] ${isFirst ? '-top-[10px]' : 'top-0'} ${isFirst && isLast ? 'h-[30px]' : 'bottom-0'} w-px bg-muted-foreground/30`}>
+                                {isLast && !isFirst && <div className="absolute top-5 left-0 w-px h-full bg-background" />}
                               </div>
                               <div className="absolute left-[17px] top-5 w-3 h-px bg-muted-foreground/30" />
 
