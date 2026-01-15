@@ -1036,19 +1036,19 @@ export default function ChatPage() {
           }`}
           onClick={() => onSelect(session.session_id)}
         >
-          {/* Tree lines for children (not root) */}
+          {/* Tree lines for children (not root) - VSCode style */}
           {depth > 0 && (
             <>
               {/* Vertical line */}
               <div
-                className="absolute top-0 bottom-0 w-px bg-border"
+                className="absolute top-0 bottom-0 w-px bg-muted-foreground/30"
                 style={{ left: `${(depth - 1) * 16 + 16}px` }}
               >
-                {isLast && <div className="absolute top-3 left-0 w-px h-full bg-background" />}
+                {isLast && <div className="absolute top-5 left-0 w-px h-full bg-background" />}
               </div>
               {/* Horizontal line */}
               <div
-                className="absolute top-3 h-px bg-border"
+                className="absolute top-5 h-px bg-muted-foreground/30"
                 style={{
                   left: `${(depth - 1) * 16 + 16}px`,
                   width: '12px'
@@ -1088,7 +1088,6 @@ export default function ChatPage() {
                   </Badge>
                 )}
 
-                <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <span
                   className={`font-mono text-xs truncate ${
                     isActive ? "font-semibold" : "text-muted-foreground"
@@ -1152,7 +1151,6 @@ export default function ChatPage() {
                   </Badge>
                 )}
 
-                <MessageSquare className="h-3 w-3 shrink-0 text-muted-foreground" />
                 <span
                   className={`font-mono text-xs truncate ${
                     isActive ? "font-semibold" : "text-muted-foreground"
@@ -1615,9 +1613,6 @@ export default function ChatPage() {
                       <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                     )}
 
-                    {/* Folder icon */}
-                    <FolderTree className="h-4 w-4 shrink-0 text-amber-600" />
-
                     {/* Node name */}
                     <span
                       className="font-medium text-sm truncate flex-1 min-w-0"
@@ -1707,6 +1702,7 @@ export default function ChatPage() {
                     ) : (
                       node.sessions.map((session, index) => {
                         const isLast = index === node.sessions.length - 1
+                        const isFirst = index === 0
                         const isActive = activeSessionId === session.session_id
 
                         return (
@@ -1719,18 +1715,17 @@ export default function ChatPage() {
                             }`}
                             onClick={() => selectSession(session.session_id)}
                           >
-                            {/* Tree line */}
-                            <div className="absolute left-5 top-0 bottom-0 w-px bg-border">
-                              {isLast && <div className="absolute top-3 left-0 w-px h-full bg-background" />}
+                            {/* Tree line - VSCode style */}
+                            <div className={`absolute left-[17px] ${isFirst ? '-top-[10px]' : 'top-0'} bottom-0 w-px bg-muted-foreground/30`}>
+                              {isLast && <div className="absolute top-5 left-0 w-px h-full bg-background" />}
                             </div>
-                            <div className="absolute left-5 top-3 w-3 h-px bg-border" />
+                            <div className="absolute left-[17px] top-5 w-3 h-px bg-muted-foreground/30" />
 
                             {sessionListMode === 'detailed' ? (
                               /* Detailed mode: Two-line layout */
                               <div className="pl-8 pr-3 py-2">
                                 {/* Line 1: Session ID + Status + Menu */}
                                 <div className="flex items-center gap-2 mb-1">
-                                  <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                                   <span
                                     className={`font-mono text-xs truncate ${
                                       isActive ? "font-semibold" : "text-muted-foreground"
@@ -1765,7 +1760,6 @@ export default function ChatPage() {
                               /* Compact mode: Single line */
                               <div className="pl-8 pr-3 py-1.5">
                                 <div className="flex items-center gap-2">
-                                  <MessageSquare className="h-3 w-3 shrink-0 text-muted-foreground" />
                                   <span
                                     className={`font-mono text-xs truncate ${
                                       isActive ? "font-semibold" : "text-muted-foreground"
@@ -2037,9 +2031,6 @@ export default function ChatPage() {
                         <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                       )}
 
-                      {/* Folder icon */}
-                      <FolderTree className="h-4 w-4 shrink-0 text-amber-600" />
-
                       {/* Node name */}
                       <span
                         className="font-medium text-sm truncate flex-1 min-w-0"
@@ -2131,6 +2122,7 @@ export default function ChatPage() {
                       ) : (
                         node.sessions.map((session, index) => {
                           const isLast = index === node.sessions.length - 1
+                          const isFirst = index === 0
                           const isActive = activeSessionId === session.session_id
 
                           return (
@@ -2146,18 +2138,17 @@ export default function ChatPage() {
                                 setSessionSheetOpen(false)
                               }}
                             >
-                              {/* Tree line */}
-                              <div className="absolute left-5 top-0 bottom-0 w-px bg-border">
-                                {isLast && <div className="absolute top-3 left-0 w-px h-full bg-background" />}
+                              {/* Tree line - VSCode style */}
+                              <div className={`absolute left-[17px] ${isFirst ? '-top-[10px]' : 'top-0'} bottom-0 w-px bg-muted-foreground/30`}>
+                                {isLast && <div className="absolute top-5 left-0 w-px h-full bg-background" />}
                               </div>
-                              <div className="absolute left-5 top-3 w-3 h-px bg-border" />
+                              <div className="absolute left-[17px] top-5 w-3 h-px bg-muted-foreground/30" />
 
                               {sessionListMode === 'detailed' ? (
                                 /* Detailed mode: Two-line layout */
                                 <div className="pl-8 pr-3 py-2">
                                   {/* Line 1: Session ID + Status + Menu */}
                                   <div className="flex items-center gap-2 mb-1">
-                                    <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                                     <span
                                       className={`font-mono text-xs truncate ${
                                         isActive ? "font-semibold" : "text-muted-foreground"
@@ -2192,7 +2183,6 @@ export default function ChatPage() {
                                 /* Compact mode: Single line */
                                 <div className="pl-8 pr-3 py-1.5">
                                   <div className="flex items-center gap-2">
-                                    <MessageSquare className="h-3 w-3 shrink-0 text-muted-foreground" />
                                     <span
                                       className={`font-mono text-xs truncate ${
                                         isActive ? "font-semibold" : "text-muted-foreground"
