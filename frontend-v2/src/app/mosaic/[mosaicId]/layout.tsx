@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Navbar } from "@/components/navbar"
 import { Sidebar } from "@/components/sidebar"
 import { AuthGuard } from "@/components/auth-guard"
@@ -16,6 +16,38 @@ export default function MosaicLayout({
 }) {
   const { mosaicId } = use(params)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState(256) // Default width: 256px (w-64)
+  const [isInitialized, setIsInitialized] = useState(false)
+
+  // Load sidebar state from localStorage
+  useEffect(() => {
+    const savedCollapsed = localStorage.getItem('sidebar-collapsed')
+    const savedWidth = localStorage.getItem('sidebar-width')
+
+    if (savedCollapsed !== null) {
+      setSidebarCollapsed(savedCollapsed === 'true')
+    }
+    if (savedWidth !== null) {
+      setSidebarWidth(parseInt(savedWidth, 10))
+    }
+    setIsInitialized(true)
+  }, [])
+
+  // Handle sidebar collapse/expand toggle
+  const handleToggleSidebar = () => {
+    setSidebarCollapsed(prev => {
+      const newValue = !prev
+      localStorage.setItem('sidebar-collapsed', String(newValue))
+      return newValue
+    })
+  }
+
+  // Handle sidebar width change
+  const handleWidthChange = (width: number) => {
+    setSidebarWidth(width)
+    localStorage.setItem('sidebar-width', String(width))
+  }
 
   return (
     <AuthGuard>
@@ -23,11 +55,19 @@ export default function MosaicLayout({
         <Navbar
           showMenuButton={true}
           onMenuClick={() => setMobileMenuOpen(true)}
+          sidebarWidth={sidebarWidth}
+          sidebarCollapsed={sidebarCollapsed}
         />
         <div className="flex flex-1 overflow-hidden">
           {/* Desktop Sidebar */}
-          <div className="hidden lg:block">
-            <Sidebar mosaicId={mosaicId} />
+          <div className="hidden lg:block h-full">
+            <Sidebar
+              mosaicId={mosaicId}
+              collapsed={sidebarCollapsed}
+              onToggle={handleToggleSidebar}
+              width={sidebarWidth}
+              onWidthChange={handleWidthChange}
+            />
           </div>
 
           {/* Mobile Sidebar (Sheet) */}

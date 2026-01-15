@@ -1471,7 +1471,22 @@ export default function ChatPage() {
       <div className="w-80 border-l flex-col bg-background hidden md:flex">
         {/* Header with view and mode toggle */}
         <div className="h-11 border-b px-3 flex items-center justify-between shrink-0">
-          <span className="text-sm font-medium">会话</span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">会话</span>
+            {/* Connection status indicator */}
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div>
+                    <Circle className={`h-2 w-2 ${isConnected ? 'fill-green-500 text-green-500' : 'fill-red-500 text-red-500'}`} />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {isConnected ? 'WebSocket 已连接' : 'WebSocket 已断开'}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
           <div className="flex items-center gap-1">
             {/* View mode toggle (tree/grouped) */}
             <TooltipProvider>
@@ -1767,20 +1782,6 @@ export default function ChatPage() {
             ))
           )}
         </div>
-
-        {/* Footer statistics */}
-        <div className="h-9 border-t px-3 flex items-center justify-between shrink-0 bg-muted/20">
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span>{nodes.length} 节点</span>
-            <span>·</span>
-            <span>{nodes.reduce((sum, node) => sum + node.sessions.length, 0)} 会话</span>
-          </div>
-          {isConnected ? (
-            <Circle className="h-2 w-2 fill-green-500 text-green-500" />
-          ) : (
-            <Circle className="h-2 w-2 fill-red-500 text-red-500" />
-          )}
-        </div>
       </div>
 
       {/* Create Session Dialog */}
@@ -1953,7 +1954,22 @@ export default function ChatPage() {
             </button>
 
           <SheetHeader className="h-11 border-b px-3 flex flex-row items-center justify-between shrink-0">
-            <SheetTitle className="text-sm font-medium">会话</SheetTitle>
+            <div className="flex items-center gap-2">
+              <SheetTitle className="text-sm font-medium">会话</SheetTitle>
+              {/* Connection status indicator */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div>
+                      <Circle className={`h-2 w-2 ${isConnected ? 'fill-green-500 text-green-500' : 'fill-red-500 text-red-500'}`} />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {isConnected ? 'WebSocket 已连接' : 'WebSocket 已断开'}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -2191,20 +2207,6 @@ export default function ChatPage() {
                   )}
                 </div>
               ))
-            )}
-          </div>
-
-          {/* Footer statistics */}
-          <div className="h-9 border-t px-3 flex items-center justify-between shrink-0 bg-muted/20">
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <span>{nodes.length} 节点</span>
-              <span>·</span>
-              <span>{nodes.reduce((sum, node) => sum + node.sessions.length, 0)} 会话</span>
-            </div>
-            {isConnected ? (
-              <Circle className="h-2 w-2 fill-green-500 text-green-500" />
-            ) : (
-              <Circle className="h-2 w-2 fill-red-500 text-red-500" />
             )}
           </div>
           </div>

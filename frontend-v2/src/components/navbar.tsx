@@ -26,9 +26,16 @@ import type { MosaicOut } from "@/lib/types"
 interface NavbarProps {
   onMenuClick?: () => void
   showMenuButton?: boolean
+  sidebarWidth?: number
+  sidebarCollapsed?: boolean
 }
 
-export function Navbar({ onMenuClick, showMenuButton = false }: NavbarProps = {}) {
+export function Navbar({
+  onMenuClick,
+  showMenuButton = false,
+  sidebarWidth = 256,
+  sidebarCollapsed = false
+}: NavbarProps = {}) {
   const pathname = usePathname()
   const router = useRouter()
   const { user, logout } = useAuth()
@@ -87,10 +94,22 @@ export function Navbar({ onMenuClick, showMenuButton = false }: NavbarProps = {}
         </div>
 
         {/* Desktop: logo in sidebar area */}
-        <div className="hidden lg:flex items-center w-64 border-r px-4 h-11 flex-shrink-0">
-          <Link href="/" className="flex items-center space-x-2">
-            <Boxes className="h-6 w-6" />
-            <span className="font-bold">Mosaic</span>
+        <div
+          className="hidden lg:flex items-center px-4 h-11 flex-shrink-0 transition-all duration-300 ease-in-out overflow-hidden"
+          style={{
+            width: `${sidebarCollapsed ? 64 : sidebarWidth}px`,
+            minWidth: `${sidebarCollapsed ? 64 : 180}px`
+          }}
+        >
+          <Link href="/" className="flex items-center space-x-2 min-w-max">
+            <Boxes className="h-6 w-6 flex-shrink-0" />
+            <span
+              className={`font-bold transition-all duration-300 ${
+                sidebarCollapsed ? 'opacity-0 w-0' : 'opacity-100'
+              }`}
+            >
+              Mosaic
+            </span>
           </Link>
         </div>
 
