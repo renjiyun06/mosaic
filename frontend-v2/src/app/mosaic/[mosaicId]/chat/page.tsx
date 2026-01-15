@@ -210,6 +210,9 @@ export default function ChatPage() {
   const [batchArchivingNode, setBatchArchivingNode] = useState<{ nodeId: string; closedSessionIds: string[] } | null>(null)
   const [batchArchiving, setBatchArchiving] = useState(false)
 
+  // Node control state - Track which nodes are being started/stopped
+  const [nodeControlLoading, setNodeControlLoading] = useState<Record<string, boolean>>({})
+
   // Code-server state - Per node
   const [nodeCodeServerStatus, setNodeCodeServerStatus] = useState<Record<string, CodeServerStatus>>({})
   const [nodeCodeServerUrl, setNodeCodeServerUrl] = useState<Record<string, string | null>>({})
@@ -348,6 +351,37 @@ export default function ChatPage() {
       console.error("Failed to load nodes and sessions:", error)
     }
   }, [mosaicId, selectSession])
+
+  // Node control functions
+  const handleStartNode = useCallback(async (nodeId: string) => {
+    try {
+      setNodeControlLoading(prev => ({ ...prev, [nodeId]: true }))
+      await apiClient.startNode(mosaicId, nodeId)
+
+      // Refresh nodes and sessions to get updated status
+      await loadNodesAndSessions(false)
+      console.log('[ChatPage] Node started:', nodeId)
+    } catch (error) {
+      console.error('[ChatPage] Failed to start node:', error)
+    } finally {
+      setNodeControlLoading(prev => ({ ...prev, [nodeId]: false }))
+    }
+  }, [mosaicId, loadNodesAndSessions])
+
+  const handleStopNode = useCallback(async (nodeId: string) => {
+    try {
+      setNodeControlLoading(prev => ({ ...prev, [nodeId]: true }))
+      await apiClient.stopNode(mosaicId, nodeId)
+
+      // Refresh nodes and sessions to get updated status
+      await loadNodesAndSessions(false)
+      console.log('[ChatPage] Node stopped:', nodeId)
+    } catch (error) {
+      console.error('[ChatPage] Failed to stop node:', error)
+    } finally {
+      setNodeControlLoading(prev => ({ ...prev, [nodeId]: false }))
+    }
+  }, [mosaicId, loadNodesAndSessions])
 
   // Code-server control functions
   const handleStartCodeServer = useCallback(async (nodeId: string) => {
@@ -1621,73 +1655,86 @@ export default function ChatPage() {
                       {node.node_id}
                     </span>
 
-                    {/* Status indicator */}
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Circle
-                            className={`h-2 w-2 shrink-0 ${
-                              node.status === NodeStatus.RUNNING
-                                ? 'fill-green-500 text-green-500'
-                                : 'fill-gray-400 text-gray-400'
-                            }`}
-                          />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          {node.status === NodeStatus.RUNNING ? '运行中' : '已停止'}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                    {/* Node control buttons */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Start/Stop node button */}
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (node.status === NodeStatus.RUNNING) {
+                                  handleStopNode(node.node_id)
+                                } else {
+                                  handleStartNode(node.node_id)
+                                }
+                              }}
+                              disabled={nodeControlLoading[node.node_id]}
+                            >
+                              {nodeControlLoading[node.node_id] ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : node.status === NodeStatus.RUNNING ? (
+                                <Square className="h-3.5 w-3.5 text-red-600" />
+                              ) : (
+                                <Play className="h-3.5 w-3.5 text-green-600" />
+                              )}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {node.status === NodeStatus.RUNNING ? '停止节点' : '启动节点'}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
 
-                    {/* Session count and buttons */}
-                    <div className="flex items-center gap-1 shrink-0">
-                      <span className="text-xs text-muted-foreground">
-                        {node.sessions.length}
-                      </span>
-
-                      {/* Batch archive button - only show if there are closed sessions */}
-                      {(() => {
-                        const closedCount = node.sessions.filter(s => s.status === SessionStatus.CLOSED).length
-                        if (closedCount > 0) {
-                          return (
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 w-6 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-100"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      openBatchArchiveDialog(node.node_id)
-                                    }}
-                                  >
-                                    <Archive className="h-3.5 w-3.5" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  批量归档已关闭会话
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-                          )
-                        }
-                        return null
-                      })()}
+                      {/* Batch archive button - always visible */}
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-100"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openBatchArchiveDialog(node.node_id)
+                              }}
+                              disabled={node.sessions.filter(s => s.status === SessionStatus.CLOSED).length === 0}
+                            >
+                              <Archive className="h-3.5 w-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            批量归档已关闭会话
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
 
                       {/* Create session button */}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          openCreateDialog(node.node_id)
-                        }}
-                        disabled={node.status !== NodeStatus.RUNNING || !isConnected}
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                      </Button>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openCreateDialog(node.node_id)
+                              }}
+                              disabled={node.status !== NodeStatus.RUNNING || !isConnected}
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            创建新会话
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                     </div>
                   </div>
                 </div>
@@ -2035,75 +2082,88 @@ export default function ChatPage() {
                         {node.node_id}
                       </span>
 
-                      {/* Status indicator */}
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Circle
-                              className={`h-2 w-2 shrink-0 ${
-                                node.status === NodeStatus.RUNNING
-                                  ? 'fill-green-500 text-green-500'
-                                  : 'fill-gray-400 text-gray-400'
-                              }`}
-                            />
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            {node.status === NodeStatus.RUNNING ? '运行中' : '已停止'}
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
+                      {/* Node control buttons */}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {/* Start/Stop node button */}
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  if (node.status === NodeStatus.RUNNING) {
+                                    handleStopNode(node.node_id)
+                                  } else {
+                                    handleStartNode(node.node_id)
+                                  }
+                                }}
+                                disabled={nodeControlLoading[node.node_id]}
+                              >
+                                {nodeControlLoading[node.node_id] ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : node.status === NodeStatus.RUNNING ? (
+                                  <Square className="h-3.5 w-3.5 text-red-600" />
+                                ) : (
+                                  <Play className="h-3.5 w-3.5 text-green-600" />
+                                )}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {node.status === NodeStatus.RUNNING ? '停止节点' : '启动节点'}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
 
-                      {/* Session count and buttons */}
-                      <div className="flex items-center gap-1 shrink-0">
-                        <span className="text-xs text-muted-foreground">
-                          {node.sessions.length}
-                        </span>
-
-                        {/* Batch archive button - only show if there are closed sessions */}
-                        {(() => {
-                          const closedCount = node.sessions.filter(s => s.status === SessionStatus.CLOSED).length
-                          if (closedCount > 0) {
-                            return (
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 w-6 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-100"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        openBatchArchiveDialog(node.node_id)
-                                        setSessionSheetOpen(false)
-                                      }}
-                                    >
-                                      <Archive className="h-3.5 w-3.5" />
-                                    </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>
-                                    批量归档已关闭会话
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            )
-                          }
-                          return null
-                        })()}
+                        {/* Batch archive button - always visible */}
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-100"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  openBatchArchiveDialog(node.node_id)
+                                  setSessionSheetOpen(false)
+                                }}
+                                disabled={node.sessions.filter(s => s.status === SessionStatus.CLOSED).length === 0}
+                              >
+                                <Archive className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              批量归档已关闭会话
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
 
                         {/* Create session button */}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            openCreateDialog(node.node_id)
-                            setSessionSheetOpen(false)
-                          }}
-                          disabled={node.status !== NodeStatus.RUNNING || !isConnected}
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                        </Button>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  openCreateDialog(node.node_id)
+                                  setSessionSheetOpen(false)
+                                }}
+                                disabled={node.status !== NodeStatus.RUNNING || !isConnected}
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              创建新会话
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       </div>
                     </div>
                   </div>
