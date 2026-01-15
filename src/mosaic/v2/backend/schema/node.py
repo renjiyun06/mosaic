@@ -145,16 +145,12 @@ class WorkspaceFileContentOut(BaseModel):
 
 # ==================== Code Server Schemas ====================
 
-class CodeServerStatusOut(BaseModel):
-    """Code server instance information and status
+class CodeServerUrlOut(BaseModel):
+    """Code server URL for a node's workspace
 
-    Used for both starting instances and querying status.
-    When instance is running, all fields are populated.
-    When instance is stopped, port/url/started_at are None.
+    Returns the URL to access code-server with the node's workspace already opened.
+    The URL includes the ?folder= parameter pointing to the node's workspace directory.
     """
 
-    status: str = Field(..., description="Instance status: 'running', 'stopped', 'starting', 'error'")
-    port: int | None = Field(None, description="Port number (null if not running)")
-    url: str | None = Field(None, description="Full URL to access code-server (null if not running)")
-    started_at: datetime | None = Field(None, description="Timestamp when instance was started (null if not running)")
-    ref_count: int = Field(0, description="Number of active connections/sessions using this instance")
+    url: str = Field(..., description="Full URL to access code-server with workspace folder parameter")
+    workspace_path: str = Field(..., description="Absolute path to the workspace directory")

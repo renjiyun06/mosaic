@@ -139,26 +139,24 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
 
     bind_host = code_server_config.get('bind_host')
     external_host = code_server_config.get('external_host')
-    port_range_start = code_server_config.get('port_range_start')
-    port_range_end = code_server_config.get('port_range_end')
+    port = code_server_config.get('port')
     binary = code_server_config.get('binary')
 
     if not all([
         bind_host is not None,
         external_host is not None,
-        port_range_start is not None,
-        port_range_end is not None,
+        port is not None,
         binary is not None
     ]):
         raise ValueError(
             "Missing required code_server configuration fields: "
-            "bind_host, external_host, port_range_start, port_range_end, binary"
+            "bind_host, external_host, port, binary"
         )
 
-    # Create CodeServerManager for managing code-server instances
+    # Create CodeServerManager for managing single code-server instance
     app.state.code_server_manager = CodeServerManager(
         host=bind_host,
-        port_range=(port_range_start, port_range_end),
+        port=port,
         code_server_binary=binary
     )
 

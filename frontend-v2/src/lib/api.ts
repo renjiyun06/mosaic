@@ -61,6 +61,7 @@ import type {
 
   // CodeServer types
   CodeServerStatusOut,
+  CodeServerUrlOut,
 
   // Image types
   UploadImageResponse,
@@ -438,65 +439,14 @@ class ApiClient {
   // ========================================================================
 
   /**
-   * Start code-server instance for a node
+   * Get code-server URL for a node's workspace
    */
-  async startCodeServer(mosaicId: number, nodeId: string): Promise<CodeServerStatusOut> {
-    return request<CodeServerStatusOut>(
-      `/api/mosaics/${mosaicId}/nodes/${nodeId}/code-server/start`,
-      {
-        method: 'POST',
-        context: 'node.codeserver.start',
-        autoToast: {
-          success: false,
-          error: true
-        }
-      }
-    )
-  }
-
-  /**
-   * Stop code-server instance for a node (release reference)
-   */
-  async stopCodeServer(mosaicId: number, nodeId: string): Promise<null> {
-    return request<null>(
-      `/api/mosaics/${mosaicId}/nodes/${nodeId}/code-server/stop`,
-      {
-        method: 'POST',
-        context: 'node.codeserver.stop',
-        autoToast: {
-          success: false,
-          error: true
-        }
-      }
-    )
-  }
-
-  /**
-   * Force stop code-server instance for a node (ignore ref_count)
-   */
-  async forceStopCodeServer(mosaicId: number, nodeId: string): Promise<null> {
-    return request<null>(
-      `/api/mosaics/${mosaicId}/nodes/${nodeId}/code-server/force-stop`,
-      {
-        method: 'POST',
-        context: 'node.codeserver.forcestop',
-        autoToast: {
-          success: false,
-          error: true
-        }
-      }
-    )
-  }
-
-  /**
-   * Get code-server instance status for a node
-   */
-  async getCodeServerStatus(mosaicId: number, nodeId: string): Promise<CodeServerStatusOut> {
-    return request<CodeServerStatusOut>(
-      `/api/mosaics/${mosaicId}/nodes/${nodeId}/code-server/status`,
+  async getCodeServerUrl(mosaicId: number, nodeId: string): Promise<CodeServerUrlOut> {
+    return request<CodeServerUrlOut>(
+      `/api/mosaics/${mosaicId}/nodes/${nodeId}/code-server/url`,
       {
         method: 'GET',
-        context: 'node.codeserver.status',
+        context: 'node.codeserver.url',
         autoToast: {
           success: false,
           error: true

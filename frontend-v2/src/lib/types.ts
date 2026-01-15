@@ -453,3 +453,8 @@ export interface CodeServerStatusOut {
   started_at: string | null
   ref_count: number | null
 }
+
+export interface CodeServerUrlOut {
+  url: string
+  workspace_path: string
+}
