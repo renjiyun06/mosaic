@@ -1695,11 +1695,7 @@ export default function ChatPage() {
                 {/* Sessions under this node */}
                 {node.expanded && (
                   <div className="bg-background">
-                    {node.sessions.length === 0 ? (
-                      <div className="pl-8 pr-3 py-3 text-center text-xs text-muted-foreground">
-                        暂无会话
-                      </div>
-                    ) : (
+                    {node.sessions.length > 0 && (
                       node.sessions.map((session, index) => {
                         const isLast = index === node.sessions.length - 1
                         const isFirst = index === 0
@@ -2115,11 +2111,7 @@ export default function ChatPage() {
                   {/* Sessions under this node */}
                   {node.expanded && (
                     <div className="bg-background">
-                      {node.sessions.length === 0 ? (
-                        <div className="pl-8 pr-3 py-3 text-center text-xs text-muted-foreground">
-                          暂无会话
-                        </div>
-                      ) : (
+                      {node.sessions.length > 0 && (
                         node.sessions.map((session, index) => {
                           const isLast = index === node.sessions.length - 1
                           const isFirst = index === 0

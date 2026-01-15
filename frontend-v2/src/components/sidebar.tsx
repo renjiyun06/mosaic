@@ -203,7 +203,7 @@ export function Sidebar({
     setIsResizing(true)
     setShouldAnimate(false) // Disable animation when starting drag
     setDragStartX(e.clientX)
-    setDragStartWidth(collapsed ? 64 : width)
+    setDragStartWidth(collapsed ? 55 : width)
   }
 
   useEffect(() => {
@@ -232,7 +232,7 @@ export function Sidebar({
         onToggle?.()
         // Update drag reference point
         setDragStartX(e.clientX)
-        setDragStartWidth(64)
+        setDragStartWidth(55)
       } else {
         // Normal width adjustment
         const clampedWidth = Math.min(Math.max(targetWidth, MIN_WIDTH), MAX_WIDTH)
@@ -255,7 +255,7 @@ export function Sidebar({
     }
   }, [isResizing, collapsed, onToggle, onWidthChange, dragStartX, dragStartWidth])
 
-  const currentWidth = collapsed ? 64 : width
+  const currentWidth = collapsed ? 55 : width
 
   return (
     <>
@@ -292,7 +292,7 @@ export function Sidebar({
 
 
         {/* Sidebar Content with overflow */}
-        <div className="flex h-full w-full flex-col border-r bg-background overflow-y-auto">
+        <div className="flex h-full w-full flex-col border-r bg-background overflow-y-auto overflow-x-hidden">
           {/* Mosaic Status Card */}
           <div
             className={cn(
@@ -385,7 +385,10 @@ export function Sidebar({
         </div>
 
         {/* Navigation */}
-        <div className="flex-1 space-y-1 px-4 pb-4 pt-4 overflow-y-auto">
+        <div className={cn(
+          "flex-1 space-y-1 pb-4 pt-4 overflow-y-auto overflow-x-hidden",
+          collapsed ? "px-1" : "px-4"
+        )}>
           <div
             className={cn(
               "mb-2 px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground",
