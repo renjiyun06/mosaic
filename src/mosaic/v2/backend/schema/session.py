@@ -67,6 +67,9 @@ class SessionOut(BaseModel):
     # Status
     status: SessionStatus = Field(..., description="Session status")
 
+    # Session metadata
+    topic: Optional[str] = Field(None, description="Session topic (maximum 80 characters)")
+
     # Statistics
     message_count: int = Field(..., description="Total number of messages")
     total_input_tokens: int = Field(..., description="Cumulative input tokens")

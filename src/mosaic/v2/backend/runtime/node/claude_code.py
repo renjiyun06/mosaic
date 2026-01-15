@@ -304,7 +304,9 @@ class ClaudeCodeNode(MosaicNode):
             "model": self.node.config.get("model", LLMModel.SONNET),
             "token_threshold_enabled": self.node.config.get("token_threshold_enabled", False),
             "token_threshold": self.node.config.get("token_threshold", 60000),
-            "inherit_threshold": self.node.config.get("inherit_threshold", True)
+            "inherit_threshold": self.node.config.get("inherit_threshold", True),
+            "auto_generate_session_topic": self.node.config.get("auto_generate_session_topic", True),
+            "topic_generation_token_threshold": self.node.config.get("topic_generation_token_threshold", 1500)
         }
 
 class ClaudeCodeSession(MosaicSession):
@@ -351,6 +353,8 @@ class ClaudeCodeSession(MosaicSession):
         self.token_threshold_enabled = config.get("token_threshold_enabled", False)
         self.token_threshold = config.get("token_threshold", 60000)
         self.inherit_threshold = config.get("inherit_threshold", True)
+        self.auto_generate_session_topic = config.get("auto_generate_session_topic", True)
+        self.topic_generation_token_threshold = config.get("topic_generation_token_threshold", 1500)
         self.mcp_servers = config.get("mcp_servers", {})  # Additional MCP servers
 
         # Claude SDK client (initialized in _on_initialize)
@@ -583,6 +587,32 @@ class ClaudeCodeSession(MosaicSession):
                 }
             })
             self._token_threshold_notified = True
+
+        # Check if we should request session topic generation
+        if (self.mode != SessionMode.PROGRAM and
+            self.auto_generate_session_topic and
+            self._total_output_tokens > self.topic_generation_token_threshold):
+            # Check if topic has already been set
+            from ...model.session import Session
+            from sqlmodel import select
+
+            async with self.async_session_factory() as db_session:
+                stmt = select(Session).where(Session.session_id == self.session_id)
+                result = await db_session.execute(stmt)
+                db_session_obj = result.scalar_one_or_none()
+
+                if db_session_obj and not db_session_obj.topic:
+                    logger.info(
+                        f"Topic generation threshold reached: session_id={self.session_id}, "
+                        f"total_output_tokens={self._total_output_tokens}, "
+                        f"threshold={self.topic_generation_token_threshold}"
+                    )
+                    self.enqueue_event({
+                        "event_type": EventType.SYSTEM_MESSAGE,
+                        "payload": {
+                            "message": "Please provide a concise topic for this session using the set_session_topic tool (maximum 80 characters). IMPORTANT: Generate the topic in the same language as our current conversation."
+                        }
+                    })
 
         # Reset interrupt flag
         self._is_interrupted = False
@@ -1274,6 +1304,122 @@ class ClaudeCodeSession(MosaicSession):
                 }
 
         @tool(
+            "set_session_topic",
+            "Set the topic/title for the current session",
+            {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "The topic/title that summarizes this session's content (maximum 80 characters). Use the same language as the current conversation."
+                    }
+                },
+                "required": ["topic"]
+            }
+        )
+        async def set_session_topic(args):
+            """
+            Set the topic/title for the current session.
+
+            This tool allows the agent to provide a descriptive topic for the session,
+            which will be stored in the database for easy reference and organization.
+            The topic should be in the same language as the conversation.
+            """
+            try:
+                topic = args.get('topic')
+
+                if not topic:
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Error: topic is required"
+                            }
+                        ]
+                    }
+
+                # Validate topic length (max 80 characters)
+                if len(topic) > 80:
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"Error: topic is too long ({len(topic)} characters). Maximum length is 80 characters."
+                            }
+                        ]
+                    }
+
+                # Update session topic in database
+                from ...model.session import Session
+                from sqlmodel import select
+
+                async with self.async_session_factory() as db_session:
+                    stmt = select(Session).where(Session.session_id == self.session_id)
+                    result = await db_session.execute(stmt)
+                    db_session_obj = result.scalar_one_or_none()
+
+                    if not db_session_obj:
+                        logger.error(
+                            f"Session not found when setting topic: session_id={self.session_id}"
+                        )
+                        return {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "Error: Session not found in database"
+                                }
+                            ]
+                        }
+
+                    # Update topic
+                    db_session_obj.topic = topic
+                    db_session_obj.updated_at = datetime.now()
+                    await db_session.commit()
+
+                    logger.info(
+                        f"Session topic updated: session_id={self.session_id}, topic='{topic}'"
+                    )
+
+                # Send WebSocket notification to frontend
+                from ...websocket import UserMessageBroker
+                user_message_broker = UserMessageBroker.get_instance()
+                user_message_broker.push_from_worker(self.node.node.user_id, {
+                    "role": MessageRole.NOTIFICATION,
+                    "message_type": MessageType.TOPIC_UPDATED,
+                    "session_id": self.session_id,
+                    "payload": {
+                        "session_id": self.session_id,
+                        "topic": topic
+                    }
+                })
+                logger.info(
+                    f"Pushed topic_updated notification to WebSocket: "
+                    f"session_id={self.session_id}, topic='{topic}'"
+                )
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Successfully set session topic to: {topic}"
+                        }
+                    ]
+                }
+            except Exception as e:
+                logger.error(
+                    f"Failed to set session topic: session_id={self.session_id}, error={e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Failed to set session topic: {str(e)}"
+                        }
+                    ]
+                }
+
+        @tool(
             "task_complete",
             "Signal that the current task has been completed.",
             {
@@ -1442,7 +1588,7 @@ class ClaudeCodeSession(MosaicSession):
 
         return create_sdk_mcp_server(
             name="mosaic-mcp-server",
-            tools=[send_message, send_email, task_complete]
+            tools=[send_message, send_email, set_session_topic, task_complete]
         )
 
     # ========== Helper Methods ==========

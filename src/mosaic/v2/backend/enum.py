@@ -155,3 +155,4 @@ class MessageType(str, Enum):
     SYSTEM_MESSAGE = "system_message"
     SESSION_STARTED = "session_started"
     SESSION_ENDED = "session_ended"
+    TOPIC_UPDATED = "topic_updated"

@@ -467,6 +467,10 @@ export default function ChatPage() {
           console.log("[Chat] Session ended, refreshing session list")
           loadNodesAndSessions()
         }
+        if (wsMessage.message_type === "topic_updated") {
+          console.log("[Chat] Topic updated, refreshing session list")
+          loadNodesAndSessions(false) // Don't auto-select session
+        }
       }
     })
 
@@ -1062,9 +1066,9 @@ export default function ChatPage() {
                   className={`font-mono text-xs truncate ${
                     isActive ? "font-semibold" : "text-muted-foreground"
                   }`}
-                  title={session.session_id}
+                  title={session.topic || session.session_id}
                 >
-                  {session.session_id.slice(0, 8)}
+                  {session.topic || session.session_id.slice(0, 8)}
                 </span>
                 <Badge
                   variant={
@@ -1125,9 +1129,9 @@ export default function ChatPage() {
                   className={`font-mono text-xs truncate ${
                     isActive ? "font-semibold" : "text-muted-foreground"
                   }`}
-                  title={session.session_id}
+                  title={session.topic || session.session_id}
                 >
-                  {session.session_id.slice(0, 8)}
+                  {session.topic || session.session_id.slice(0, 8)}
                 </span>
                 <span className="text-xs text-amber-600 font-medium truncate">
                   {session.node_id}
@@ -1188,7 +1192,7 @@ export default function ChatPage() {
                   <span className="text-xs sm:text-sm font-mono text-muted-foreground truncate">
                     {currentSessionInfo.nodeId}
                     <span className="mx-1">/</span>
-                    {activeSessionId?.slice(0, 8)}
+                    {currentSessionInfo.session.topic || activeSessionId?.slice(0, 8)}
                   </span>
                 </div>
 
@@ -1630,8 +1634,9 @@ export default function ChatPage() {
                                     className={`font-mono text-xs truncate ${
                                       isActive ? "font-semibold" : "text-muted-foreground"
                                     }`}
+                                    title={session.topic || session.session_id}
                                   >
-                                    {session.session_id.slice(0, 8)}
+                                    {session.topic || session.session_id.slice(0, 8)}
                                   </span>
                                   <Badge
                                     variant={
@@ -1664,8 +1669,9 @@ export default function ChatPage() {
                                     className={`font-mono text-xs truncate ${
                                       isActive ? "font-semibold" : "text-muted-foreground"
                                     }`}
+                                    title={session.topic || session.session_id}
                                   >
-                                    {session.session_id.slice(0, 8)}
+                                    {session.topic || session.session_id.slice(0, 8)}
                                   </span>
                                   <Circle
                                     className={`h-1.5 w-1.5 shrink-0 ml-auto ${
@@ -2062,8 +2068,9 @@ export default function ChatPage() {
                                       className={`font-mono text-xs truncate ${
                                         isActive ? "font-semibold" : "text-muted-foreground"
                                       }`}
+                                      title={session.topic || session.session_id}
                                     >
-                                      {session.session_id.slice(0, 8)}
+                                      {session.topic || session.session_id.slice(0, 8)}
                                     </span>
                                     <Badge
                                       variant={
@@ -2096,8 +2103,9 @@ export default function ChatPage() {
                                       className={`font-mono text-xs truncate ${
                                         isActive ? "font-semibold" : "text-muted-foreground"
                                       }`}
+                                      title={session.topic || session.session_id}
                                     >
-                                      {session.session_id.slice(0, 8)}
+                                      {session.topic || session.session_id.slice(0, 8)}
                                     </span>
                                     <Circle
                                       className={`h-1.5 w-1.5 shrink-0 ml-auto ${

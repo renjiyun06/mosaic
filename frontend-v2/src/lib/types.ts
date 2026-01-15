@@ -114,7 +114,8 @@ export enum MessageType {
   ASSISTANT_RESULT = 'assistant_result',
   SYSTEM_MESSAGE = 'system_message',
   SESSION_STARTED = 'session_started',
-  SESSION_ENDED = 'session_ended'
+  SESSION_ENDED = 'session_ended',
+  TOPIC_UPDATED = 'topic_updated'
 }
 
 // ==================== Auth Types ====================
@@ -350,6 +351,7 @@ export interface SessionOut {
   mode: SessionMode
   model: LLMModel | null
   status: SessionStatus
+  topic: string | null
   message_count: number
   total_input_tokens: number
   total_output_tokens: number

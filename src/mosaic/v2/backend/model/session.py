@@ -53,6 +53,14 @@ class Session(BaseModel, table=True):
         description="Session status"
     )
 
+    # Session metadata
+    topic: Optional[str] = Field(
+        default=None,
+        max_length=80,
+        index=True,
+        description="Auto-generated session topic/title (maximum 80 characters)"
+    )
+
     # Statistics
     message_count: int = Field(
         default=0,
