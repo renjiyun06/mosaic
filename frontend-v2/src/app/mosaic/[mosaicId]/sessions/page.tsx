@@ -206,8 +206,7 @@ export default function SessionsPage() {
 
   // Truncate session ID for display
   const truncateSessionId = (sessionId: string): string => {
-    if (sessionId.length <= 16) return sessionId
-    return `${sessionId.substring(0, 8)}...${sessionId.substring(sessionId.length - 8)}`
+    return sessionId.substring(0, 8)
   }
 
   // Handle session ID click to open view dialog
@@ -363,6 +362,12 @@ export default function SessionsPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
+                {session.topic && (
+                  <div>
+                    <span className="text-xs text-muted-foreground">主题</span>
+                    <div className="text-sm mt-0.5">{session.topic}</div>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div>
                     <span className="text-xs text-muted-foreground">节点</span>
@@ -427,6 +432,7 @@ export default function SessionsPage() {
                   <TableRow>
                     <TableHead className="text-center">会话 ID</TableHead>
                     <TableHead className="text-center">节点 ID</TableHead>
+                    <TableHead className="text-center w-[100px] max-w-[100px]">主题</TableHead>
                     <TableHead className="text-center">模式</TableHead>
                     <TableHead className="text-center">模型</TableHead>
                     <TableHead className="text-center">状态</TableHead>
@@ -462,6 +468,14 @@ export default function SessionsPage() {
                       </TableCell>
                       <TableCell className="text-center">
                         <span className="font-mono text-sm">{session.node_id}</span>
+                      </TableCell>
+                      <TableCell className={`w-[100px] max-w-[100px] ${session.topic ? 'text-left' : 'text-center'}`}>
+                        <div
+                          className="text-sm truncate max-w-full"
+                          title={session.topic || undefined}
+                        >
+                          {session.topic || "—"}
+                        </div>
                       </TableCell>
                       <TableCell className="text-center">
                         <Badge variant="outline">{session.mode}</Badge>
