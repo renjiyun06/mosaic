@@ -304,7 +304,7 @@ class ClaudeCodeNode(MosaicNode):
             "mode": self.node.config.get("mode", SessionMode.BACKGROUND),
             "model": self.node.config.get("model", LLMModel.SONNET),
             "token_threshold_enabled": self.node.config.get("token_threshold_enabled", False),
-            "token_threshold": self.node.config.get("token_threshold", 60000),
+            "token_threshold": self.node.config.get("token_threshold", 30000),
             "inherit_threshold": self.node.config.get("inherit_threshold", True),
             "auto_generate_session_topic": self.node.config.get("auto_generate_session_topic", True),
             "topic_generation_token_threshold": self.node.config.get("topic_generation_token_threshold", 1500)
@@ -351,8 +351,13 @@ class ClaudeCodeSession(MosaicSession):
         config = config or {}
         self.mode = config.get("mode", SessionMode.BACKGROUND)
         self.model = config.get("model", LLMModel.SONNET)
-        self.token_threshold_enabled = config.get("token_threshold_enabled", False)
-        self.token_threshold = config.get("token_threshold", 60000)
+
+        # Token threshold: force enable for LONG_RUNNING mode
+        if self.mode == SessionMode.LONG_RUNNING:
+            self.token_threshold_enabled = True
+        else:
+            self.token_threshold_enabled = config.get("token_threshold_enabled", False)
+        self.token_threshold = config.get("token_threshold", 30000)
         self.inherit_threshold = config.get("inherit_threshold", True)
         self.auto_generate_session_topic = config.get("auto_generate_session_topic", True)
         self.topic_generation_token_threshold = config.get("topic_generation_token_threshold", 1500)
