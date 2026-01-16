@@ -380,6 +380,9 @@ class ClaudeCodeSession(MosaicSession):
         self._effective_threshold = self.token_threshold  # Dynamic threshold (updates after each notification)
         self._token_threshold_notified = False  # Notification flag
 
+        # Task acknowledgment flag (LONG_RUNNING mode only)
+        self._task_acknowledged = False  # Whether current task has been acknowledged as finished
+
         logger.debug(
             f"Initialized ClaudeCodeSession: session_id={session_id}, "
             f"mode={self.mode}, model={self.model}"
@@ -1786,9 +1789,62 @@ class ClaudeCodeSession(MosaicSession):
                     ]
                 }
 
+        # Build tools list based on session mode
+        tools = [send_message, send_email, set_session_topic, task_complete]
+
+        # Add acknowledge_task_finished tool only for LONG_RUNNING mode
+        if self.mode == SessionMode.LONG_RUNNING:
+            @tool(
+                "acknowledge_task_finished",
+                "Acknowledge that the current task has been finished.",
+                {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            )
+            async def acknowledge_task_finished(args):
+                """
+                Acknowledge task completion for LONG_RUNNING sessions.
+
+                This tool allows the agent to signal that it has finished the current task
+                and is ready to accept new tasks. The session continues to run.
+                """
+                try:
+                    # Set task acknowledgment flag
+                    self._task_acknowledged = True
+
+                    logger.info(
+                        f"Task acknowledged as finished: session_id={self.session_id}"
+                    )
+
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Task acknowledged as finished. Ready for next task."
+                            }
+                        ]
+                    }
+                except Exception as e:
+                    logger.error(
+                        f"Failed to acknowledge task: session_id={self.session_id}, error={e}",
+                        exc_info=True
+                    )
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"Failed to acknowledge task: {str(e)}"
+                            }
+                        ]
+                    }
+
+            tools.append(acknowledge_task_finished)
+
         return create_sdk_mcp_server(
             name="mosaic-mcp-server",
-            tools=[send_message, send_email, set_session_topic, task_complete]
+            tools=tools
         )
 
     # ========== Helper Methods ==========
