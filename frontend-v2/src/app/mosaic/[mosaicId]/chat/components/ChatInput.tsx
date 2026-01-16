@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast"
 interface ChatInputProps {
   sessionId: string | null
   initialValue: string
-  isLoading: boolean
+  isBusy: boolean
   isConnected: boolean
   canSendMessage: boolean
   placeholder: string
@@ -60,7 +60,7 @@ function mapCursorPosition(cursorPos: number, displayValue: string, fullMarkdown
 export const ChatInput = memo(function ChatInput({
   sessionId,
   initialValue,
-  isLoading,
+  isBusy,
   isConnected,
   canSendMessage,
   placeholder,
@@ -119,12 +119,12 @@ export const ChatInput = memo(function ChatInput({
     textarea.style.height = `${newHeight}px`
   }, [displayValue])
 
-  // Auto-focus textarea when loading finishes
+  // Auto-focus textarea when session becomes idle
   useEffect(() => {
-    if (!isLoading && sessionId && isConnected && textareaRef.current) {
+    if (!isBusy && sessionId && isConnected && textareaRef.current) {
       textareaRef.current.focus()
     }
-  }, [isLoading, sessionId, isConnected])
+  }, [isBusy, sessionId, isConnected])
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newDisplayValue = e.target.value
@@ -140,7 +140,7 @@ export const ChatInput = memo(function ChatInput({
   }, [sessionId, fullMarkdown, onInputChange])
 
   const handleSend = useCallback(() => {
-    if (!fullMarkdown.trim() || !sessionId || !isConnected || !canSendMessage || isLoading) return
+    if (!fullMarkdown.trim() || !sessionId || !isConnected || !canSendMessage || isBusy) return
 
     // Stop voice recording if it's active
     if (isRecording) {
@@ -158,7 +158,7 @@ export const ChatInput = memo(function ChatInput({
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto"
     }
-  }, [fullMarkdown, sessionId, isConnected, canSendMessage, isLoading, isRecording, stop, onSendMessage])
+  }, [fullMarkdown, sessionId, isConnected, canSendMessage, isBusy, isRecording, stop, onSendMessage])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && e.ctrlKey) {
@@ -271,7 +271,7 @@ export const ChatInput = memo(function ChatInput({
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           placeholder={isRecording ? "🎤 Listening..." : isUploading ? "📤 Uploading image..." : placeholder}
-          disabled={isLoading || !isConnected || !canSendMessage || isRecording || isUploading}
+          disabled={isBusy || !isConnected || !canSendMessage || isRecording || isUploading}
           className={`w-full resize-none overflow-y-auto border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-2 sm:px-3 pt-2 sm:pt-3 text-base ${isRecording || isUploading ? "opacity-70" : ""}`}
           style={{ minHeight: "24px" }}
         />
@@ -289,7 +289,7 @@ export const ChatInput = memo(function ChatInput({
           {/* Action buttons */}
           <div className="flex gap-2">
             {/* Voice input button - only show if supported */}
-            {isSupported && !isLoading && (
+            {isSupported && !isBusy && (
               <Button
                 onClick={handleVoiceClick}
                 variant={isRecording ? "destructive" : "outline"}
@@ -306,7 +306,7 @@ export const ChatInput = memo(function ChatInput({
             )}
 
             {/* Send/Interrupt button */}
-            {isLoading ? (
+            {isBusy ? (
               <Button onClick={handleInterruptClick} variant="destructive" size="icon">
                 <StopCircle className="h-4 w-4" />
               </Button>

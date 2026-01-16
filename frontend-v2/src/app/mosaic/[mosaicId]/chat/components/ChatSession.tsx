@@ -7,6 +7,7 @@ import { useWebSocket } from "@/contexts/websocket-context"
 import {
   SessionStatus,
   NodeStatus,
+  RuntimeStatus,
   MessageRole,
   MessageType,
   type NodeOut,
@@ -40,7 +41,6 @@ export function ChatSession({
 
   // Session-specific state
   const [messages, setMessages] = useState<ParsedMessage[]>([])
-  const [isLoading, setIsLoading] = useState(false)
   const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set())
   const [sessionStats, setSessionStats] = useState<{
     total_cost_usd?: number
@@ -179,11 +179,6 @@ export function ChatSession({
       ) {
         setCollapsedMessages((prev) => new Set(prev).add(wsMessage.message_id!))
       }
-
-      // Stop loading on result
-      if (wsMessage.message_type === "assistant_result") {
-        setIsLoading(false)
-      }
     })
 
     return () => {
@@ -260,18 +255,6 @@ export function ChatSession({
         setSessionStats(stats)
         onStatsUpdate?.(sessionId, stats)
       }
-
-      // Restore loading state based on last message
-      if (parsed.length > 0) {
-        const lastMessage = parsed[parsed.length - 1]
-        const isProcessing = lastMessage.message_type !== MessageType.ASSISTANT_RESULT
-        setIsLoading(isProcessing)
-        if (isProcessing) {
-          console.log("[ChatSession] Session is still processing, restored loading state")
-        }
-      } else {
-        setIsLoading(false)
-      }
     } catch (error) {
       console.error("Failed to load messages:", error)
     }
@@ -279,7 +262,6 @@ export function ChatSession({
 
   // Handle send message
   const handleSendMessage = useCallback((sessionId: string, message: string) => {
-    setIsLoading(true)
     sendMessage(sessionId, message)
     onInputChange(sessionId, "")
   }, [sendMessage, onInputChange])
@@ -287,7 +269,6 @@ export function ChatSession({
   // Handle interrupt
   const handleInterrupt = useCallback((sessionId: string) => {
     interrupt(sessionId)
-    setIsLoading(false)
   }, [interrupt])
 
   // Toggle collapsed state
@@ -314,7 +295,7 @@ export function ChatSession({
       <MessageList
         messages={messages}
         collapsedMessages={collapsedMessages}
-        isLoading={isLoading}
+        isLoading={currentSessionInfo?.session.runtime_status === RuntimeStatus.BUSY}
         isVisible={isVisible}
         onToggleCollapse={toggleCollapse}
       />
@@ -323,7 +304,7 @@ export function ChatSession({
       <ChatInput
         sessionId={sessionId}
         initialValue={sessionInput}
-        isLoading={isLoading}
+        isBusy={currentSessionInfo?.session.runtime_status === RuntimeStatus.BUSY}
         isConnected={isConnected}
         canSendMessage={!!canSendMessage}
         placeholder={
