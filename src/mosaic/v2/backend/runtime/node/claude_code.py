@@ -389,8 +389,12 @@ class ClaudeCodeSession(MosaicSession):
         self._effective_threshold = self.token_threshold  # Dynamic threshold (updates after each notification)
         self._token_threshold_notified = False  # Notification flag
 
-        # Task acknowledgment flag (LONG_RUNNING mode only)
+        # Task lifecycle flags (LONG_RUNNING mode only)
+        self._task_started = False  # Whether task has been acknowledged as started
         self._task_acknowledged = False  # Whether current task has been acknowledged as finished
+
+        # Background monitor task (LONG_RUNNING mode only)
+        self._monitor_task: Optional[asyncio.Task] = None
 
         logger.debug(
             f"Initialized ClaudeCodeSession: session_id={session_id}, "
@@ -487,7 +491,14 @@ class ClaudeCodeSession(MosaicSession):
         })
         logger.info(f"Pushed session_started notification to WebSocket: session_id={self.session_id}")
 
-        # 6. Send self-notification if session_start_notify is enabled (all modes except PROGRAM)
+        # 6. Start background task progress monitor (LONG_RUNNING mode only)
+        if self.mode == SessionMode.LONG_RUNNING:
+            self._monitor_task = asyncio.create_task(self._monitor_task_progress())
+            logger.info(
+                f"Started background task progress monitor: session_id={self.session_id}"
+            )
+
+        # 7. Send self-notification if session_start_notify is enabled (all modes except PROGRAM)
         if self.mode != SessionMode.PROGRAM and self.node.node.config.get("session_start_notify", False):
             self.enqueue_event({
                 "event_type": EventType.SYSTEM_MESSAGE,
@@ -812,6 +823,17 @@ class ClaudeCodeSession(MosaicSession):
         """
         logger.info(f"Cleaning up ClaudeCodeSession: session_id={self.session_id}")
 
+        # Cancel background monitor task if running (LONG_RUNNING mode)
+        if self._monitor_task and not self._monitor_task.done():
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+            logger.info(
+                f"Background monitor task cancelled: session_id={self.session_id}"
+            )
+
         # Sync final session state to database
         try:
             await self._update_session_to_db()
@@ -876,9 +898,83 @@ class ClaudeCodeSession(MosaicSession):
 
     async def _on_initialize(self):
         pass
-    
+
     async def _on_close(self):
         pass
+
+    # ========== Task Progress Monitoring (LONG_RUNNING mode) ==========
+
+    async def _monitor_task_progress(self):
+        """
+        Background task that monitors progress for LONG_RUNNING sessions.
+
+        This task runs continuously and checks every 10 seconds:
+        - If runtime_status is IDLE
+        - If task has been started (acknowledge_task_started called)
+        - If task has NOT been acknowledged as finished
+
+        If all conditions are met, it sends a reminder to the agent to continue working.
+
+        This ensures the agent doesn't get stuck waiting and continues until
+        the task is explicitly marked as complete.
+        """
+        logger.info(
+            f"Task progress monitor started for LONG_RUNNING session: session_id={self.session_id}"
+        )
+
+        try:
+            while True:
+                # Wait 10 seconds before next check
+                await asyncio.sleep(10)
+
+                # Check if session should be monitored
+                from ...model.session import Session
+                from sqlmodel import select
+
+                async with self.async_session_factory() as db_session:
+                    stmt = select(Session).where(Session.session_id == self.session_id)
+                    result = await db_session.execute(stmt)
+                    db_session_obj = result.scalar_one_or_none()
+
+                    if not db_session_obj:
+                        logger.warning(
+                            f"Session not found in database, stopping monitor: session_id={self.session_id}"
+                        )
+                        break
+
+                    runtime_status = db_session_obj.runtime_status
+
+                # Check conditions: IDLE, task started, and task not finished
+                if (runtime_status == RuntimeStatus.IDLE and
+                    self._task_started and
+                    not self._task_acknowledged):
+                    logger.info(
+                        f"LONG_RUNNING session is IDLE and task not finished, sending reminder: "
+                        f"session_id={self.session_id}"
+                    )
+
+                    # Send reminder event to continue working
+                    self.enqueue_event({
+                        "event_type": EventType.SYSTEM_MESSAGE,
+                        "payload": {
+                            "message": (
+                                "Task progress check: You are currently idle. "
+                                "If you have completed all tasks, please call the acknowledge_task_finished tool. "
+                                "Otherwise, please continue working on the current task."
+                            )
+                        }
+                    })
+
+        except asyncio.CancelledError:
+            logger.info(
+                f"Task progress monitor cancelled: session_id={self.session_id}"
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"Error in task progress monitor: session_id={self.session_id}, error={e}",
+                exc_info=True
+            )
 
     # ========== Claude Client Management ==========
 
@@ -1820,8 +1916,56 @@ class ClaudeCodeSession(MosaicSession):
         # Build tools list based on session mode
         tools = [send_message, send_email, set_session_topic, task_complete]
 
-        # Add acknowledge_task_finished tool only for LONG_RUNNING mode
+        # Add LONG_RUNNING mode specific tools
         if self.mode == SessionMode.LONG_RUNNING:
+            @tool(
+                "acknowledge_task_started",
+                "Acknowledge that you have understood the task and are ready to start working on it.",
+                {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            )
+            async def acknowledge_task_started(args):
+                """
+                Acknowledge task start for LONG_RUNNING sessions.
+
+                This tool allows the agent to signal that it has understood the task
+                and is ready to start working. After calling this tool, the monitoring
+                system will start checking progress and send reminders if the agent
+                becomes idle without finishing the task.
+                """
+                try:
+                    # Set task started flag
+                    self._task_started = True
+
+                    logger.info(
+                        f"Task acknowledged as started: session_id={self.session_id}"
+                    )
+
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Task acknowledged as started. Progress monitoring is now active."
+                            }
+                        ]
+                    }
+                except Exception as e:
+                    logger.error(
+                        f"Failed to acknowledge task start: session_id={self.session_id}, error={e}",
+                        exc_info=True
+                    )
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"Failed to acknowledge task start: {str(e)}"
+                            }
+                        ]
+                    }
+
             @tool(
                 "acknowledge_task_finished",
                 "Acknowledge that the current task has been finished.",
@@ -1868,6 +2012,7 @@ class ClaudeCodeSession(MosaicSession):
                         ]
                     }
 
+            tools.append(acknowledge_task_started)
             tools.append(acknowledge_task_finished)
 
         return create_sdk_mcp_server(
