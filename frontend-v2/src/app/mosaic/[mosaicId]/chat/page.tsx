@@ -1733,6 +1733,9 @@ export default function ChatPage() {
                   <SelectItem value={SessionMode.PROGRAM}>
                     Program - 编程模式
                   </SelectItem>
+                  <SelectItem value={SessionMode.LONG_RUNNING}>
+                    Long Running - 长期运行模式
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>

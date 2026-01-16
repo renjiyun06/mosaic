@@ -35,11 +35,11 @@ class CreateSessionRequest(BaseModel):
     @field_validator('mode')
     @classmethod
     def validate_mode(cls, value: SessionMode) -> SessionMode:
-        """Validate that mode is either PROGRAM or CHAT (BACKGROUND not allowed)"""
-        if value not in (SessionMode.PROGRAM, SessionMode.CHAT):
+        """Validate that mode is either PROGRAM or CHAT or LONG_RUNNING (BACKGROUND not allowed)"""
+        if value not in (SessionMode.PROGRAM, SessionMode.CHAT, SessionMode.LONG_RUNNING):
             raise ValueError(
                 f"Invalid session mode '{value}'. "
-                "Only 'program' and 'chat' modes can be created manually. "
+                "Only 'program' and 'chat' and 'LONG_RUNNING' modes can be created manually. "
                 "Background sessions are created automatically by event triggers."
             )
         return value

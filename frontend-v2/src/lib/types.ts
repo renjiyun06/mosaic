@@ -94,7 +94,8 @@ export enum RuntimeStatus {
 export enum SessionMode {
   BACKGROUND = 'background',
   PROGRAM = 'program',
-  CHAT = 'chat'
+  CHAT = 'chat',
+  LONG_RUNNING = 'long_running'
 }
 
 export enum LLMModel {

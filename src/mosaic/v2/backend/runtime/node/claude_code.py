@@ -376,7 +376,9 @@ class ClaudeCodeSession(MosaicSession):
         # Message sequence number (starts from 0, incremented for each message)
         self._message_sequence = 0
 
-        self._token_threshold_notified = False
+        # Token threshold notification tracking
+        self._effective_threshold = self.token_threshold  # Dynamic threshold (updates after each notification)
+        self._token_threshold_notified = False  # Notification flag
 
         logger.debug(
             f"Initialized ClaudeCodeSession: session_id={session_id}, "
@@ -527,6 +529,25 @@ class ClaudeCodeSession(MosaicSession):
             # _should_close_after_event will handle the close decision
             return
 
+        # LONG_RUNNING mode: Restart Claude client on self-referencing message
+        if self.mode == SessionMode.LONG_RUNNING:
+            source_node_id = event.get('source_node_id')
+            source_session_id = event.get('source_session_id')
+
+            if (source_node_id == self.node.node.node_id and
+                source_session_id == self.session_id):
+                logger.info(
+                    f"LONG_RUNNING session detected self-referencing message, "
+                    f"restarting Claude client to clear context: session_id={self.session_id}"
+                )
+
+                # Restart Claude client: disconnect old client and create new one
+                await self._restart_claude_client()
+
+                logger.info(
+                    f"Claude client restarted successfully: session_id={self.session_id}"
+                )
+
         # 1. Format event to message string
         message = self._format_event_for_claude(event)
 
@@ -617,15 +638,30 @@ class ClaudeCodeSession(MosaicSession):
             # Sync session state to database
             await self._update_session_to_db()
 
-        if self.mode != SessionMode.PROGRAM and self.token_threshold_enabled and self._total_output_tokens > self.token_threshold and not self._token_threshold_notified:
-            logger.warning(f"Token threshold reached: session_id={self.session_id}, total_output_tokens={self._total_output_tokens}")
+        # Token threshold notification
+        if (self.mode != SessionMode.PROGRAM and
+            self.token_threshold_enabled and
+            self._total_output_tokens >= self._effective_threshold and
+            not self._token_threshold_notified):
+            logger.warning(
+                f"Token threshold reached: session_id={self.session_id}, "
+                f"total_output_tokens={self._total_output_tokens}, "
+                f"effective_threshold={self._effective_threshold}"
+            )
             self.enqueue_event({
                 "event_type": EventType.SYSTEM_MESSAGE,
                 "payload": {
-                    "message": "Token threshold reached"
+                    "message": f"Token threshold reached: {self._effective_threshold}"
                 }
             })
+
+            # Set flag to True - only reset on Claude client restart (LONG_RUNNING mode)
             self._token_threshold_notified = True
+
+            logger.debug(
+                f"Token notification sent: session_id={self.session_id}, "
+                f"mode={self.mode.value}"
+            )
 
         # Check if we should request session topic generation
         if (self.mode != SessionMode.PROGRAM and
@@ -827,6 +863,88 @@ class ClaudeCodeSession(MosaicSession):
     
     async def _on_close(self):
         pass
+
+    # ========== Claude Client Management ==========
+
+    async def _restart_claude_client(self) -> None:
+        """
+        Restart Claude SDK client to clear conversation context.
+
+        This is used when the session receives a self-referencing message,
+        allowing the session to continue with a fresh context while maintaining
+        the same session_id.
+
+        Steps:
+        1. Reset notification flags
+        2. Disconnect old client (send /exit, receive remaining messages, disconnect)
+        3. Create and connect new client with same configuration
+        """
+        # Step 1: Reset notification tracking
+        # After restart, reset flag and update effective threshold
+        self._token_threshold_notified = False
+        self._effective_threshold = self._total_output_tokens + self.token_threshold
+        logger.debug(
+            f"Reset notification tracking: session_id={self.session_id}, "
+            f"current_tokens={self._total_output_tokens}, "
+            f"effective_threshold={self._effective_threshold}, "
+            f"base_threshold={self.token_threshold}"
+        )
+
+        # Step 2: Disconnect old client
+        if self._cc_client:
+            try:
+                logger.debug(f"Disconnecting old Claude client: session_id={self.session_id}")
+                await self._cc_client.query("/exit")
+                async for _ in self._cc_client.receive_response():
+                    pass
+                await self._cc_client.disconnect()
+                logger.debug(f"Old Claude client disconnected: session_id={self.session_id}")
+            except Exception as e:
+                logger.error(
+                    f"Error disconnecting old Claude client: session_id={self.session_id}, error={e}",
+                    exc_info=True
+                )
+            self._cc_client = None
+
+        # Step 3: Create new client with same configuration
+        logger.debug(f"Creating new Claude client: session_id={self.session_id}")
+
+        # Get system prompt from node template
+        system_prompt = self.node._system_prompt_template.replace("###session_id###", self.session_id)
+
+        # Configure MCP servers
+        mcp_servers = self.mcp_servers.copy()
+        mcp_servers["mosaic-mcp-server"] = self._create_mosaic_mcp_server()
+
+        # Configure Claude SDK
+        cc_options = ClaudeAgentOptions(
+            model=self.model,
+            system_prompt={
+                "type": "preset",
+                "preset": "claude_code",
+                "append": system_prompt
+            },
+            cwd=str(self.node.node_path),
+            permission_mode="bypassPermissions",
+            hooks={
+                "PreToolUse": [
+                    HookMatcher(hooks=[self._pre_tool_use_hook])
+                ],
+                "PostToolUse": [
+                    HookMatcher(hooks=[self._post_tool_use_hook])
+                ],
+            },
+            mcp_servers=mcp_servers,
+            allowed_tools=["*"],
+            setting_sources=["project"],
+            max_thinking_tokens=2000
+        )
+
+        # Create and connect new client
+        self._cc_client = ClaudeSDKClient(cc_options)
+        await self._cc_client.connect()
+
+        logger.debug(f"New Claude client connected: session_id={self.session_id}")
 
     # ========== User Message Handling ==========
 
@@ -1298,6 +1416,15 @@ class ClaudeCodeSession(MosaicSession):
                 target_node_id = args['target_node_id']
                 target_session_id = args.get('target_session_id', None)
                 message = args['message']
+
+                # Auto-fill target_session_id for LONG_RUNNING mode when sending to self
+                if (self.mode == SessionMode.LONG_RUNNING and
+                    target_node_id == self.node.node.node_id):
+                    target_session_id = self.session_id
+                    logger.debug(
+                        f"LONG_RUNNING mode: Auto-filled target_session_id for self-referencing message: "
+                        f"session_id={self.session_id}"
+                    )
 
                 await self.node.send_event(
                     source_session_id=self.session_id,

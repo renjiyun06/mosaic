@@ -127,10 +127,18 @@ class SessionMode(str, Enum):
     CHAT: Interactive chat session created by users for normal usage of agent nodes.
           Only available for agent nodes. Used for regular interaction with the agent.
           DOES emit events to the event mesh during normal operation.
+
+    LONG_RUNNING: Long-running session mode with continuous availability (24/7 worker pattern).
+                  When the session sends a message to itself, the Claude client is restarted
+                  to clear conversation context while maintaining the same session_id.
+                  This allows the session to continue indefinitely with fresh context.
+                  External nodes can always reach this session using the same session_id.
+                  DOES emit events to the event mesh during normal operation.
     """
     BACKGROUND = "background"
     PROGRAM = "program"
     CHAT = "chat"
+    LONG_RUNNING = "long_running"
 
 
 class LLMModel(str, Enum):
