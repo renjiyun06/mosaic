@@ -102,6 +102,7 @@ import { useVoiceInput } from "@/hooks/use-voice-input"
 import {
   SessionMode,
   SessionStatus,
+  RuntimeStatus,
   LLMModel,
   NodeType,
   NodeStatus,
@@ -469,6 +470,10 @@ export default function ChatPage() {
         }
         if (wsMessage.message_type === "topic_updated") {
           console.log("[Chat] Topic updated, refreshing session list")
+          loadNodesAndSessions(false) // Don't auto-select session
+        }
+        if (wsMessage.message_type === "runtime_status_changed") {
+          console.log("[Chat] Runtime status changed, refreshing session list")
           loadNodesAndSessions(false) // Don't auto-select session
         }
       }
@@ -1138,8 +1143,10 @@ export default function ChatPage() {
                 </span>
                 <Circle
                   className={`h-1.5 w-1.5 shrink-0 ml-auto ${
-                    session.status === SessionStatus.ACTIVE
-                      ? 'fill-blue-500 text-blue-500'
+                    session.status === SessionStatus.ACTIVE && session.runtime_status === RuntimeStatus.IDLE
+                      ? 'fill-green-500 text-green-500'
+                      : session.status === SessionStatus.ACTIVE && session.runtime_status === RuntimeStatus.BUSY
+                      ? 'fill-orange-500 text-orange-500'
                       : 'fill-gray-400 text-gray-400'
                   }`}
                 />
@@ -1675,8 +1682,10 @@ export default function ChatPage() {
                                   </span>
                                   <Circle
                                     className={`h-1.5 w-1.5 shrink-0 ml-auto ${
-                                      session.status === SessionStatus.ACTIVE
-                                        ? 'fill-blue-500 text-blue-500'
+                                      session.status === SessionStatus.ACTIVE && session.runtime_status === RuntimeStatus.IDLE
+                                        ? 'fill-green-500 text-green-500'
+                                        : session.status === SessionStatus.ACTIVE && session.runtime_status === RuntimeStatus.BUSY
+                                        ? 'fill-orange-500 text-orange-500'
                                         : 'fill-gray-400 text-gray-400'
                                     }`}
                                   />
@@ -2109,8 +2118,10 @@ export default function ChatPage() {
                                     </span>
                                     <Circle
                                       className={`h-1.5 w-1.5 shrink-0 ml-auto ${
-                                        session.status === SessionStatus.ACTIVE
-                                          ? 'fill-blue-500 text-blue-500'
+                                        session.status === SessionStatus.ACTIVE && session.runtime_status === RuntimeStatus.IDLE
+                                          ? 'fill-green-500 text-green-500'
+                                          : session.status === SessionStatus.ACTIVE && session.runtime_status === RuntimeStatus.BUSY
+                                          ? 'fill-orange-500 text-orange-500'
                                           : 'fill-gray-400 text-gray-400'
                                       }`}
                                     />

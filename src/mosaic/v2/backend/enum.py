@@ -96,6 +96,20 @@ class SessionStatus(str, Enum):
     ARCHIVED = "archived"
 
 
+class RuntimeStatus(str, Enum):
+    """Runtime status enumeration
+
+    Defines the runtime processing state of a session.
+
+    IDLE: Session is not currently processing any request
+    BUSY: Session is currently processing a request
+
+    Runtime lifecycle: IDLE ⇄ BUSY
+    """
+    IDLE = "idle"
+    BUSY = "busy"
+
+
 class SessionMode(str, Enum):
     """Session mode enumeration
 
@@ -156,3 +170,4 @@ class MessageType(str, Enum):
     SESSION_STARTED = "session_started"
     SESSION_ENDED = "session_ended"
     TOPIC_UPDATED = "topic_updated"
+    RUNTIME_STATUS_CHANGED = "runtime_status_changed"

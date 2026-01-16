@@ -4,7 +4,7 @@ from sqlmodel import Field, Column, JSON
 from datetime import datetime
 from typing import Optional
 from .base import BaseModel
-from ..enum import SessionMode, SessionStatus, LLMModel
+from ..enum import SessionMode, SessionStatus, LLMModel, RuntimeStatus
 
 
 class Session(BaseModel, table=True):
@@ -51,6 +51,10 @@ class Session(BaseModel, table=True):
     # Status
     status: SessionStatus = Field(
         description="Session status"
+    )
+    runtime_status: RuntimeStatus = Field(
+        default=RuntimeStatus.IDLE,
+        description="Runtime processing status (idle/busy)"
     )
 
     # Session metadata

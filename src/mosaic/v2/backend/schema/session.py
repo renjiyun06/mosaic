@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
-from ..enum import SessionMode, SessionStatus, LLMModel
+from ..enum import SessionMode, SessionStatus, LLMModel, RuntimeStatus
 
 
 # ==================== Request Schemas ====================
@@ -66,6 +66,7 @@ class SessionOut(BaseModel):
 
     # Status
     status: SessionStatus = Field(..., description="Session status")
+    runtime_status: RuntimeStatus = Field(..., description="Runtime processing status (idle/busy)")
 
     # Session metadata
     topic: Optional[str] = Field(None, description="Session topic (maximum 80 characters)")

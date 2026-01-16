@@ -86,6 +86,11 @@ export enum SessionStatus {
   ARCHIVED = 'archived'
 }
 
+export enum RuntimeStatus {
+  IDLE = 'idle',
+  BUSY = 'busy'
+}
+
 export enum SessionMode {
   BACKGROUND = 'background',
   PROGRAM = 'program',
@@ -115,7 +120,8 @@ export enum MessageType {
   SYSTEM_MESSAGE = 'system_message',
   SESSION_STARTED = 'session_started',
   SESSION_ENDED = 'session_ended',
-  TOPIC_UPDATED = 'topic_updated'
+  TOPIC_UPDATED = 'topic_updated',
+  RUNTIME_STATUS_CHANGED = 'runtime_status_changed'
 }
 
 // ==================== Auth Types ====================
@@ -351,6 +357,7 @@ export interface SessionOut {
   mode: SessionMode
   model: LLMModel | null
   status: SessionStatus
+  runtime_status: RuntimeStatus
   topic: string | null
   message_count: number
   total_input_tokens: number

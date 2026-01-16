@@ -29,7 +29,8 @@ from ...enum import (
     LLMModel,
     EventType,
     MessageRole,
-    MessageType
+    MessageType,
+    RuntimeStatus
 )
 from ...websocket import UserMessageBroker
 from ...exception import SessionNotFoundError, SessionConflictError
@@ -562,14 +563,52 @@ class ClaudeCodeSession(MosaicSession):
                 payload={"prompt": message}
             )
 
-        # 5. Send to Claude SDK
+        # 5. Update runtime status to BUSY before processing
+        await self._update_runtime_status_to_db(RuntimeStatus.BUSY)
+
+        # Send WebSocket notification for BUSY status
+        user_message_broker = UserMessageBroker.get_instance()
+        user_message_broker.push_from_worker(self.node.node.user_id, {
+            "role": MessageRole.NOTIFICATION,
+            "message_type": MessageType.RUNTIME_STATUS_CHANGED,
+            "session_id": self.session_id,
+            "payload": {
+                "session_id": self.session_id,
+                "runtime_status": RuntimeStatus.BUSY.value
+            }
+        })
+        logger.debug(
+            f"Pushed runtime_status_changed notification to WebSocket: "
+            f"session_id={self.session_id}, runtime_status=busy"
+        )
+
+        # 6. Send to Claude SDK
         logger.debug(f"Sending query to Claude: session_id={self.session_id}")
         await self._cc_client.query(message)
 
-        # 6. Receive and forward Claude's response
+        # 7. Receive and forward Claude's response
         stats = await self._receive_assistant_response()
 
-        # 7. Update session statistics
+        # 8. Update runtime status back to IDLE after processing
+        await self._update_runtime_status_to_db(RuntimeStatus.IDLE)
+
+        # Send WebSocket notification for IDLE status
+        user_message_broker = UserMessageBroker.get_instance()
+        user_message_broker.push_from_worker(self.node.node.user_id, {
+            "role": MessageRole.NOTIFICATION,
+            "message_type": MessageType.RUNTIME_STATUS_CHANGED,
+            "session_id": self.session_id,
+            "payload": {
+                "session_id": self.session_id,
+                "runtime_status": RuntimeStatus.IDLE.value
+            }
+        })
+        logger.debug(
+            f"Pushed runtime_status_changed notification to WebSocket: "
+            f"session_id={self.session_id}, runtime_status=idle"
+        )
+
+        # 9. Update session statistics
         if stats:
             self._total_cost_usd += stats["cost_usd"]
             self._total_input_tokens += stats["input_tokens"]
@@ -1037,6 +1076,40 @@ class ClaudeCodeSession(MosaicSession):
             else:
                 logger.warning(
                     f"Session record not found for update: session_id={self.session_id}"
+                )
+
+    async def _update_runtime_status_to_db(self, runtime_status: RuntimeStatus):
+        """
+        Update runtime_status in database.
+
+        This method updates the runtime processing status of the session.
+
+        Args:
+            runtime_status: New runtime status (IDLE or BUSY)
+        """
+        from ...model.session import Session
+        from sqlmodel import select
+
+        async with self.async_session_factory() as db_session:
+            # Query session record
+            stmt = select(Session).where(Session.session_id == self.session_id)
+            result = await db_session.execute(stmt)
+            db_session_obj = result.scalar_one_or_none()
+
+            if db_session_obj:
+                # Update runtime status
+                db_session_obj.runtime_status = runtime_status
+                db_session_obj.updated_at = datetime.now()
+
+                await db_session.commit()
+
+                logger.debug(
+                    f"Runtime status updated in database: session_id={self.session_id}, "
+                    f"runtime_status={runtime_status.value}"
+                )
+            else:
+                logger.warning(
+                    f"Session record not found for runtime status update: session_id={self.session_id}"
                 )
 
     def _push_to_websocket(
