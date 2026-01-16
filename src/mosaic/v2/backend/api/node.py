@@ -1495,7 +1495,7 @@ async def get_code_server_url(
     port = code_server_config.get('port', 20000)
 
     # 5. Build URL with folder parameter
-    url = f"http://{external_host}:{port}/?folder={workspace_path}"
+    url = f"https://{external_host}:{port}/?folder={workspace_path}"
 
     logger.info(
         f"Code-server URL generated: node_db_id={node.id}, url={url}"
