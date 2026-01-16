@@ -366,6 +366,10 @@ class ClaudeCodeSession(MosaicSession):
         self._total_input_tokens = 0
         self._total_output_tokens = 0
 
+        # Context window usage tracking
+        self._context_usage = 0  # Actual context usage (input + cache tokens)
+        self._context_percentage = 0.0  # Context usage percentage (0-100)
+
         # Session state (in-memory, synced to DB)
         self._message_count = 0
         self._last_activity_at: Optional[datetime] = None
@@ -637,6 +641,8 @@ class ClaudeCodeSession(MosaicSession):
             self._total_cost_usd += stats["cost_usd"]
             self._total_input_tokens += stats["input_tokens"]
             self._total_output_tokens += stats["output_tokens"]
+            self._context_usage = stats["context_usage"]
+            self._context_percentage = stats["context_percentage"]
 
             # Sync session state to database
             await self._update_session_to_db()
@@ -846,6 +852,8 @@ class ClaudeCodeSession(MosaicSession):
         self._total_cost_usd = 0.0
         self._total_input_tokens = 0
         self._total_output_tokens = 0
+        self._context_usage = 0
+        self._context_percentage = 0.0
         self._message_count = 0
         self._last_activity_at = None
 
@@ -1050,6 +1058,12 @@ class ClaudeCodeSession(MosaicSession):
                 input_tokens = message.usage.get("input_tokens", 0)
                 output_tokens = message.usage.get("output_tokens", 0)
 
+                # Calculate context window usage
+                cache_creation_tokens = message.usage.get("cache_creation_input_tokens", 0)
+                cache_read_tokens = message.usage.get("cache_read_input_tokens", 0)
+                context_usage = input_tokens + cache_creation_tokens + cache_read_tokens
+                context_percentage = (context_usage / 200000) * 100  # 200k token window
+
                 # Save result message to database and push to WebSocket
                 message_id, sequence, timestamp = await self._save_message_to_db(
                     role=MessageRole.ASSISTANT,
@@ -1060,7 +1074,9 @@ class ClaudeCodeSession(MosaicSession):
                         "total_input_tokens": self._total_input_tokens + input_tokens,
                         "total_output_tokens": self._total_output_tokens + output_tokens,
                         "cost_usd": cost_usd,
-                        "usage": message.usage
+                        "usage": message.usage,
+                        "context_usage": context_usage,
+                        "context_percentage": context_percentage
                     }
                 )
                 self._push_to_websocket(
@@ -1075,7 +1091,9 @@ class ClaudeCodeSession(MosaicSession):
                         "total_input_tokens": self._total_input_tokens + input_tokens,
                         "total_output_tokens": self._total_output_tokens + output_tokens,
                         "cost_usd": cost_usd,
-                        "usage": message.usage
+                        "usage": message.usage,
+                        "context_usage": context_usage,
+                        "context_percentage": context_percentage
                     }
                 )
 
@@ -1091,7 +1109,9 @@ class ClaudeCodeSession(MosaicSession):
                 return {
                     "cost_usd": cost_usd,
                     "input_tokens": input_tokens,
-                    "output_tokens": output_tokens
+                    "output_tokens": output_tokens,
+                    "context_usage": context_usage,
+                    "context_percentage": context_percentage
                 }
 
         # Return None if no ResultMessage received
@@ -1163,6 +1183,7 @@ class ClaudeCodeSession(MosaicSession):
         - message_count: Total number of messages
         - last_activity_at: Last activity timestamp
         - total_input_tokens, total_output_tokens, total_cost_usd: Token/cost statistics
+        - context_usage, context_percentage: Context window usage statistics
         - updated_at: Current timestamp
 
         This method should be called:
@@ -1185,6 +1206,8 @@ class ClaudeCodeSession(MosaicSession):
                 db_session_obj.total_input_tokens = self._total_input_tokens
                 db_session_obj.total_output_tokens = self._total_output_tokens
                 db_session_obj.total_cost_usd = self._total_cost_usd
+                db_session_obj.context_usage = self._context_usage
+                db_session_obj.context_percentage = self._context_percentage
                 db_session_obj.updated_at = datetime.now()
 
                 await db_session.commit()

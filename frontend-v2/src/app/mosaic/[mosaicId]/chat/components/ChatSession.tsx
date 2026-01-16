@@ -25,6 +25,8 @@ interface ChatSessionProps {
     total_cost_usd?: number
     total_input_tokens?: number
     total_output_tokens?: number
+    context_usage?: number
+    context_percentage?: number
   } | null) => void
 }
 
@@ -46,6 +48,8 @@ export function ChatSession({
     total_cost_usd?: number
     total_input_tokens?: number
     total_output_tokens?: number
+    context_usage?: number
+    context_percentage?: number
   } | null>(null)
 
   // Refs
@@ -133,6 +137,8 @@ export function ChatSession({
           total_cost_usd: wsMessage.payload.total_cost_usd,
           total_input_tokens: wsMessage.payload.total_input_tokens,
           total_output_tokens: wsMessage.payload.total_output_tokens,
+          context_usage: wsMessage.payload.context_usage,
+          context_percentage: wsMessage.payload.context_percentage,
         }
         setSessionStats(stats)
         onStatsUpdate?.(sessionId, stats)
@@ -251,6 +257,8 @@ export function ChatSession({
           total_cost_usd: lastResult.contentParsed.total_cost_usd,
           total_input_tokens: lastResult.contentParsed.total_input_tokens,
           total_output_tokens: lastResult.contentParsed.total_output_tokens,
+          context_usage: lastResult.contentParsed.context_usage,
+          context_percentage: lastResult.contentParsed.context_percentage,
         }
         setSessionStats(stats)
         onStatsUpdate?.(sessionId, stats)

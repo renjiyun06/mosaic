@@ -144,6 +144,50 @@ type ViewMode = 'chat' | 'workspace'
 type SessionListMode = 'detailed' | 'compact'
 type SessionViewMode = 'tree' | 'grouped'
 
+// Circular progress component for context usage
+const CircularProgress = memo(({ percentage }: { percentage: number }) => {
+  // Determine color based on percentage (lighter versions)
+  const getColor = () => {
+    if (percentage < 60) return 'rgba(34, 197, 94, 0.4)' // green-500 with 40% opacity
+    if (percentage < 85) return 'rgba(234, 179, 8, 0.4)' // yellow-500 with 40% opacity
+    if (percentage < 95) return 'rgba(249, 115, 22, 0.4)' // orange-500 with 40% opacity
+    return 'rgba(239, 68, 68, 0.5)' // red-500 with 50% opacity (slightly more visible when critical)
+  }
+
+  const color = getColor()
+  const circumference = 2 * Math.PI * 15.9155
+  const strokeDashoffset = circumference - (percentage / 100) * circumference
+
+  return (
+    <svg className="h-4 w-4 -rotate-90" viewBox="0 0 36 36">
+      {/* Background circle - highly visible */}
+      <circle
+        cx="18"
+        cy="18"
+        r="15.9155"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        className="text-muted"
+      />
+      {/* Progress circle - lighter color */}
+      <circle
+        cx="18"
+        cy="18"
+        r="15.9155"
+        fill="none"
+        stroke={color}
+        strokeWidth="3"
+        strokeDasharray={circumference}
+        strokeDashoffset={strokeDashoffset}
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+})
+
+CircularProgress.displayName = 'CircularProgress'
+
 export default function ChatPage() {
   const params = useParams()
   const { token } = useAuth()
@@ -188,6 +232,8 @@ export default function ChatPage() {
     total_cost_usd?: number
     total_input_tokens?: number
     total_output_tokens?: number
+    context_usage?: number
+    context_percentage?: number
   } | null>>({})
 
   // Get current active session stats
@@ -527,6 +573,8 @@ export default function ChatPage() {
     total_cost_usd?: number
     total_input_tokens?: number
     total_output_tokens?: number
+    context_usage?: number
+    context_percentage?: number
   } | null) => {
     setSessionStats(prev => ({
       ...prev,
@@ -1295,6 +1343,28 @@ export default function ChatPage() {
                       </>
                     )}
                   </div>
+                )}
+                {/* Context Window Usage */}
+                {(currentStats.context_usage !== undefined && currentStats.context_percentage !== undefined && currentStats.context_percentage > 0) && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center gap-1">
+                          <CircularProgress percentage={currentStats.context_percentage} />
+                          <span className="font-mono">{currentStats.context_percentage.toFixed(1)}%</span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <div className="space-y-1">
+                          <div className="font-semibold">Context Window Usage</div>
+                          <div className="text-xs space-y-0.5">
+                            <div>Used: {currentStats.context_usage.toLocaleString()} / 200,000 tokens</div>
+                            <div>Percentage: {currentStats.context_percentage.toFixed(2)}%</div>
+                          </div>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 )}
               </div>
             )}

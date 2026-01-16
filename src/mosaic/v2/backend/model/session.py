@@ -82,6 +82,14 @@ class Session(BaseModel, table=True):
         default=0.0,
         description="Cumulative cost in USD"
     )
+    context_usage: int = Field(
+        default=0,
+        description="Current context window usage (input + cache tokens)"
+    )
+    context_percentage: float = Field(
+        default=0.0,
+        description="Context window usage percentage (0-100)"
+    )
 
     # Additional timestamps (beyond BaseModel's created_at, updated_at, deleted_at)
     last_activity_at: Optional[datetime] = Field(

@@ -76,6 +76,8 @@ class SessionOut(BaseModel):
     total_input_tokens: int = Field(..., description="Cumulative input tokens")
     total_output_tokens: int = Field(..., description="Cumulative output tokens")
     total_cost_usd: float = Field(..., description="Cumulative cost in USD")
+    context_usage: int = Field(..., description="Current context window usage (input + cache tokens)")
+    context_percentage: float = Field(..., description="Context window usage percentage (0-100)")
 
     # Timestamps
     created_at: datetime = Field(..., description="When session was created")
