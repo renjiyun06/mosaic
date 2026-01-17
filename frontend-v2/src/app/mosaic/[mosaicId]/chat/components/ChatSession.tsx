@@ -176,12 +176,13 @@ export function ChatSession({
         return [...prev, newMessage]
       })
 
-      // Collapse thinking, system, and tool messages by default
+      // Collapse thinking, system, tool, and pre_compact messages by default
       if (
         wsMessage.message_type === "assistant_thinking" ||
         wsMessage.message_type === "system_message" ||
         wsMessage.message_type === "assistant_tool_use" ||
-        wsMessage.message_type === "assistant_tool_output"
+        wsMessage.message_type === "assistant_tool_output" ||
+        wsMessage.message_type === "assistant_pre_compact"
       ) {
         setCollapsedMessages((prev) => new Set(prev).add(wsMessage.message_id!))
       }
@@ -239,13 +240,14 @@ export function ChatSession({
         maxSequenceRef.current = 0
       }
 
-      // Collapse all thinking, system, and tool messages by default
+      // Collapse all thinking, system, tool, and pre_compact messages by default
       const collapsibleIds = parsed
         .filter((msg) =>
           msg.message_type === MessageType.ASSISTANT_THINKING ||
           msg.message_type === MessageType.SYSTEM_MESSAGE ||
           msg.message_type === MessageType.ASSISTANT_TOOL_USE ||
-          msg.message_type === MessageType.ASSISTANT_TOOL_OUTPUT
+          msg.message_type === MessageType.ASSISTANT_TOOL_OUTPUT ||
+          msg.message_type === MessageType.ASSISTANT_PRE_COMPACT
         )
         .map((msg) => msg.message_id)
       setCollapsedMessages(new Set(collapsibleIds))

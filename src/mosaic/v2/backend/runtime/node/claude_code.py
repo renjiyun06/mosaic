@@ -452,6 +452,9 @@ class ClaudeCodeSession(MosaicSession):
                 "PostToolUse": [
                     HookMatcher(hooks=[self._post_tool_use_hook])
                 ],
+                "PreCompact": [
+                    HookMatcher(hooks=[self._pre_compact_hook])
+                ],
             },
             mcp_servers=mcp_servers,
             allowed_tools=["*"],
@@ -1045,6 +1048,9 @@ class ClaudeCodeSession(MosaicSession):
                 "PostToolUse": [
                     HookMatcher(hooks=[self._post_tool_use_hook])
                 ],
+                "PreCompact": [
+                    HookMatcher(hooks=[self._pre_compact_hook])
+                ],
             },
             mcp_servers=mcp_servers,
             allowed_tools=["*"],
@@ -1505,6 +1511,30 @@ class ClaudeCodeSession(MosaicSession):
                 }
             )
         
+        return {}
+
+    async def _pre_compact_hook(
+        self,
+        hook_input: Dict[str, Any],
+        tool_use_id: Optional[str],
+        context: Any
+    ):
+        tool_name = hook_input.get("tool_name")
+        tool_output = hook_input.get("tool_response")
+        
+        message_id, sequence, timestamp = await self._save_message_to_db(
+            role=MessageRole.ASSISTANT,
+            message_type=MessageType.ASSISTANT_PRE_COMPACT,
+            payload={}
+        )
+        self._push_to_websocket(
+            role=MessageRole.ASSISTANT,
+            message_type=MessageType.ASSISTANT_PRE_COMPACT,
+            message_id=message_id,
+            sequence=sequence,
+            timestamp=timestamp,
+            payload={}
+        )
         return {}
 
     def _create_mosaic_mcp_server(self):

@@ -103,7 +103,8 @@ export const MessageItem = memo(function MessageItem({
   const isSystemMessage = msg.message_type === MessageType.SYSTEM_MESSAGE
   const isToolUse = msg.message_type === MessageType.ASSISTANT_TOOL_USE
   const isToolOutput = msg.message_type === MessageType.ASSISTANT_TOOL_OUTPUT
-  const isCollapsible = isThinking || isSystemMessage || isToolUse || isToolOutput
+  const isPreCompact = msg.message_type === MessageType.ASSISTANT_PRE_COMPACT
+  const isCollapsible = isThinking || isSystemMessage || isToolUse || isToolOutput || isPreCompact
 
   const handleToggle = useCallback(() => {
     onToggleCollapse(msg.message_id)
@@ -238,6 +239,25 @@ export const MessageItem = memo(function MessageItem({
                   }
                   return JSON.stringify(output, null, 2)
                 })()}
+              </div>
+            )}
+          </div>
+        ) : isPreCompact ? (
+          <div>
+            <div
+              className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
+              onClick={handleToggle}
+            >
+              {isCollapsed ? (
+                <ChevronRight className="h-3 w-3 opacity-70" />
+              ) : (
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              )}
+              <span className="text-xs opacity-70">🗜️ 上下文压缩</span>
+            </div>
+            {!isCollapsed && (
+              <div className="text-sm px-2 pb-1 pt-0 text-muted-foreground italic">
+                会话上下文即将被压缩以节省 token 使用
               </div>
             )}
           </div>
