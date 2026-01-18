@@ -243,6 +243,8 @@ class ClaudeCodeNode(MosaicNode):
                 f"Session {session_id} not found in node {self.node.node_id}"
             )
 
+        await session.interrupt()
+
         # Call session cleanup (stops worker, calls _on_close hook)
         await session.close()
 
