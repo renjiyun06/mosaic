@@ -269,6 +269,18 @@ export default function ChatPage() {
   const [nodeCodeServerUrl, setNodeCodeServerUrl] = useState<Record<string, string | null>>({})
   const [copiedCodeServerUrl, setCopiedCodeServerUrl] = useState<string | null>(null)
 
+  // Notification state - Store notification enabled state
+  const [notificationEnabled, setNotificationEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true // Default enabled
+    try {
+      const saved = localStorage.getItem(`mosaic-${mosaicId}-notification-enabled`)
+      return saved !== 'false' // Default enabled if not set
+    } catch (error) {
+      console.error('[ChatPage] Failed to load notification setting:', error)
+      return true
+    }
+  })
+
   // Refs
   const sessionStartedResolvers = useRef<Map<string, (value: boolean) => void>>(new Map())
 
@@ -447,12 +459,92 @@ export default function ChatPage() {
     }
   }, [nodeCodeServerUrl])
 
+  // Show desktop/browser notification for new result messages
+  const showNotification = useCallback((message: any) => {
+    // Check if notifications are enabled
+    if (!notificationEnabled) {
+      return
+    }
+
+    // Check if browser supports notifications and permission is granted
+    if (!('Notification' in window) || Notification.permission !== 'granted') {
+      return
+    }
+
+    // Find session information
+    const sessionInfo = nodes
+      .flatMap((node) =>
+        node.sessions.map((session) => ({
+          nodeId: node.node_id,
+          session,
+        }))
+      )
+      .find((info) => info.session.session_id === message.session_id)
+
+    if (!sessionInfo) return
+
+    // Create notification title and body
+    // Use topic if available, otherwise use full session_id
+    const sessionName = sessionInfo.session.topic || message.session_id
+    const title = 'Mosaic - 新消息'
+    const body = `${sessionInfo.nodeId} / ${sessionName}\n收到新的响应消息`
+
+    // Create notification
+    // Use message_id as tag to ensure each message gets its own notification
+    // If no message_id, use timestamp to make it unique
+    const notificationTag = message.message_id || `${message.session_id}-${Date.now()}`
+    const notification = new Notification(title, {
+      body,
+      icon: '/favicon.ico',
+      tag: notificationTag, // Each message gets its own notification
+      requireInteraction: false, // Auto-dismiss
+      silent: false, // Allow sound
+    })
+
+    // Click notification to switch to the session
+    notification.onclick = () => {
+      window.focus()
+      selectSession(message.session_id)
+      notification.close()
+    }
+
+    console.log('[ChatPage] Notification shown for session:', message.session_id)
+  }, [notificationEnabled, nodes, selectSession])
+
   // Mobile detection effect
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768)
     checkMobile()
     window.addEventListener('resize', checkMobile)
     return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
+  // Save notification enabled state to localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      localStorage.setItem(
+        `mosaic-${mosaicId}-notification-enabled`,
+        notificationEnabled.toString()
+      )
+    } catch (error) {
+      console.error('[ChatPage] Failed to save notification setting:', error)
+    }
+  }, [notificationEnabled, mosaicId])
+
+  // Request notification permission on mount
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return
+
+    // Only request if permission hasn't been determined yet
+    if (Notification.permission === 'default') {
+      console.log('[ChatPage] Requesting notification permission...')
+      Notification.requestPermission().then(permission => {
+        console.log('[ChatPage] Notification permission:', permission)
+      })
+    } else {
+      console.log('[ChatPage] Notification permission already:', Notification.permission)
+    }
   }, [])
 
   // Load nodes and sessions on mount
@@ -529,12 +621,19 @@ export default function ChatPage() {
           loadNodesAndSessions(false) // Don't auto-select session
         }
       }
+
+      // Handle assistant result messages - Show notification for all sessions
+      if (wsMessage.role === "assistant" && wsMessage.message_type === "assistant_result") {
+        console.log("[Chat] Received assistant result:", wsMessage.session_id)
+        // Show notification for all sessions (including currently active one)
+        showNotification(wsMessage)
+      }
     })
 
     return () => {
       unsubscribe()
     }
-  }, [subscribe, loadNodesAndSessions])
+  }, [subscribe, loadNodesAndSessions, showNotification])
 
   // Scroll and message loading logic removed - now handled by ChatSession component
 
