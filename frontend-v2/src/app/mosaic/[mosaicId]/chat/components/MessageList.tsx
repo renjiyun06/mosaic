@@ -1,6 +1,7 @@
 import { useRef, useEffect } from "react"
 import { Loader2, MessageSquare } from "lucide-react"
 import { MessageItem, type ParsedMessage } from "./MessageItem"
+import { MessageRole } from "@/lib/types"
 
 interface MessageListProps {
   messages: ParsedMessage[]
@@ -8,6 +9,9 @@ interface MessageListProps {
   isLoading: boolean
   isVisible: boolean
   onToggleCollapse: (messageId: string) => void
+  sessionId: string
+  onScrollStateChange?: (state: { scrollTop: number; autoScrollEnabled: boolean }) => void
+  initialScrollState?: { scrollTop: number; autoScrollEnabled: boolean }
 }
 
 export function MessageList({
@@ -16,11 +20,15 @@ export function MessageList({
   isLoading,
   isVisible,
   onToggleCollapse,
+  sessionId,
+  onScrollStateChange,
+  initialScrollState,
 }: MessageListProps) {
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const prevMessageCountRef = useRef<number>(0)
-  const autoScrollEnabledRef = useRef<boolean>(true)
+  const autoScrollEnabledRef = useRef<boolean>(initialScrollState?.autoScrollEnabled ?? true)
+  const isRestoringRef = useRef<boolean>(false)
 
   // Monitor user scroll behavior to update auto-scroll state
   useEffect(() => {
@@ -33,31 +41,82 @@ export function MessageList({
 
       // Enable auto-scroll when user scrolls near bottom, disable when scrolling up
       autoScrollEnabledRef.current = isNearBottom
+
+      // Save scroll state (skip during restoration)
+      if (!isRestoringRef.current && onScrollStateChange) {
+        onScrollStateChange({
+          scrollTop: container.scrollTop,
+          autoScrollEnabled: isNearBottom
+        })
+      }
     }
 
     container.addEventListener("scroll", handleScroll)
     return () => container.removeEventListener("scroll", handleScroll)
-  }, [])
+  }, [onScrollStateChange])
+
+  // Restore scroll position when session becomes visible
+  useEffect(() => {
+    if (!isVisible || !messagesContainerRef.current) return
+
+    const container = messagesContainerRef.current
+
+    // Delay restoration to ensure DOM is rendered
+    requestAnimationFrame(() => {
+      isRestoringRef.current = true
+
+      if (initialScrollState) {
+        if (initialScrollState.autoScrollEnabled) {
+          // Was at bottom, scroll to new bottom
+          container.scrollTop = container.scrollHeight
+        } else {
+          // Was in middle, restore to original position
+          container.scrollTop = initialScrollState.scrollTop
+        }
+      }
+
+      // Allow state saving after restoration completes
+      setTimeout(() => {
+        isRestoringRef.current = false
+      }, 100)
+    })
+  }, [isVisible, sessionId])
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     if (!isVisible) return
 
-    // Only scroll when auto-scroll is enabled and there are new messages
-    if (
-      messages.length > prevMessageCountRef.current &&
-      autoScrollEnabledRef.current
-    ) {
-      // First load: instant scroll (no animation)
-      // Subsequent messages: smooth scroll
-      const isFirstLoad = prevMessageCountRef.current === 0
-      messagesEndRef.current?.scrollIntoView({
-        behavior: isFirstLoad ? "instant" : "smooth",
-      })
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    // Check if there are new messages
+    if (messages.length > prevMessageCountRef.current) {
+      // Get the latest message
+      const latestMessage = messages[messages.length - 1]
+
+      // If user sent a message, force scroll to bottom and enable auto-scroll
+      if (latestMessage && latestMessage.role === MessageRole.USER) {
+        autoScrollEnabledRef.current = true
+        requestAnimationFrame(() => {
+          container.scrollTop = container.scrollHeight
+          // Update scroll state
+          if (onScrollStateChange) {
+            onScrollStateChange({
+              scrollTop: container.scrollHeight,
+              autoScrollEnabled: true
+            })
+          }
+        })
+      } else if (autoScrollEnabledRef.current) {
+        // For non-user messages, only scroll if auto-scroll is enabled
+        requestAnimationFrame(() => {
+          container.scrollTop = container.scrollHeight
+        })
+      }
     }
 
     prevMessageCountRef.current = messages.length
-  }, [messages, isVisible])
+  }, [messages, isVisible, onScrollStateChange])
 
   return (
     <div

@@ -236,6 +236,12 @@ export default function ChatPage() {
     context_percentage?: number
   } | null>>({})
 
+  // Session scroll states - Store scroll position and auto-scroll state per session
+  const [sessionScrollStates, setSessionScrollStates] = useState<Record<string, {
+    scrollTop: number
+    autoScrollEnabled: boolean
+  }>>({})
+
   // Get current active session stats
   const currentStats = activeSessionId ? sessionStats[activeSessionId] : null
 
@@ -579,6 +585,17 @@ export default function ChatPage() {
     setSessionStats(prev => ({
       ...prev,
       [sessionId]: stats
+    }))
+  }, [])
+
+  // Callback for ChatSession component - track session scroll state
+  const handleScrollStateChange = useCallback((sessionId: string, state: {
+    scrollTop: number
+    autoScrollEnabled: boolean
+  }) => {
+    setSessionScrollStates(prev => ({
+      ...prev,
+      [sessionId]: state
     }))
   }, [])
 
@@ -1409,6 +1426,8 @@ export default function ChatPage() {
                   onInputChange={handleInputChange}
                   sessionInput={sessionInputs[sessionId] || ""}
                   onStatsUpdate={handleStatsUpdate}
+                  onScrollStateChange={(state) => handleScrollStateChange(sessionId, state)}
+                  initialScrollState={sessionScrollStates[sessionId]}
                 />
               ))}
             </>

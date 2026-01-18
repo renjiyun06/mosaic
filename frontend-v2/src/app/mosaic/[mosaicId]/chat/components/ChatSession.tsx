@@ -28,6 +28,8 @@ interface ChatSessionProps {
     context_usage?: number
     context_percentage?: number
   } | null) => void
+  onScrollStateChange?: (state: { scrollTop: number; autoScrollEnabled: boolean }) => void
+  initialScrollState?: { scrollTop: number; autoScrollEnabled: boolean }
 }
 
 export function ChatSession({
@@ -38,6 +40,8 @@ export function ChatSession({
   onInputChange,
   sessionInput,
   onStatsUpdate,
+  onScrollStateChange,
+  initialScrollState,
 }: ChatSessionProps) {
   const { isConnected, sendMessage, interrupt, subscribe } = useWebSocket()
 
@@ -308,6 +312,9 @@ export function ChatSession({
         isLoading={currentSessionInfo?.session.runtime_status === RuntimeStatus.BUSY}
         isVisible={isVisible}
         onToggleCollapse={toggleCollapse}
+        sessionId={sessionId}
+        onScrollStateChange={onScrollStateChange}
+        initialScrollState={initialScrollState}
       />
 
       {/* Input Area */}
