@@ -61,12 +61,18 @@ export class GeoGebraShapeUtil extends BaseBoxShapeUtil<GeoGebraShape> {
     const BASE_WIDTH = 800
     const BASE_HEIGHT = 450
 
+    // Title bar height
+    const TITLE_BAR_HEIGHT = 32
+
     // Actual render dimensions (user-adjusted size, tldraw ensures 800:450 ratio)
     const actualWidth = shape.props.w
     const actualHeight = shape.props.h
 
-    // Calculate scale ratio
-    const scale = actualWidth / BASE_WIDTH
+    // GeoGebra content area height (excluding title bar)
+    const contentHeight = actualHeight - TITLE_BAR_HEIGHT
+
+    // Calculate scale ratio based on content area
+    const scale = contentHeight / BASE_HEIGHT
 
     // Initialize GeoGebra (execute only once on creation)
     useEffect(() => {
@@ -121,31 +127,64 @@ export class GeoGebraShapeUtil extends BaseBoxShapeUtil<GeoGebraShape> {
           border: '2px solid hsl(var(--primary))',
           borderRadius: '6px',
           backgroundColor: 'hsl(var(--background))',
+          display: 'flex',
+          flexDirection: 'column',
         }}
       >
-        {/* GeoGebra scaling container */}
+        {/* Title bar - allows drag to move the shape */}
         <div
-          ref={containerRef}
           style={{
-            width: `${BASE_WIDTH}px`,
-            height: `${BASE_HEIGHT}px`,
-            transform: `scale(${scale})`,
-            transformOrigin: 'top left',
-            pointerEvents: 'auto',
+            height: `${TITLE_BAR_HEIGHT}px`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'hsl(var(--muted))',
+            color: 'hsl(var(--foreground))',
+            fontSize: '14px',
+            fontWeight: 600,
+            borderTopLeftRadius: '4px',
+            borderTopRightRadius: '4px',
+            borderBottom: '1px solid hsl(var(--border))',
+            flexShrink: 0,
+            pointerEvents: 'none',
+            userSelect: 'none',
           }}
-          onPointerDown={(e) => {
-            editor.markEventAsHandled(e)
+        >
+          画板 #{shape.props.instanceNumber}
+        </div>
+
+        {/* GeoGebra content area */}
+        <div
+          style={{
+            flex: 1,
+            overflow: 'hidden',
+            position: 'relative',
           }}
-          onPointerUp={(e) => {
-            editor.markEventAsHandled(e)
-          }}
-          onPointerMove={(e) => {
-            editor.markEventAsHandled(e)
-          }}
-          onClick={(e) => {
-            editor.markEventAsHandled(e)
-          }}
-        />
+        >
+          {/* GeoGebra scaling container */}
+          <div
+            ref={containerRef}
+            style={{
+              width: `${BASE_WIDTH}px`,
+              height: `${BASE_HEIGHT}px`,
+              transform: `scale(${scale})`,
+              transformOrigin: 'top left',
+              pointerEvents: 'auto',
+            }}
+            onPointerDown={(e) => {
+              editor.markEventAsHandled(e)
+            }}
+            onPointerUp={(e) => {
+              editor.markEventAsHandled(e)
+            }}
+            onPointerMove={(e) => {
+              editor.markEventAsHandled(e)
+            }}
+            onClick={(e) => {
+              editor.markEventAsHandled(e)
+            }}
+          />
+        </div>
       </HTMLContainer>
     )
   }
