@@ -89,4 +89,22 @@
   .react-flow__pane:active {
     cursor: grabbing;
   }
+
+  /* Tldraw custom styles for geometry canvas */
+
+  /* Hide tldraw watermark */
+  .tl-watermark_SEE-LICENSE {
+    display: none !important;
+  }
+
+  /* Enable pointer events for GeoGebra shapes inside tldraw */
+  .tl-shape .tl-html-container {
+    pointer-events: auto !important;
+  }
+
+  /* Ensure tldraw canvas fills container */
+  .tldraw {
+    width: 100% !important;
+    height: 100% !important;
+  }
 }
