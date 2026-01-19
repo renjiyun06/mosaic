@@ -33,11 +33,13 @@ export class GeoGebraShapeUtil extends BaseBoxShapeUtil<GeoGebraShape> {
 
   // Default properties
   getDefaultProps(): GeoGebraShape['props'] {
-    const BASE_WIDTH = 800
-    const BASE_HEIGHT = 450
+    // Base size = default display size (scale=1.0 for clarity)
+    const BASE_WIDTH = 810
+    const BASE_HEIGHT = 600
+    const TITLE_BAR_HEIGHT = 32
     return {
       w: BASE_WIDTH,
-      h: BASE_HEIGHT,
+      h: BASE_HEIGHT + TITLE_BAR_HEIGHT, // Total height includes title bar
       instanceNumber: 1,
     }
   }
@@ -47,7 +49,7 @@ export class GeoGebraShapeUtil extends BaseBoxShapeUtil<GeoGebraShape> {
   override canEdit = () => true
   override canResize = () => true
   override canCrop = () => false
-  override isAspectRatioLocked = () => true // Lock aspect ratio 800:450
+  override isAspectRatioLocked = () => true // Lock aspect ratio 810:600 (27:20)
 
   // Enable native pointer events (allow GeoGebra to receive user interaction)
   override allowPointerEvents = () => true
@@ -57,22 +59,23 @@ export class GeoGebraShapeUtil extends BaseBoxShapeUtil<GeoGebraShape> {
     const editor = useEditor()
     const containerRef = useRef<HTMLDivElement>(null)
 
-    // Base dimensions (GeoGebra fixed creation size)
-    const BASE_WIDTH = 800
-    const BASE_HEIGHT = 450
+    // Base dimensions (GeoGebra fixed creation size, with extra space for axis arrows)
+    const BASE_WIDTH = 820
+    const BASE_HEIGHT = 610
 
     // Title bar height
     const TITLE_BAR_HEIGHT = 32
 
-    // Actual render dimensions (user-adjusted size, tldraw ensures 800:450 ratio)
+    // Actual render dimensions (user-adjusted size, tldraw ensures 810:600 ratio)
     const actualWidth = shape.props.w
     const actualHeight = shape.props.h
 
     // GeoGebra content area height (excluding title bar)
     const contentHeight = actualHeight - TITLE_BAR_HEIGHT
 
-    // Calculate scale ratio based on content area
-    const scale = contentHeight / BASE_HEIGHT
+    // Calculate scale ratio for width and height separately to fill container
+    const scaleX = actualWidth / BASE_WIDTH
+    const scaleY = contentHeight / BASE_HEIGHT
 
     // Initialize GeoGebra (execute only once on creation)
     useEffect(() => {
@@ -156,7 +159,8 @@ export class GeoGebraShapeUtil extends BaseBoxShapeUtil<GeoGebraShape> {
         {/* GeoGebra content area */}
         <div
           style={{
-            flex: 1,
+            width: actualWidth,
+            height: contentHeight,
             overflow: 'hidden',
             position: 'relative',
           }}
@@ -167,7 +171,7 @@ export class GeoGebraShapeUtil extends BaseBoxShapeUtil<GeoGebraShape> {
             style={{
               width: `${BASE_WIDTH}px`,
               height: `${BASE_HEIGHT}px`,
-              transform: `scale(${scale})`,
+              transform: `scale(${scaleX}, ${scaleY})`,
               transformOrigin: 'top left',
               pointerEvents: 'auto',
             }}

@@ -29,11 +29,9 @@ const uiOverrides: TLUiOverrides = {
         editor.createShapes([{
           id,
           type: 'geogebra',
-          x: centerX - 300,
-          y: centerY - 200,
+          x: centerX - 405,
+          y: centerY - 316,
           props: {
-            w: 600,
-            h: 400,
             instanceNumber: geogebraInstanceCounter,
           },
         }])
