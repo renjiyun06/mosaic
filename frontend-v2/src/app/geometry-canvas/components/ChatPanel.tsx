@@ -567,7 +567,6 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
               !!selectedNodeId &&
               currentSessionStatus === SessionStatus.ACTIVE
             }
-            editor={editor}
             placeholder={
               !isConnected
                 ? 'WebSocket 连接中...'

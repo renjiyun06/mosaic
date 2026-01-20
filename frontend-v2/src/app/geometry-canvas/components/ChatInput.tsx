@@ -16,7 +16,6 @@ interface ChatInputProps {
   onSendMessage: (sessionId: string, message: string) => void
   onInterrupt: (sessionId: string) => void
   onInputChange: (sessionId: string, value: string) => void
-  editor?: any // tldraw editor instance to mark events as handled
 }
 
 // Convert markdown images to display format: ![🖼️ filename](url) -> [🖼️ filename]
@@ -68,7 +67,6 @@ export const ChatInput = memo(function ChatInput({
   onSendMessage,
   onInterrupt,
   onInputChange,
-  editor,
 }: ChatInputProps) {
   // fullMarkdown stores the complete markdown with full image URLs
   // displayValue is what shows in textarea (with simplified image placeholders)
@@ -248,27 +246,38 @@ export const ChatInput = memo(function ChatInput({
 
   // Handle paste event
   const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    console.log('[ChatInput] Paste event triggered')
+
     const items = e.clipboardData?.items
     if (!items) return
 
+    let hasImage = false
     for (const item of Array.from(items)) {
       if (item.type.startsWith('image/')) {
-        e.preventDefault()
-        e.stopPropagation() // Prevent event from bubbling to tldraw canvas
-
-        // Mark event as handled for tldraw
-        if (editor) {
-          editor.markEventAsHandled(e.nativeEvent)
-        }
-
-        const file = item.getAsFile()
-        if (file) {
-          await handleImageUpload(file)
-        }
+        hasImage = true
         break
       }
     }
-  }, [handleImageUpload, editor])
+
+    if (hasImage) {
+      console.log('[ChatInput] Image paste detected - blocking all propagation')
+      // Completely stop the event from propagating
+      e.preventDefault()
+      e.stopPropagation()
+      e.nativeEvent.stopImmediatePropagation()
+
+      // Process the image
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile()
+          if (file) {
+            await handleImageUpload(file)
+          }
+          break
+        }
+      }
+    }
+  }, [handleImageUpload])
 
   return (
     <div className="border-t bg-background">
