@@ -16,6 +16,7 @@ interface ChatInputProps {
   onSendMessage: (sessionId: string, message: string) => void
   onInterrupt: (sessionId: string) => void
   onInputChange: (sessionId: string, value: string) => void
+  editor?: any // tldraw editor instance to mark events as handled
 }
 
 // Convert markdown images to display format: ![🖼️ filename](url) -> [🖼️ filename]
@@ -67,6 +68,7 @@ export const ChatInput = memo(function ChatInput({
   onSendMessage,
   onInterrupt,
   onInputChange,
+  editor,
 }: ChatInputProps) {
   // fullMarkdown stores the complete markdown with full image URLs
   // displayValue is what shows in textarea (with simplified image placeholders)
@@ -252,6 +254,13 @@ export const ChatInput = memo(function ChatInput({
     for (const item of Array.from(items)) {
       if (item.type.startsWith('image/')) {
         e.preventDefault()
+        e.stopPropagation() // Prevent event from bubbling to tldraw canvas
+
+        // Mark event as handled for tldraw
+        if (editor) {
+          editor.markEventAsHandled(e.nativeEvent)
+        }
+
         const file = item.getAsFile()
         if (file) {
           await handleImageUpload(file)
@@ -259,7 +268,7 @@ export const ChatInput = memo(function ChatInput({
         break
       }
     }
-  }, [handleImageUpload])
+  }, [handleImageUpload, editor])
 
   return (
     <div className="border-t bg-background">

@@ -19,7 +19,7 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
-  const { isConnected, sendMessage, subscribe, sendRaw } = useWebSocket()
+  const { isConnected, sendMessage, interrupt, subscribe, sendRaw } = useWebSocket()
 
   const [messages, setMessages] = useState<ParsedMessage[]>([])
   const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set())
@@ -28,6 +28,7 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [currentSessionStatus, setCurrentSessionStatus] = useState<SessionStatus | null>(null)
+  const [currentRuntimeStatus, setCurrentRuntimeStatus] = useState<RuntimeStatus>(RuntimeStatus.IDLE)
   const [isCreatingSession, setIsCreatingSession] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingSession, setIsLoadingSession] = useState(false)
@@ -43,6 +44,7 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
     setSelectedNodeId(nodeId)
     setCurrentSessionId(null)
     setCurrentSessionStatus(null)
+    setCurrentRuntimeStatus(RuntimeStatus.IDLE)
     setMessages([]) // Clear messages on node change
     setSessionInput('') // Clear input on node change
     hasCreatedSessionRef.current = false
@@ -123,13 +125,15 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
       .then((response) => {
         if (response.items.length > 0) {
           const latestSession = response.items[0]
-          console.log('[ChatPanel] Loaded latest session:', latestSession.session_id, 'status:', latestSession.status)
+          console.log('[ChatPanel] Loaded latest session:', latestSession.session_id, 'status:', latestSession.status, 'runtime_status:', latestSession.runtime_status)
           setCurrentSessionId(latestSession.session_id)
           setCurrentSessionStatus(latestSession.status)
+          setCurrentRuntimeStatus(latestSession.runtime_status || RuntimeStatus.IDLE)
         } else {
           console.log('[ChatPanel] No sessions found for node:', selectedNodeId)
           setCurrentSessionId(null)
           setCurrentSessionStatus(null)
+          setCurrentRuntimeStatus(RuntimeStatus.IDLE)
         }
       })
       .catch((error) => {
@@ -204,9 +208,14 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
         return
       }
 
-      // Skip notification messages
+      // Handle notification messages
       if (wsMessage.role === 'notification') {
-        console.log('[ChatPanel] Skipping notification message:', wsMessage)
+        console.log('[ChatPanel] Received notification message:', wsMessage)
+        // Update runtime status when it changes
+        if (wsMessage.message_type === 'runtime_status_changed' && wsMessage.payload?.runtime_status) {
+          console.log('[ChatPanel] Runtime status changed to:', wsMessage.payload.runtime_status)
+          setCurrentRuntimeStatus(wsMessage.payload.runtime_status)
+        }
         return
       }
 
@@ -434,11 +443,11 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
     setSessionInput('')
   }, [isConnected, sendMessage, collectGeoGebraStates])
 
-  // Handle interrupt (not implemented for geometry canvas yet)
+  // Handle interrupt
   const handleInterrupt = useCallback((sessionId: string) => {
     console.log('[ChatPanel] Interrupt requested for session:', sessionId)
-    // TODO: Implement interrupt if needed
-  }, [])
+    interrupt(sessionId)
+  }, [interrupt])
 
   // Handle input change
   const handleInputChange = useCallback((sessionId: string, value: string) => {
@@ -454,6 +463,19 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
     setIsCreatingSession(true)
 
     try {
+      // Step 1: Close current session if it exists and is active
+      if (currentSessionId && currentSessionStatus === SessionStatus.ACTIVE) {
+        console.log('[ChatPanel] Closing current session:', currentSessionId)
+        try {
+          await apiClient.closeSession(selectedMosaicId, selectedNodeId, currentSessionId)
+          console.log('[ChatPanel] Current session closed successfully')
+        } catch (error) {
+          console.error('[ChatPanel] Failed to close current session:', error)
+          // Continue to create new session even if close fails
+        }
+      }
+
+      // Step 2: Create new session
       const session = await apiClient.createSession(selectedMosaicId, selectedNodeId, {
         mode: SessionMode.CHAT,
       })
@@ -462,6 +484,7 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
       // Clear current state
       setCurrentSessionId(session.session_id)
       setCurrentSessionStatus(session.status)
+      setCurrentRuntimeStatus(session.runtime_status || RuntimeStatus.IDLE)
       setMessages([])
       hasLoadedRef.current = false
       maxSequenceRef.current = 0
@@ -470,7 +493,7 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
     } finally {
       setIsCreatingSession(false)
     }
-  }, [selectedMosaicId, selectedNodeId, isCreatingSession])
+  }, [selectedMosaicId, selectedNodeId, currentSessionId, currentSessionStatus, isCreatingSession])
 
   return (
     <>
@@ -535,7 +558,7 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
           <ChatInput
             sessionId={currentSessionId}
             initialValue={sessionInput}
-            isBusy={false} // Geometry canvas doesn't track busy state yet
+            isBusy={currentRuntimeStatus === RuntimeStatus.BUSY}
             isConnected={isConnected}
             canSendMessage={
               !isCreatingSession &&
@@ -544,6 +567,7 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
               !!selectedNodeId &&
               currentSessionStatus === SessionStatus.ACTIVE
             }
+            editor={editor}
             placeholder={
               !isConnected
                 ? 'WebSocket 连接中...'
