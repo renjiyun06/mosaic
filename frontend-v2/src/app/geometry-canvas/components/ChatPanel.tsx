@@ -9,7 +9,7 @@ import type { WSMessage, GeoGebraInstanceState, GeoGebraObject, MessageContext }
 import { apiClient } from '@/lib/api'
 import { MessageList } from './MessageList'
 import type { ParsedMessage } from './MessageItem'
-import { MessageRole, MessageType, RuntimeStatus, SessionStatus, NodeStatus, SessionMode } from '@/lib/types'
+import { MessageRole, MessageType, RuntimeStatus, SessionStatus, NodeStatus, SessionMode, LLMModel } from '@/lib/types'
 import { ChatInput } from './ChatInput'
 
 interface ChatPanelProps {
@@ -477,7 +477,8 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
 
       // Step 2: Create new session
       const session = await apiClient.createSession(selectedMosaicId, selectedNodeId, {
-        mode: SessionMode.CHAT,
+        mode: SessionMode.LONG_RUNNING,
+        model: LLMModel.SONNET,
       })
       console.log('[ChatPanel] New session created:', session.session_id)
 
