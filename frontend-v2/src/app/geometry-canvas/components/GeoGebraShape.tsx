@@ -16,6 +16,12 @@ export function getGeoGebraAPI(instanceNumber: number): any | null {
   return geogebraAPIs.get(instanceNumber) || null
 }
 
+// Expose to window for browser console testing
+if (typeof window !== 'undefined') {
+  ;(window as any).getGeoGebraAPI = getGeoGebraAPI
+  ;(window as any).geogebraAPIs = geogebraAPIs
+}
+
 // Define GeoGebra shape type
 export type GeoGebraShape = TLBaseShape<
   'geogebra',

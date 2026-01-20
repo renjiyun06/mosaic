@@ -959,13 +959,14 @@ class MosaicNode(ABC):
         """
         pass
 
-    async def send_message(self, session_id: str, message: str) -> None:
+    async def send_message(self, session_id: str, message: str, context: Optional[Dict[str, Any]] = None) -> None:
         """
         Send a message to a session (only for agent nodes).
 
         Args:
             session_id: Session identifier
             message: User message content
+            context: Optional context data (e.g., GeoGebra states)
 
         Raises:
             SessionNotFoundError: If session not found

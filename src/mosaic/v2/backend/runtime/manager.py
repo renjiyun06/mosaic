@@ -752,7 +752,7 @@ class RuntimeManager:
 
         return session_id
 
-    def submit_send_message(self, node: 'Node', session: 'Session', message: str) -> None:
+    def submit_send_message(self, node: 'Node', session: 'Session', message: str, context: Optional[Dict[str, Any]] = None) -> None:
         """
         Submit a send message command (fire-and-forget).
 
@@ -762,6 +762,7 @@ class RuntimeManager:
             node: Node model object (validated by FastAPI layer)
             session: Session model object (validated by FastAPI layer)
             message: User message content
+            context: Optional context data (e.g., GeoGebra states)
 
         Raises:
             MosaicNotRunningError: If mosaic not running
@@ -783,6 +784,7 @@ class RuntimeManager:
             node=node,
             session=session,
             message=message,
+            context=context,
             future=None  # Don't wait for result
         )
 

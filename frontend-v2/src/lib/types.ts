@@ -123,7 +123,8 @@ export enum MessageType {
   SESSION_STARTED = 'session_started',
   SESSION_ENDED = 'session_ended',
   TOPIC_UPDATED = 'topic_updated',
-  RUNTIME_STATUS_CHANGED = 'runtime_status_changed'
+  RUNTIME_STATUS_CHANGED = 'runtime_status_changed',
+  GEOGEBRA_COMMAND = 'geogebra_command'
 }
 
 // ==================== Auth Types ====================

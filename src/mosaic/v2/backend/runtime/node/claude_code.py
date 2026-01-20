@@ -273,7 +273,7 @@ class ClaudeCodeNode(MosaicNode):
 
         logger.info(f"Claude Code session closed: session_id={session_id}")
 
-    async def send_message(self, session_id: str, message: str) -> None:
+    async def send_message(self, session_id: str, message: str, context: Optional[Dict[str, Any]] = None) -> None:
         """
         Send a user message to a Claude Code session.
 
@@ -282,6 +282,7 @@ class ClaudeCodeNode(MosaicNode):
         Args:
             session_id: Session identifier
             message: User message content
+            context: Optional context data (e.g., GeoGebra states)
 
         Raises:
             SessionNotFoundError: If session not found
@@ -293,7 +294,7 @@ class ClaudeCodeNode(MosaicNode):
             )
 
         # Delegate to session's process_user_message method
-        await session.process_user_message(message)
+        await session.process_user_message(message, context)
 
         logger.debug(
             f"User message sent to session: session_id={session_id}, "
@@ -576,24 +577,35 @@ class ClaudeCodeSession(MosaicSession):
                     f"Claude client restarted successfully: session_id={self.session_id}"
                 )
 
-        # 1. Format event to message string
-        message = self._format_event_for_claude(event)
-
-        # 2. Determine message role and type based on event type
+        # 1. Determine message role and type based on event type
         if event_type == EventType.USER_MESSAGE_EVENT:
             # User message: role=user, type=user_message
             role = MessageRole.USER
             message_type = MessageType.USER_MESSAGE
+
+            # Extract original message and context from event payload
+            payload = event.get("payload", {})
+            original_message = payload.get("message", "")
+            context = payload.get("context")
+
+            # Build storage payload (keep structured format)
+            storage_payload = {"message": original_message}
+            if context:
+                storage_payload["context"] = context
         else:
             # Network events: role=system, type=system_message
             role = MessageRole.SYSTEM
             message_type = MessageType.SYSTEM_MESSAGE
 
-        # 3. Store to database and push to WebSocket
+            # For network events, format the entire event
+            formatted_message = self._format_event_for_claude(event)
+            storage_payload = {"message": formatted_message}
+
+        # 2. Store to database and push to WebSocket
         message_id, sequence, timestamp = await self._save_message_to_db(
             role=role,
             message_type=message_type,
-            payload={"message": message}
+            payload=storage_payload
         )
         self._push_to_websocket(
             role=role,
@@ -601,18 +613,18 @@ class ClaudeCodeSession(MosaicSession):
             message_id=message_id,
             sequence=sequence,
             timestamp=timestamp,
-            payload={"message": message}
+            payload=storage_payload
         )
 
-        # 4. Publish user_prompt_submit event (all modes except PROGRAM)
-        if self.mode != SessionMode.PROGRAM:
+        # 3. Publish user_prompt_submit event (only for user messages, all modes except PROGRAM)
+        if self.mode != SessionMode.PROGRAM and event_type == EventType.USER_MESSAGE_EVENT:
             await self.node.send_event(
                 source_session_id=self.session_id,
                 event_type=EventType.USER_PROMPT_SUBMIT,
-                payload={"prompt": message}
+                payload={"prompt": original_message}
             )
 
-        # 5. Update runtime status to BUSY before processing
+        # 4. Update runtime status to BUSY before processing
         await self._update_runtime_status_to_db(RuntimeStatus.BUSY)
 
         # Send WebSocket notification for BUSY status
@@ -631,9 +643,18 @@ class ClaudeCodeSession(MosaicSession):
             f"session_id={self.session_id}, runtime_status=busy"
         )
 
+        # 5. Format message for Claude
+        # For USER_MESSAGE_EVENT, format with context if present
+        # For other events, already formatted in step 1
+        if event_type == EventType.USER_MESSAGE_EVENT:
+            formatted_message_for_claude = self._format_event_for_claude(event)
+        else:
+            # Network events already formatted
+            formatted_message_for_claude = formatted_message
+
         # 6. Send to Claude SDK
         logger.debug(f"Sending query to Claude: session_id={self.session_id}")
-        await self._cc_client.query(message)
+        await self._cc_client.query(formatted_message_for_claude)
 
         # 7. Receive and forward Claude's response
         stats = await self._receive_assistant_response()
@@ -1085,7 +1106,7 @@ class ClaudeCodeSession(MosaicSession):
 
     # ========== Claude SDK Processing ==========
 
-    async def process_user_message(self, message: str):
+    async def process_user_message(self, message: str, context: Optional[Dict[str, Any]] = None):
         """
         Enqueue a user message for processing.
 
@@ -1097,11 +1118,16 @@ class ClaudeCodeSession(MosaicSession):
 
         Args:
             message: User input text
+            context: Optional context data (e.g., GeoGebra states)
         """
         # Wrap message into internal event
+        payload = {"message": message}
+        if context:
+            payload["context"] = context
+
         event = {
             "event_type": EventType.USER_MESSAGE_EVENT,
-            "payload": {"message": message}
+            "payload": payload
         }
 
         # Enqueue for processing by worker loop
@@ -1109,7 +1135,7 @@ class ClaudeCodeSession(MosaicSession):
 
         logger.debug(
             f"User message enqueued: session_id={self.session_id}, "
-            f"message_length={len(message)}"
+            f"message_length={len(message)}, context={'present' if context else 'absent'}"
         )
 
     async def _receive_assistant_response(self) -> Optional[Dict[str, Any]]:
@@ -1779,6 +1805,107 @@ class ClaudeCodeSession(MosaicSession):
                 }
 
         @tool(
+            "execute_geogebra_command",
+            "Execute GeoGebra commands in the geometry canvas",
+            {
+                "type": "object",
+                "properties": {
+                    "instance_number": {
+                        "type": "integer",
+                        "description": "GeoGebra instance number (1, 2, 3, etc.)"
+                    },
+                    "commands": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of GeoGebra commands to execute"
+                    }
+                },
+                "required": ["instance_number", "commands"]
+            }
+        )
+        async def execute_geogebra_command(args):
+            """
+            Execute GeoGebra commands in a specific instance.
+
+            This tool allows the agent to manipulate GeoGebra instances by sending
+            commands that will be executed in the frontend geometry canvas.
+
+            Args:
+                instance_number: GeoGebra instance number (1, 2, 3, etc.)
+                commands: List of GeoGebra commands to execute
+
+            Returns:
+                Success or error message
+            """
+            try:
+                instance_number = args.get('instance_number')
+                commands = args.get('commands')
+
+                # Validate instance_number
+                if not isinstance(instance_number, int) or instance_number < 1:
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": f"Error: instance_number must be a positive integer, got: {instance_number}"
+                        }]
+                    }
+
+                # Validate commands
+                if not isinstance(commands, list) or len(commands) == 0:
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": "Error: commands must be a non-empty list of strings"
+                        }]
+                    }
+
+                # Validate all commands are strings
+                if not all(isinstance(cmd, str) for cmd in commands):
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": "Error: all commands must be strings"
+                        }]
+                    }
+
+                # Push WebSocket message to frontend
+                from ...websocket import UserMessageBroker
+                user_message_broker = UserMessageBroker.get_instance()
+                user_message_broker.push_from_worker(self.node.node.user_id, {
+                    "role": MessageRole.ASSISTANT,
+                    "message_type": MessageType.GEOGEBRA_COMMAND,
+                    "session_id": self.session_id,
+                    "payload": {
+                        "instance_number": instance_number,
+                        "commands": commands
+                    }
+                })
+
+                logger.info(
+                    f"GeoGebra commands sent to instance #{instance_number}: "
+                    f"{len(commands)} command(s), session_id={self.session_id}"
+                )
+
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": f"Successfully sent {len(commands)} command(s) to GeoGebra instance #{instance_number}"
+                    }]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to execute GeoGebra command: session_id={self.session_id}, error={e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": f"Failed to execute GeoGebra command: {str(e)}"
+                    }]
+                }
+
+        @tool(
             "task_complete",
             "Signal that the current task has been completed.",
             {
@@ -1946,7 +2073,7 @@ class ClaudeCodeSession(MosaicSession):
                 }
 
         # Build tools list based on session mode
-        tools = [send_message, send_email, set_session_topic, task_complete]
+        tools = [send_message, send_email, set_session_topic, task_complete, execute_geogebra_command]
 
         # Add LONG_RUNNING mode specific tools
         if self.mode == SessionMode.LONG_RUNNING:
@@ -2076,7 +2203,15 @@ class ClaudeCodeSession(MosaicSession):
         # Internal event: User message (direct input)
         if event_type == EventType.USER_MESSAGE_EVENT:
             payload = event.get("payload", {})
-            return payload.get("message", "")
+            message = payload.get("message", "")
+            context = payload.get("context")
+
+            # If context is present, append it as formatted JSON
+            if context:
+                context_json = json.dumps(context, indent=2, ensure_ascii=False)
+                return f"{message}\n\n[Context]\n{context_json}"
+
+            return message
 
         if event_type == EventType.SYSTEM_MESSAGE:
             formatted_event = {

@@ -476,7 +476,7 @@ class MosaicInstance:
 
         Steps:
         1. Get the MosaicNode instance via self._get_node(command.node)
-        2. Delegate to mosaic_node.send_message(command.session_id, command.message)
+        2. Delegate to mosaic_node.send_message(command.session_id, command.message, command.context)
         3. Return None
 
         Args:
@@ -489,7 +489,7 @@ class MosaicInstance:
             NodeNotFoundError: If node is not running
         """
         mosaic_node = self._get_node(command.node)
-        await mosaic_node.send_message(command.session.session_id, command.message)
+        await mosaic_node.send_message(command.session.session_id, command.message, command.context)
 
     async def _handle_interrupt_session(self, command: InterruptSessionCommand) -> None:
         """

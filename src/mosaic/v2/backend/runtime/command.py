@@ -148,10 +148,12 @@ class SendMessageCommand(Command):
         node: Node model object (required)
         session: Session model object (required)
         message: User message content (required)
+        context: Optional context data (e.g., GeoGebra states)
     """
     node: 'Node' = None
     session: 'Session' = None
     message: str = None
+    context: Optional[Dict[str, Any]] = None
 
 
 @dataclass

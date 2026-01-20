@@ -180,3 +180,4 @@ class MessageType(str, Enum):
     SESSION_ENDED = "session_ended"
     TOPIC_UPDATED = "topic_updated"
     RUNTIME_STATUS_CHANGED = "runtime_status_changed"
+    GEOGEBRA_COMMAND = "geogebra_command"

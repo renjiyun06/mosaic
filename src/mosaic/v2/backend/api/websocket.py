@@ -174,12 +174,16 @@ async def websocket_user_endpoint(
                     })
                     continue
 
+                # Extract optional context (e.g., GeoGebra states)
+                context = data.get("context")
+
                 # Submit command to RuntimeManager (non-blocking)
                 try:
                     runtime_manager.submit_send_message(
                         node=node,
                         session=session,
-                        message=user_message
+                        message=user_message,
+                        context=context
                     )
                     logger.debug(
                         f"User message submitted: session_id={session_id}, "

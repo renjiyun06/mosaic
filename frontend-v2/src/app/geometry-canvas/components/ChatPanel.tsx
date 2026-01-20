@@ -5,8 +5,8 @@ import { ChevronRight, MessageSquare, Plus } from 'lucide-react'
 import { getGeoGebraAPI } from './GeoGebraShape'
 import { NodeSelector } from './NodeSelector'
 import { useWebSocket } from '@/contexts/websocket-context'
+import type { WSMessage, GeoGebraInstanceState, GeoGebraObject, MessageContext } from '@/contexts/websocket-context'
 import { apiClient } from '@/lib/api'
-import type { WSMessage } from '@/contexts/websocket-context'
 import { MessageList } from './MessageList'
 import type { ParsedMessage } from './MessageItem'
 import { MessageRole, MessageType, RuntimeStatus, SessionStatus, NodeStatus, SessionMode } from '@/lib/types'
@@ -192,6 +192,13 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
       // Update max sequence number
       maxSequenceRef.current = Math.max(maxSequenceRef.current, wsMessage.sequence)
 
+      // Handle GeoGebra command messages
+      if (wsMessage.message_type === MessageType.GEOGEBRA_COMMAND) {
+        console.log('[ChatPanel] Received GeoGebra command:', wsMessage.payload)
+        handleGeoGebraCommand(wsMessage.payload)
+        return
+      }
+
       // Skip terminal messages
       if (wsMessage.message_type === 'terminal_output' || wsMessage.message_type === 'terminal_status') {
         return
@@ -266,6 +273,89 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
     })
   }, [])
 
+  // Handle GeoGebra command execution
+  const handleGeoGebraCommand = useCallback((payload: any) => {
+    const { instance_number, commands } = payload
+
+    if (!instance_number || !commands || !Array.isArray(commands)) {
+      console.error('[ChatPanel] Invalid GeoGebra command payload:', payload)
+      return
+    }
+
+    const api = getGeoGebraAPI(instance_number)
+
+    if (!api) {
+      console.error(`[ChatPanel] GeoGebra instance #${instance_number} not found`)
+      return
+    }
+
+    console.log(`[ChatPanel] Executing ${commands.length} command(s) on instance #${instance_number}`)
+
+    for (const command of commands) {
+      try {
+        api.evalCommand(command)
+        console.log(`[ChatPanel] Successfully executed: ${command}`)
+      } catch (error) {
+        console.error(`[ChatPanel] Failed to execute command: ${command}`, error)
+      }
+    }
+  }, [])
+
+  // Collect GeoGebra states from all instances
+  const collectGeoGebraStates = useCallback((): GeoGebraInstanceState[] => {
+    if (!editor) {
+      return []
+    }
+
+    const states: GeoGebraInstanceState[] = []
+
+    // Get all GeoGebra shapes from the editor
+    const shapes = editor.getCurrentPageShapes()
+    const geogebraShapes = shapes.filter((shape: any) => shape.type === 'geogebra')
+
+    for (const shape of geogebraShapes) {
+      const instanceNumber = shape.props.instanceNumber
+      const api = getGeoGebraAPI(instanceNumber)
+
+      if (!api) {
+        console.warn(`[ChatPanel] No API found for instance #${instanceNumber}`)
+        continue
+      }
+
+      try {
+        // Get all object names
+        const objectNames = api.getAllObjectNames()
+        const objects: GeoGebraObject[] = []
+
+        for (const name of objectNames) {
+          const type = api.getObjectType(name)
+          const obj: GeoGebraObject = {
+            name,
+            type,
+            definition: api.getDefinitionString(name) || '',
+          }
+
+          // Add coordinates for points and vectors
+          if (type === 'point' || type === 'vector') {
+            obj.x = api.getXcoord(name)
+            obj.y = api.getYcoord(name)
+          }
+
+          objects.push(obj)
+        }
+
+        states.push({
+          instanceNumber,
+          objects,
+        })
+      } catch (error) {
+        console.error(`[ChatPanel] Error collecting state for instance #${instanceNumber}:`, error)
+      }
+    }
+
+    return states
+  }, [editor])
+
   // Handle send message
   const handleSendMessage = useCallback((sessionId: string, message: string) => {
     if (!message.trim() || !isConnected) {
@@ -273,12 +363,22 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
       return
     }
 
-    console.log('[ChatPanel] Sending message:', message)
-    sendMessage(sessionId, message)
+    // Collect GeoGebra states
+    const geogebraStates = collectGeoGebraStates()
+
+    // Build context
+    const context: MessageContext = {}
+    if (geogebraStates.length > 0) {
+      context.geogebra_states = geogebraStates
+      console.log('[ChatPanel] Collected GeoGebra states:', geogebraStates)
+    }
+
+    console.log('[ChatPanel] Sending message:', message, 'with context:', context)
+    sendMessage(sessionId, message, Object.keys(context).length > 0 ? context : undefined)
 
     // Clear input after sending
     setSessionInput('')
-  }, [isConnected, sendMessage])
+  }, [isConnected, sendMessage, collectGeoGebraStates])
 
   // Handle interrupt (not implemented for geometry canvas yet)
   const handleInterrupt = useCallback((sessionId: string) => {

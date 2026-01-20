@@ -26,6 +26,26 @@ export interface WSError {
   message: string
 }
 
+// GeoGebra object state
+export interface GeoGebraObject {
+  name: string
+  type: string
+  definition: string
+  x?: number
+  y?: number
+}
+
+// GeoGebra instance state
+export interface GeoGebraInstanceState {
+  instanceNumber: number
+  objects: GeoGebraObject[]
+}
+
+// Context data attached to user messages
+export interface MessageContext {
+  geogebra_states?: GeoGebraInstanceState[]
+}
+
 // Message sent from client to server
 export interface WSClientMessage {
   session_id: string
@@ -34,13 +54,14 @@ export interface WSClientMessage {
   data?: string // For terminal input
   cols?: number // For terminal resize
   rows?: number // For terminal resize
+  context?: MessageContext // Supplementary data (e.g., GeoGebra states)
 }
 
 type MessageHandler = (message: WSMessage | WSError) => void
 
 interface WebSocketContextType {
   isConnected: boolean
-  sendMessage: (sessionId: string, message: string) => void
+  sendMessage: (sessionId: string, message: string, context?: MessageContext) => void
   interrupt: (sessionId: string) => void
   sendRaw: (data: any) => void // Generic method for sending any JSON data
   subscribe: (sessionId: string, handler: MessageHandler) => () => void
@@ -183,7 +204,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, [isAuthenticated, token, connect, disconnect])
 
   // Send user message to session
-  const sendMessage = useCallback((sessionId: string, message: string) => {
+  const sendMessage = useCallback((sessionId: string, message: string, context?: MessageContext) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       console.error('[WebSocket] Cannot send message: not connected')
       return
@@ -192,7 +213,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     const payload: WSClientMessage = {
       session_id: sessionId,
       type: 'user_message',
-      message
+      message,
+      ...(context && { context })
     }
 
     console.log('[WebSocket] Sending message:', payload)
