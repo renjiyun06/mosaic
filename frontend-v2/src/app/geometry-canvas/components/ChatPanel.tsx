@@ -19,7 +19,7 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
-  const { isConnected, sendMessage, subscribe } = useWebSocket()
+  const { isConnected, sendMessage, subscribe, sendRaw } = useWebSocket()
 
   const [messages, setMessages] = useState<ParsedMessage[]>([])
   const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set())
@@ -275,10 +275,23 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
 
   // Handle GeoGebra command execution
   const handleGeoGebraCommand = useCallback((payload: any) => {
-    const { instance_number, commands } = payload
+    const { response_id, instance_number, commands } = payload
 
     if (!instance_number || !commands || !Array.isArray(commands)) {
       console.error('[ChatPanel] Invalid GeoGebra command payload:', payload)
+
+      // Send error response if response_id exists
+      if (response_id && currentSessionId) {
+        sendRaw({
+          session_id: currentSessionId,
+          type: 'tool_response',
+          response_id: response_id,
+          result: {
+            success: false,
+            error: 'Invalid payload: missing instance_number or commands'
+          }
+        })
+      }
       return
     }
 
@@ -286,20 +299,61 @@ export function ChatPanel({ editor, isVisible, onToggle }: ChatPanelProps) {
 
     if (!api) {
       console.error(`[ChatPanel] GeoGebra instance #${instance_number} not found`)
+
+      // Send error response if response_id exists
+      if (response_id && currentSessionId) {
+        sendRaw({
+          session_id: currentSessionId,
+          type: 'tool_response',
+          response_id: response_id,
+          result: {
+            success: false,
+            error: `GeoGebra instance #${instance_number} not found`
+          }
+        })
+      }
       return
     }
 
     console.log(`[ChatPanel] Executing ${commands.length} command(s) on instance #${instance_number}`)
 
+    let executionSuccess = true
+    let executionError: string | undefined = undefined
+
+    // Execute all commands
     for (const command of commands) {
       try {
         api.evalCommand(command)
         console.log(`[ChatPanel] Successfully executed: ${command}`)
       } catch (error) {
         console.error(`[ChatPanel] Failed to execute command: ${command}`, error)
+        executionSuccess = false
+        executionError = error instanceof Error ? error.message : String(error)
+        break // Stop on first error
       }
     }
-  }, [])
+
+    // Collect current state from ALL GeoGebra instances (regardless of success/failure)
+    const currentStates = collectGeoGebraStates()
+    console.log(`[ChatPanel] Collected states from ${currentStates.length} GeoGebra instance(s)`)
+
+    // Send response back to backend if response_id exists
+    if (response_id && currentSessionId) {
+      sendRaw({
+        session_id: currentSessionId,
+        type: 'tool_response',
+        response_id: response_id,
+        result: {
+          success: executionSuccess,
+          current_states: currentStates,  // All instances' current states
+          error: executionError
+        }
+      })
+
+      const totalObjects = currentStates.reduce((sum, state) => sum + state.objects.length, 0)
+      console.log(`[ChatPanel] Sent tool_response for response_id: ${response_id}, ${currentStates.length} instance(s), ${totalObjects} total objects`)
+    }
+  }, [currentSessionId, sendRaw, editor])
 
   // Collect GeoGebra states from all instances
   const collectGeoGebraStates = useCallback((): GeoGebraInstanceState[] => {

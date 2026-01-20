@@ -1006,6 +1006,32 @@ class MosaicNode(ABC):
 
         await mosaic_session.interrupt()
 
+    async def handle_tool_response(self, session_id: str, response_id: str, result: Any) -> None:
+        """
+        Handle tool response from frontend (only for agent nodes).
+
+        This method is called when the frontend sends back a response to a tool execution
+        (e.g., GeoGebra command result). It is used to complete pending asynchronous
+        tool operations that are waiting for user/frontend input.
+
+        Args:
+            session_id: Session identifier
+            response_id: Unique identifier matching the pending response
+            result: Response data from frontend
+
+        Raises:
+            NotImplementedError: If this node type doesn't support tool responses
+
+        Note:
+            Most node types (scheduler, email, etc.) don't need this functionality.
+            Only agent nodes (like claude_code) that execute tools asynchronously
+            and need to wait for frontend responses should override this method.
+            Default implementation raises NotImplementedError.
+        """
+        raise NotImplementedError(
+            f"Node type {self.node.node_type} does not support handle_tool_response"
+        )
+
     @abstractmethod
     async def close_session(self, session_id: str) -> None:
         """

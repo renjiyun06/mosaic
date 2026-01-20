@@ -187,3 +187,25 @@ class CloseSessionCommand(Command):
     """
     node: 'Node' = None
     session_id: str = None
+
+
+@dataclass
+class ToolResponseCommand(Command):
+    """
+    Command to handle tool response from frontend.
+
+    This command delivers a frontend response to a waiting tool execution.
+    The response_id is used to match with a pending Future in the session.
+
+    This is typically a fire-and-forget operation (future=None).
+
+    Attributes:
+        node: Node model object (required)
+        session: Session model object (required)
+        response_id: Unique identifier matching the pending response (required)
+        result: Response data from frontend (can be any structure)
+    """
+    node: 'Node' = None
+    session: 'Session' = None
+    response_id: str = None
+    result: Any = None

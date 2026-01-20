@@ -795,6 +795,68 @@ class RuntimeManager:
             f"Message submitted for session: session_id={session.session_id}, node_id={node.node_id}"
         )
 
+    def submit_tool_response(
+        self,
+        node: 'Node',
+        session: 'Session',
+        response_id: str,
+        result: Any
+    ) -> None:
+        """
+        Submit a tool response from frontend (fire-and-forget).
+
+        This method is called when the frontend sends back a response to a tool execution
+        (e.g., GeoGebra command execution result). The response will be matched with a
+        pending Future using the response_id, allowing the tool to complete its async wait.
+
+        Flow:
+        1. Tool (e.g., execute_geogebra_command) sends command to frontend with response_id
+        2. Tool creates Future and stores in session._pending_responses[response_id]
+        3. Tool awaits the Future (with timeout)
+        4. Frontend executes command and sends result back via WebSocket
+        5. WebSocket handler calls this method
+        6. This method routes to the session to set the Future result
+        7. Tool receives result and returns to Claude
+
+        Args:
+            node: Node model object (validated by FastAPI layer)
+            session: Session model object (validated by FastAPI layer)
+            response_id: Unique identifier matching the pending response
+            result: Response data from frontend (can be any structure)
+
+        Raises:
+            MosaicNotRunningError: If mosaic not running
+
+        Note:
+            This is a non-blocking operation. The actual Future completion happens
+            in the runtime thread.
+            FastAPI layer must validate node and session existence/permissions before calling.
+        """
+        logger.debug(
+            f"Submitting tool response for session: session_id={session.session_id}, "
+            f"node_id={node.node_id}, response_id={response_id}"
+        )
+
+        # Import command here to avoid circular import
+        from .command import ToolResponseCommand
+
+        # Create ToolResponseCommand (no future needed, fire-and-forget)
+        command = ToolResponseCommand(
+            node=node,
+            session=session,
+            response_id=response_id,
+            result=result,
+            future=None  # Don't wait for result
+        )
+
+        # Submit command without waiting (fire-and-forget)
+        self._submit_command_no_wait(node.mosaic_id, command)
+
+        logger.debug(
+            f"Tool response submitted for session: session_id={session.session_id}, "
+            f"response_id={response_id}"
+        )
+
     async def interrupt_session(self, node: 'Node', session: 'Session', timeout: float = 5.0) -> None:
         """
         Interrupt a running session.

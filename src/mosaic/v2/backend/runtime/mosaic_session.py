@@ -506,6 +506,31 @@ class MosaicSession(ABC):
             f"Session type {self.__class__.__name__} does not support interrupt"
         )
 
+    async def handle_tool_response(self, response_id: str, result: Any) -> None:
+        """
+        Handle tool response from frontend (only for agent sessions).
+
+        This method is called when the frontend sends back a response to a tool execution
+        (e.g., GeoGebra command result). It is used to complete pending asynchronous
+        tool operations that are waiting for user/frontend input.
+
+        Args:
+            response_id: Unique identifier matching the pending response
+            result: Response data from frontend
+
+        Raises:
+            NotImplementedError: If this session type doesn't support tool responses
+
+        Note:
+            Default implementation raises NotImplementedError.
+            Most session types (scheduler, email, etc.) don't need this functionality.
+            Only agent sessions that execute tools asynchronously and need to wait
+            for frontend responses should override this method.
+        """
+        raise NotImplementedError(
+            f"Session type {self.__class__.__name__} does not support handle_tool_response"
+        )
+
     # ========== State Properties ==========
 
     @property

@@ -21,6 +21,7 @@ from .command import (
     SendMessageCommand,
     InterruptSessionCommand,
     CloseSessionCommand,
+    ToolResponseCommand,
 )
 
 if TYPE_CHECKING:
@@ -337,6 +338,8 @@ class MosaicInstance:
             return await self._handle_interrupt_session(command)
         elif isinstance(command, CloseSessionCommand):
             return await self._handle_close_session(command)
+        elif isinstance(command, ToolResponseCommand):
+            return await self._handle_tool_response(command)
         else:
             raise RuntimeInternalError(
                 f"Unknown command type: {command.__class__.__name__}"
@@ -532,6 +535,31 @@ class MosaicInstance:
         """
         mosaic_node = self._get_node(command.node)
         await mosaic_node.close_session(command.session_id)
+
+    async def _handle_tool_response(self, command: ToolResponseCommand) -> None:
+        """
+        Handle ToolResponseCommand.
+
+        Steps:
+        1. Get the MosaicNode instance via self._get_node(command.node)
+        2. Delegate to mosaic_node.handle_tool_response(session_id, response_id, result)
+        3. Return None
+
+        Args:
+            command: ToolResponseCommand instance
+
+        Returns:
+            None
+
+        Raises:
+            NodeNotFoundError: If node is not running
+        """
+        mosaic_node = self._get_node(command.node)
+        await mosaic_node.handle_tool_response(
+            command.session.session_id,
+            command.response_id,
+            command.result
+        )
 
     # ========== Node Management (Internal) ==========
 

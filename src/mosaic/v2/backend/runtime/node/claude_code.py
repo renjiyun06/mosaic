@@ -301,6 +301,33 @@ class ClaudeCodeNode(MosaicNode):
             f"message_length={len(message)}"
         )
 
+    async def handle_tool_response(self, session_id: str, response_id: str, result: Any) -> None:
+        """
+        Handle tool response from frontend.
+
+        This is called from the API layer (WebSocket) when frontend sends back
+        a response to a tool execution (e.g., GeoGebra command result).
+
+        Args:
+            session_id: Session identifier
+            response_id: Unique identifier matching the pending response
+            result: Response data from frontend
+
+        Raises:
+            SessionNotFoundError: If session not found
+        """
+        session = self._sessions.get(session_id)
+        if not session:
+            raise SessionNotFoundError(
+                f"Session {session_id} not found in node {self.node.node_id}"
+            )
+
+        # Delegate to session's handle_tool_response method
+        await session.handle_tool_response(response_id, result)
+
+        logger.debug(
+            f"Tool response handled: session_id={session_id}, response_id={response_id}"
+        )
 
     def get_default_session_config(self) -> Optional[Dict[str, Any]]:
         return {
@@ -391,6 +418,9 @@ class ClaudeCodeSession(MosaicSession):
         # Token threshold notification tracking
         self._effective_threshold = self.token_threshold  # Dynamic threshold (updates after each notification)
         self._token_threshold_notified = False  # Notification flag
+
+        # Tool response tracking (for async tool execution)
+        self._pending_responses: Dict[str, asyncio.Future] = {}  # response_id -> Future
 
         # Task lifecycle flags (LONG_RUNNING mode only)
         self._task_started = False  # Whether task has been acknowledged as started
@@ -1103,6 +1133,46 @@ class ClaudeCodeSession(MosaicSession):
             logger.warning(
                 f"Cannot interrupt session {self.session_id}: Claude SDK not connected"
             )
+
+    async def handle_tool_response(self, response_id: str, result: Any) -> None:
+        """
+        Handle tool response from frontend.
+
+        This method is called when the frontend sends back a response to a tool execution.
+        It finds the pending Future for the given response_id and sets its result,
+        allowing the tool execution to complete.
+
+        Args:
+            response_id: Unique identifier matching the pending response
+            result: Response data from frontend
+
+        Note:
+            If no pending response is found for the response_id, a warning is logged
+            and the method returns without error (the tool may have timed out).
+        """
+        future = self._pending_responses.get(response_id)
+
+        if not future:
+            logger.warning(
+                f"No pending response found for response_id={response_id}, "
+                f"session_id={self.session_id}. Tool may have timed out."
+            )
+            return
+
+        if future.done():
+            logger.warning(
+                f"Future already completed for response_id={response_id}, "
+                f"session_id={self.session_id}"
+            )
+            return
+
+        # Set the result to complete the Future
+        future.set_result(result)
+
+        logger.info(
+            f"Tool response handled: session_id={self.session_id}, "
+            f"response_id={response_id}"
+        )
 
     # ========== Claude SDK Processing ==========
 
@@ -1835,7 +1905,7 @@ class ClaudeCodeSession(MosaicSession):
                 commands: List of GeoGebra commands to execute
 
             Returns:
-                Success or error message
+                Success or error message with execution result
             """
             try:
                 instance_number = args.get('instance_number')
@@ -1868,7 +1938,15 @@ class ClaudeCodeSession(MosaicSession):
                         }]
                     }
 
-                # Push WebSocket message to frontend
+                # Generate response_id
+                import uuid
+                response_id = str(uuid.uuid4())
+
+                # Create Future and store in pending responses
+                future = asyncio.Future()
+                self._pending_responses[response_id] = future
+
+                # Push WebSocket message to frontend with response_id
                 from ...websocket import UserMessageBroker
                 user_message_broker = UserMessageBroker.get_instance()
                 user_message_broker.push_from_worker(self.node.node.user_id, {
@@ -1876,6 +1954,7 @@ class ClaudeCodeSession(MosaicSession):
                     "message_type": MessageType.GEOGEBRA_COMMAND,
                     "session_id": self.session_id,
                     "payload": {
+                        "response_id": response_id,  # Add response_id for frontend to reply
                         "instance_number": instance_number,
                         "commands": commands
                     }
@@ -1883,15 +1962,42 @@ class ClaudeCodeSession(MosaicSession):
 
                 logger.info(
                     f"GeoGebra commands sent to instance #{instance_number}: "
-                    f"{len(commands)} command(s), session_id={self.session_id}"
+                    f"{len(commands)} command(s), session_id={self.session_id}, "
+                    f"response_id={response_id}, waiting for response..."
                 )
 
-                return {
-                    "content": [{
-                        "type": "text",
-                        "text": f"Successfully sent {len(commands)} command(s) to GeoGebra instance #{instance_number}"
-                    }]
-                }
+                # Wait for frontend response (with 30 second timeout)
+                try:
+                    response_data = await asyncio.wait_for(future, timeout=30.0)
+
+                    logger.info(
+                        f"GeoGebra response received: session_id={self.session_id}, "
+                        f"response_id={response_id}"
+                    )
+
+                    # Return result with response data
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": f"Commands executed successfully. Response: {json.dumps(response_data, ensure_ascii=False)}"
+                        }]
+                    }
+
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"GeoGebra response timeout: session_id={self.session_id}, "
+                        f"response_id={response_id}"
+                    )
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": f"Timeout waiting for GeoGebra response (30 seconds). Commands may not have been executed."
+                        }]
+                    }
+
+                finally:
+                    # Clean up pending response
+                    self._pending_responses.pop(response_id, None)
 
             except Exception as e:
                 logger.error(

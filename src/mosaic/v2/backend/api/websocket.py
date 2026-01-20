@@ -287,6 +287,39 @@ async def websocket_user_endpoint(
                     logger.error(f"Failed to stop terminal: {e}", exc_info=True)
                     # Don't send error to client for stop failures (session may be closing)
 
+            elif message_type == "tool_response":
+                # Handle tool response from frontend (e.g., GeoGebra execution result)
+                response_id = data.get("response_id")
+                result = data.get("result")
+
+                if not response_id:
+                    await websocket.send_json({
+                        "session_id": session_id,
+                        "type": "error",
+                        "message": "Missing response_id in tool_response"
+                    })
+                    continue
+
+                # Submit tool response handling (non-blocking)
+                try:
+                    runtime_manager.submit_tool_response(
+                        node=node,
+                        session=session,
+                        response_id=response_id,
+                        result=result
+                    )
+                    logger.debug(
+                        f"Tool response submitted: session_id={session_id}, "
+                        f"response_id={response_id}"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to submit tool response: {e}", exc_info=True)
+                    await websocket.send_json({
+                        "session_id": session_id,
+                        "type": "error",
+                        "message": f"Failed to handle tool response: {str(e)}"
+                    })
+
             else:
                 logger.warning(f"Unknown message type from user {current_user.id}: {message_type}")
                 await websocket.send_json({
