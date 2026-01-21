@@ -1363,7 +1363,11 @@ export default function ChatPage() {
                   <span className="text-xs sm:text-sm font-mono text-muted-foreground truncate">
                     {currentSessionInfo.nodeId}
                     <span className="mx-1">/</span>
-                    {currentSessionInfo.session.topic || activeSessionId?.slice(0, 8)}
+                    {currentSessionInfo.session.topic
+                      ? (currentSessionInfo.session.topic.length > 20
+                          ? currentSessionInfo.session.topic.slice(0, 20) + '…'
+                          : currentSessionInfo.session.topic)
+                      : activeSessionId?.slice(0, 8)}
                   </span>
                 </div>
 
