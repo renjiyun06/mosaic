@@ -5,6 +5,8 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, TYPE_CHECKING
+import jsonschema
+from jsonschema import ValidationError as JsonSchemaValidationError
 
 from claude_agent_sdk import (
     ClaudeSDKClient,
@@ -30,7 +32,8 @@ from ...enum import (
     EventType,
     MessageRole,
     MessageType,
-    RuntimeStatus
+    RuntimeStatus,
+    Nil
 )
 from ...websocket import UserMessageBroker
 from ...exception import SessionNotFoundError, SessionConflictError
@@ -329,6 +332,56 @@ class ClaudeCodeNode(MosaicNode):
             f"Tool response handled: session_id={session_id}, response_id={response_id}"
         )
 
+    async def execute_programmable_call(
+        self,
+        session_id: str,
+        call_id: str,
+        method: str,
+        instruction: Optional[str],
+        kwargs: Dict[str, Any],
+        return_schema: Optional[Dict[str, Any]],
+        command: 'ProgrammableCallCommand'
+    ):
+        """
+        Execute a programmable call in a Claude Code session.
+
+        This method enables SDK-style programmatic invocation of the agent,
+        allowing external systems to call the node with structured method calls
+        and receive structured responses.
+
+        Args:
+            session_id: Session identifier (must be ACTIVE)
+            call_id: Unique call identifier (UUID) for tracking this specific call
+            method: Semantic method identifier (e.g., "analyze_data", "extract_entities")
+            instruction: Optional detailed task description for complex multi-step tasks
+            kwargs: Keyword arguments for the call (must be JSON-serializable dict)
+            return_schema: Optional JSON Schema Draft 7 for return value validation
+            command: ProgrammableCallCommand instance (for MCP tool to set result)
+
+        Returns:
+            None: This method returns immediately. The MCP tool will set command.future result.
+
+        Raises:
+            SessionNotFoundError: If session not found in this node
+            RuntimeInternalError: If execution fails or validation errors occur
+        """
+        # Get the session from the session map
+        mosaic_session = self._sessions.get(session_id)
+        if not mosaic_session:
+            raise SessionNotFoundError(
+                f"Session {session_id} not found in node {self.node.node_id}"
+            )
+
+        # Delegate to the session's execute_programmable_call method
+        return await mosaic_session.execute_programmable_call(
+            call_id=call_id,
+            method=method,
+            instruction=instruction,
+            kwargs=kwargs,
+            return_schema=return_schema,
+            command=command
+        )
+
     def get_default_session_config(self) -> Optional[Dict[str, Any]]:
         return {
             "mode": self.node.config.get("mode", SessionMode.BACKGROUND),
@@ -421,6 +474,9 @@ class ClaudeCodeSession(MosaicSession):
 
         # Tool response tracking (for async tool execution)
         self._pending_responses: Dict[str, asyncio.Future] = {}  # response_id -> Future
+
+        # Programmable call tracking (for SDK programmable calls)
+        self._pending_programmable_calls: Dict[str, 'ProgrammableCallCommand'] = {}  # call_id -> Command
 
         # Task lifecycle flags (LONG_RUNNING mode only)
         self._task_started = False  # Whether task has been acknowledged as started
@@ -587,6 +643,15 @@ class ClaudeCodeSession(MosaicSession):
             # No business logic processing needed - just return
             # _should_close_after_event will handle the close decision
             return
+
+        # Special handling for PROGRAMMABLE_CALL_EVENT (internal event)
+        if event_type == EventType.PROGRAMMABLE_CALL_EVENT:
+            logger.info(
+                f"Received programmable_call event: session_id={self.session_id}"
+            )
+            # Format the programmable call as a structured message to Claude
+            # This event will be processed like a normal event (sent to Claude)
+            # The agent will process it and call the programmable_return MCP tool
 
         # LONG_RUNNING mode: Restart Claude client on self-referencing message
         if self.mode == SessionMode.LONG_RUNNING:
@@ -1173,6 +1238,77 @@ class ClaudeCodeSession(MosaicSession):
             f"Tool response handled: session_id={self.session_id}, "
             f"response_id={response_id}"
         )
+
+    async def execute_programmable_call(
+        self,
+        call_id: str,
+        method: str,
+        instruction: Optional[str],
+        kwargs: Dict[str, Any],
+        return_schema: Optional[Dict[str, Any]],
+        command: 'ProgrammableCallCommand'
+    ) -> None:
+        """
+        Execute a programmable call in this Claude Code session.
+
+        This method enables SDK-style programmatic invocation of the agent,
+        allowing external systems to call the session with structured method calls
+        and receive structured responses.
+
+        Implementation Strategy:
+        1. Store the command reference in _pending_programmable_calls
+        2. Enqueue a programmable_call event to the session's event queue
+        3. Return immediately (don't wait for result)
+        4. The event loop will process the event and send it to the agent
+        5. The agent processes and calls programmable_return MCP tool
+        6. The MCP tool calls command.set_result() to resolve the future
+
+        Args:
+            call_id: Unique call identifier (UUID) for tracking this specific call
+            method: Semantic method identifier (e.g., "analyze_data", "extract_entities")
+            instruction: Optional detailed task description for complex multi-step tasks
+            kwargs: Keyword arguments for the call (must be JSON-serializable dict)
+            return_schema: Optional JSON Schema Draft 7 for return value validation
+            command: ProgrammableCallCommand instance (for MCP tool to set result)
+
+        Returns:
+            None: This method returns immediately. The MCP tool will set command.future result.
+
+        Raises:
+            RuntimeInternalError: If execution fails or validation errors occur
+
+        Note:
+            The command object is stored and will be retrieved by the programmable_return MCP tool
+            to set the result. Timeout is handled by RuntimeManager layer via asyncio.wait_for.
+        """
+        # 1. Store command reference
+        self._pending_programmable_calls[call_id] = command
+
+        logger.debug(
+            f"Stored programmable call command: session_id={self.session_id}, "
+            f"call_id={call_id}, method={method}"
+        )
+
+        # 2. Enqueue programmable_call event to session queue (non-blocking)
+        event = {
+            "event_type": EventType.PROGRAMMABLE_CALL_EVENT,
+            "payload": {
+                "call_id": call_id,
+                "method": method,
+                "instruction": instruction,
+                "kwargs": kwargs,
+                "return_schema": return_schema
+            }
+        }
+        self.enqueue_event(event)
+
+        logger.debug(
+            f"Enqueued programmable_call event: session_id={self.session_id}, "
+            f"call_id={call_id}"
+        )
+
+        # 3. Return immediately (don't wait)
+        return Nil.NIL
 
     # ========== Claude SDK Processing ==========
 
@@ -2178,8 +2314,169 @@ class ClaudeCodeSession(MosaicSession):
                     ]
                 }
 
+        @tool(
+            "programmable_return",
+            "Return the result of a programmable call request.",
+            {
+                "type": "object",
+                "properties": {
+                    "call_id": {
+                        "type": "string",
+                        "description": "The call ID from the programmable call request"
+                    },
+                    "result": {
+                        "description": "The result to return (can be any JSON-serializable value)"
+                    }
+                },
+                "required": ["call_id", "result"]
+            }
+        )
+        async def programmable_return(args):
+            """
+            Return the result of a programmable call.
+
+            This tool is used by the agent to return the result of a programmable call
+            request. The result will be validated against the return_schema if provided.
+
+            Args:
+                args: Dict containing:
+                    - call_id: The call ID from the programmable call request
+                    - result: The result to return (any JSON-serializable value)
+            """
+            try:
+                call_id = args.get('call_id')
+                result = args.get('result')
+
+                if not call_id:
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Error: call_id is required"
+                            }
+                        ]
+                    }
+
+                # Get the pending command
+                command = self._pending_programmable_calls.get(call_id)
+
+                if not command:
+                    logger.warning(
+                        f"No pending programmable call found for call_id={call_id}, "
+                        f"session_id={self.session_id}"
+                    )
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"Error: No pending programmable call found for call_id={call_id}"
+                            }
+                        ]
+                    }
+
+                # Schema validation if return_schema is provided
+                if command.return_schema:
+                    try:
+                        jsonschema.validate(instance=result, schema=command.return_schema)
+                        logger.debug(
+                            f"Return value validation passed: session_id={self.session_id}, "
+                            f"call_id={call_id}"
+                        )
+                    except JsonSchemaValidationError as e:
+                        # Validation failed - return error to agent for retry
+                        error_msg = f"Return value validation failed: {e.message}"
+
+                        # Build detailed error message
+                        error_details = [
+                            "Validation Error:",
+                            f"- Message: {e.message}",
+                        ]
+
+                        if e.path:
+                            path_str = ".".join(str(p) for p in e.path)
+                            error_details.append(f"- Path: {path_str}")
+
+                        if e.schema_path:
+                            schema_path_str = ".".join(str(p) for p in e.schema_path)
+                            error_details.append(f"- Schema Path: {schema_path_str}")
+
+                        error_details.append(f"\nExpected Schema:")
+                        error_details.append(json.dumps(command.return_schema, indent=2, ensure_ascii=False))
+
+                        error_details.append(f"\nYour Result:")
+                        error_details.append(json.dumps(result, indent=2, ensure_ascii=False))
+
+                        error_details.append(f"\nPlease fix the result and call programmable_return again with the same call_id={call_id}")
+
+                        full_error = "\n".join(error_details)
+
+                        logger.warning(
+                            f"Return value validation failed: session_id={self.session_id}, "
+                            f"call_id={call_id}, error={e.message}"
+                        )
+
+                        # Don't set result, don't clean up - agent can retry
+                        return {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": full_error
+                                }
+                            ]
+                        }
+                    except Exception as e:
+                        # Schema validation error (invalid schema itself)
+                        logger.error(
+                            f"Schema validation error: session_id={self.session_id}, "
+                            f"call_id={call_id}, error={e}",
+                            exc_info=True
+                        )
+                        return {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Schema validation error: {str(e)}"
+                                }
+                            ]
+                        }
+
+                # Validation passed (or no schema) - set the result
+                command.set_result(result)
+
+                # Clean up
+                self._pending_programmable_calls.pop(call_id, None)
+
+                logger.info(
+                    f"Programmable call result set: session_id={self.session_id}, "
+                    f"call_id={call_id}"
+                )
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Successfully returned result for call_id={call_id}"
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to return programmable call result: "
+                    f"session_id={self.session_id}, error={e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Failed to return programmable call result: {str(e)}"
+                        }
+                    ]
+                }
+
         # Build tools list based on session mode
-        tools = [send_message, send_email, set_session_topic, task_complete, execute_geogebra_command]
+        tools = [send_message, send_email, set_session_topic, task_complete, execute_geogebra_command, programmable_return]
 
         # Add LONG_RUNNING mode specific tools
         if self.mode == SessionMode.LONG_RUNNING:
@@ -2318,6 +2615,35 @@ class ClaudeCodeSession(MosaicSession):
                 return f"{message}\n\n[Context]\n{context_json}"
 
             return message
+
+        # Internal event: Programmable call request
+        if event_type == EventType.PROGRAMMABLE_CALL_EVENT:
+            payload = event.get("payload", {})
+            call_id = payload.get("call_id", "")
+            method = payload.get("method", "")
+            instruction = payload.get("instruction")
+            kwargs = payload.get("kwargs", {})
+            return_schema = payload.get("return_schema")
+
+            # Build formatted message
+            parts = [f"[Programmable Call Request]"]
+            parts.append(f"Call ID: {call_id}")
+            parts.append(f"Method: {method}")
+
+            if instruction:
+                parts.append(f"\nInstruction:\n{instruction}")
+
+            if kwargs:
+                kwargs_json = json.dumps(kwargs, indent=2, ensure_ascii=False)
+                parts.append(f"\nArguments:\n{kwargs_json}")
+
+            if return_schema:
+                schema_json = json.dumps(return_schema, indent=2, ensure_ascii=False)
+                parts.append(f"\nExpected Return Schema:\n{schema_json}")
+
+            parts.append("\nPlease process this request and use the 'programmable_return' MCP tool to return the result.")
+
+            return "\n".join(parts)
 
         if event_type == EventType.SYSTEM_MESSAGE:
             formatted_event = {

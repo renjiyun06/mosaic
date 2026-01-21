@@ -73,6 +73,7 @@ class EventType(str, Enum):
     # Internal session events (not published to Event Mesh)
     USER_MESSAGE_EVENT = "user_message_event"
     TASK_COMPLETE_EVENT = "task_complete_event"  # Agent signals task completion
+    PROGRAMMABLE_CALL_EVENT = "programmable_call_event"  # SDK programmable call request
 
 
 class SessionStatus(str, Enum):
@@ -181,3 +182,7 @@ class MessageType(str, Enum):
     TOPIC_UPDATED = "topic_updated"
     RUNTIME_STATUS_CHANGED = "runtime_status_changed"
     GEOGEBRA_COMMAND = "geogebra_command"
+
+
+class Nil(str, Enum):
+    NIL = "nil"

@@ -531,6 +531,84 @@ class MosaicSession(ABC):
             f"Session type {self.__class__.__name__} does not support handle_tool_response"
         )
 
+    async def execute_programmable_call(
+        self,
+        call_id: str,
+        method: str,
+        instruction: Optional[str],
+        kwargs: Dict[str, Any],
+        return_schema: Optional[Dict[str, Any]],
+        command: 'ProgrammableCallCommand'
+    ):
+        """
+        Execute a programmable call in this session (only for agent sessions).
+
+        This method enables SDK-style programmatic invocation of the agent session,
+        allowing external systems to call the session with structured method calls
+        and receive structured responses.
+
+        Flow:
+        1. Store the command reference by call_id
+        2. Create and enqueue a programmable_call event to the session's event queue
+        3. Return immediately (don't wait for result)
+        4. The event loop will process the event and send it to the agent
+        5. The agent processes and calls programmable_return MCP tool
+        6. The MCP tool calls command.set_result() to resolve the future
+
+        Implementation Strategy:
+        - Store pending commands in a map: _pending_programmable_calls: Dict[str, ProgrammableCallCommand]
+        - MCP tool (programmable_return) will retrieve the command and call command.set_result()
+        - Timeout is handled by RuntimeManager layer (via asyncio.wait_for on command.future)
+
+        Schema Validation:
+        - If return_schema is provided, validation can be done in the MCP tool
+        - Validation errors should be set via command.set_exception()
+
+        Args:
+            call_id: Unique call identifier (UUID) for tracking this specific call
+            method: Semantic method identifier (e.g., "analyze_data", "extract_entities")
+            instruction: Optional detailed task description for complex multi-step tasks
+            kwargs: Keyword arguments for the call (must be JSON-serializable dict)
+            return_schema: Optional JSON Schema Draft 7 for return value validation
+            command: ProgrammableCallCommand instance (for MCP tool to set result)
+
+        Returns:
+            None: This method returns immediately. The MCP tool will set command.future result.
+
+        Raises:
+            NotImplementedError: If this session type doesn't support programmable calls
+            RuntimeInternalError: If execution fails or validation errors occur
+
+        Note:
+            Default implementation raises NotImplementedError.
+            Most session types (scheduler, email, etc.) don't support programmable calls.
+            Only agent sessions (like ClaudeCodeSession) that can process structured
+            requests and return structured responses should override this method.
+
+        Implementation Pattern:
+            async def execute_programmable_call(self, call_id, method, instruction, kwargs, return_schema, command):
+                # 1. Store command reference
+                self._pending_programmable_calls[call_id] = command
+
+                # 2. Enqueue programmable_call event (non-blocking)
+                event = {
+                    "event_type": EventType.PROGRAMMABLE_CALL_EVENT,
+                    "payload": {
+                        "call_id": call_id,
+                        "method": method,
+                        "instruction": instruction,
+                        "kwargs": kwargs,
+                        "return_schema": return_schema
+                    }
+                }
+                self.enqueue_event(event)
+
+                # 3. Return immediately (don't wait)
+        """
+        raise NotImplementedError(
+            f"Session type {self.__class__.__name__} does not support execute_programmable_call"
+        )
+
     # ========== State Properties ==========
 
     @property
