@@ -117,6 +117,7 @@ export default function CustomEdge({
         className="react-flow__edge-path"
         d={customPath}
         markerEnd={markerEnd}
+        fill="none"
       />
       {label && (
         <g>

@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback } from "react"
 import { useParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Loader2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Loader2, Download } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
 import { getLayoutedNodes } from "@/lib/layout"
@@ -17,10 +18,15 @@ import {
   MiniMap,
   applyNodeChanges,
   NodeChange,
-  EdgeTypes
+  EdgeTypes,
+  useReactFlow,
+  ReactFlowProvider,
+  getNodesBounds,
+  getViewportForBounds
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import CustomEdge from "@/components/custom-edge"
+import { toPng, toSvg } from "html-to-image"
 
 // Define custom edge types
 const edgeTypes: EdgeTypes = {
@@ -57,16 +63,19 @@ const getEventTypeLabel = (eventType: string): string => {
   return labels[eventType] || eventType
 }
 
-export default function TopologyPage() {
+function TopologyContent() {
   const params = useParams()
   const { token } = useAuth()
   const mosaicId = params.mosaicId as string
+  const { getNodes, getEdges, getViewport } = useReactFlow()
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [topologyNodes, setTopologyNodes] = useState<Node[]>([])
   const [topologyEdges, setTopologyEdges] = useState<Edge[]>([])
   const [isMobile, setIsMobile] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [exportFormat, setExportFormat] = useState<'svg' | 'png' | null>(null)
 
   // Detect mobile screen size
   useEffect(() => {
@@ -87,6 +96,145 @@ export default function TopologyPage() {
     },
     []
   )
+
+  // Export topology as PNG with high quality
+  const handleExportPNG = useCallback(async () => {
+    try {
+      setIsExporting(true)
+      setExportFormat('png')
+
+      // Wait a bit to ensure rendering is complete
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const viewportElement = document.querySelector('.react-flow__viewport') as HTMLElement
+
+      if (!viewportElement) {
+        console.error('Viewport element not found')
+        return
+      }
+
+      // Get current nodes to calculate bounds
+      const nodes = getNodes()
+
+      // Calculate the bounds of all nodes
+      const nodesBounds = getNodesBounds(nodes)
+
+      // Calculate dimensions with padding
+      const imageWidth = nodesBounds.width + 100
+      const imageHeight = nodesBounds.height + 100
+
+      // Get viewport transform to fit all nodes
+      const viewport = getViewportForBounds(
+        nodesBounds,
+        imageWidth,
+        imageHeight,
+        0.5, // min zoom
+        2,   // max zoom
+        0.1  // padding
+      )
+
+      // Use toPng for high-quality PNG export
+      const dataUrl = await toPng(viewportElement, {
+        backgroundColor: 'white',
+        quality: 0.95,
+        width: imageWidth,
+        height: imageHeight,
+        style: {
+          transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`
+        },
+        filter: (node: Element) => {
+          // Filter out controls and minimap
+          const classNames = node.className?.toString() || ''
+          return !classNames.includes('react-flow__controls') &&
+                 !classNames.includes('react-flow__minimap')
+        }
+      })
+
+      // Download the PNG
+      const link = document.createElement('a')
+      link.download = `topology-${mosaicId}.png`
+      link.href = dataUrl
+      link.click()
+
+      console.log('PNG export successful')
+    } catch (error) {
+      console.error('Failed to export topology as PNG:', error)
+      alert('PNG导出失败，请查看控制台了解详细信息')
+    } finally {
+      setIsExporting(false)
+      setExportFormat(null)
+    }
+  }, [mosaicId, getNodes])
+
+  // Export topology as SVG - simplified version
+  const handleExportSVG = useCallback(async () => {
+    try {
+      setIsExporting(true)
+      setExportFormat('svg')
+
+      // Wait a bit to ensure rendering is complete
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const viewportElement = document.querySelector('.react-flow__viewport') as HTMLElement
+
+      if (!viewportElement) {
+        console.error('Viewport element not found')
+        return
+      }
+
+      // Get current nodes to calculate bounds
+      const nodes = getNodes()
+
+      // Calculate the bounds of all nodes
+      const nodesBounds = getNodesBounds(nodes)
+
+      // Calculate dimensions with padding
+      const imageWidth = nodesBounds.width + 100
+      const imageHeight = nodesBounds.height + 100
+
+      // Get viewport transform to fit all nodes
+      const viewport = getViewportForBounds(
+        nodesBounds,
+        imageWidth,
+        imageHeight,
+        0.5, // min zoom
+        2,   // max zoom
+        0.1  // padding
+      )
+
+      console.log('Exporting SVG with html-to-image...')
+
+      // Export using html-to-image directly
+      const dataUrl = await toSvg(viewportElement, {
+        backgroundColor: 'white',
+        width: imageWidth,
+        height: imageHeight,
+        style: {
+          transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`
+        },
+        filter: (node: Element) => {
+          // Filter out controls and minimap
+          const classNames = node.className?.toString() || ''
+          return !classNames.includes('react-flow__controls') &&
+                 !classNames.includes('react-flow__minimap')
+        }
+      })
+
+      // Download the SVG
+      const link = document.createElement('a')
+      link.download = `topology-${mosaicId}.svg`
+      link.href = dataUrl
+      link.click()
+
+      console.log('SVG export successful')
+    } catch (error) {
+      console.error('Failed to export topology as SVG:', error)
+      alert('SVG导出失败，请查看控制台了解详细信息')
+    } finally {
+      setIsExporting(false)
+      setExportFormat(null)
+    }
+  }, [mosaicId, getNodes])
 
   // Load topology data from API
   useEffect(() => {
@@ -278,9 +426,33 @@ export default function TopologyPage() {
 
   return (
     <div className="flex flex-col h-full space-y-3 sm:space-y-4 md:space-y-6">
-      <div className="flex-shrink-0">
-        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">拓扑可视化</h1>
-        <p className="text-muted-foreground mt-1 text-sm sm:text-base">查看节点和连接关系</p>
+      <div className="flex-shrink-0 flex items-start justify-between">
+        <div>
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">拓扑可视化</h1>
+          <p className="text-muted-foreground mt-1 text-sm sm:text-base">查看节点和连接关系</p>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            onClick={handleExportSVG}
+            disabled={isExporting || loading}
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-2"
+          >
+            <Download className="h-4 w-4" />
+            {isExporting && exportFormat === 'svg' ? '导出中...' : '导出SVG'}
+          </Button>
+          <Button
+            onClick={handleExportPNG}
+            disabled={isExporting || loading}
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-2"
+          >
+            <Download className="h-4 w-4" />
+            {isExporting && exportFormat === 'png' ? '导出中...' : '导出PNG'}
+          </Button>
+        </div>
       </div>
 
       <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -325,5 +497,13 @@ export default function TopologyPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export default function TopologyPage() {
+  return (
+    <ReactFlowProvider>
+      <TopologyContent />
+    </ReactFlowProvider>
   )
 }
