@@ -30,6 +30,7 @@ async with MosaicSDK(
 - **特殊参数**：
   - `_instruction`：提供详细的执行指令（可选）
   - `_return_schema`：指定返回结果必须遵循的 JSON Schema，确保返回格式可预测（可选）
+  - `_timeout`：指定该调用的超时时间（单位：秒），默认为 60 秒（可选）
 
 ### 语义调用示例
 
@@ -62,6 +63,14 @@ result = await node.analyze_sentiment(
 )
 # 返回格式保证符合 schema，程序可以安全地访问字段
 print(f"情感: {result['sentiment']}, 分数: {result['score']}")
+
+# 示例4: 使用 _timeout 延长超时时间（适合耗时较长的任务）
+result = await node.write_short_story(
+    theme="未来世界的冒险",
+    style="科幻悬疑",
+    _timeout=180,  # 3分钟超时，适合生成长文本等耗时任务
+    _instruction="创作一篇800-1000字的短篇小说"
+)
 ```
 
 **核心特性：**
@@ -69,4 +78,5 @@ print(f"情感: {result['sentiment']}, 分数: {result['score']}")
 - **参数**传递具体数据
 - **_instruction** 参数（可选）：提供详细的执行指令
 - **_return_schema** 参数（可选）：指定返回结果必须遵循的 JSON Schema，确保返回数据结构可预测，便于程序处理
+- **_timeout** 参数（可选）：指定超时时间（单位：秒），默认 60 秒，适合调整耗时较长的任务
 - Node 理解语义并返回符合要求的结果

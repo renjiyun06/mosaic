@@ -317,6 +317,9 @@ class SessionizedNode:
             # Get _return_schema from kwargs and delete it from kwargs
             return_schema = kwargs.pop("_return_schema", None)
 
+            # Get _timeout from kwargs and delete it from kwargs
+            timeout = kwargs.pop("_timeout", 60)
+
             # Execute programmable call
             result = await self.programmable_api.execute(
                 mosaic_id=mosaic_id,
@@ -325,6 +328,7 @@ class SessionizedNode:
                 method=method_name,
                 instruction=instruction,
                 return_schema=return_schema,
+                timeout=timeout,
                 kwargs=kwargs
             )
 
