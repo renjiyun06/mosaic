@@ -2,12 +2,13 @@
 
 /**
  * Theme Context - Multi-theme switching system
- * Supports 5 themes: default, cyberpunk, glassmorphism, terminal, minimal
+ * Supports 11 themes: default, cyberpunk, glassmorphism, terminal, minimal,
+ * bright-blue, ocean, sunset, mint, lavender, vscode-light
  */
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 
-export type Theme = 'default' | 'cyberpunk' | 'glassmorphism' | 'terminal' | 'minimal'
+export type Theme = 'default' | 'cyberpunk' | 'glassmorphism' | 'terminal' | 'minimal' | 'bright-blue' | 'ocean' | 'sunset' | 'mint' | 'lavender' | 'vscode-light'
 
 interface ThemeContextType {
   theme: Theme
@@ -53,6 +54,42 @@ const THEMES = [
     name: '极简主义',
     description: '纯净简洁，专注内容',
     preview: '#64748B',
+  },
+  {
+    id: 'bright-blue' as Theme,
+    name: '明亮蓝',
+    description: '活力蓝色，清新明快',
+    preview: '#3B82F6',
+  },
+  {
+    id: 'ocean' as Theme,
+    name: '海洋',
+    description: '蓝绿色调，清新自然',
+    preview: '#06B6D4',
+  },
+  {
+    id: 'sunset' as Theme,
+    name: '日落',
+    description: '温暖橙色，温馨明快',
+    preview: '#F59E0B',
+  },
+  {
+    id: 'mint' as Theme,
+    name: '薄荷',
+    description: '薄荷绿色，清凉舒适',
+    preview: '#10B981',
+  },
+  {
+    id: 'lavender' as Theme,
+    name: '薰衣草',
+    description: '淡紫色调，柔和优雅',
+    preview: '#8B5CF6',
+  },
+  {
+    id: 'vscode-light' as Theme,
+    name: 'VS Code',
+    description: '科技青色，扁平现代',
+    preview: '#00BCD4',
   },
 ]
 
