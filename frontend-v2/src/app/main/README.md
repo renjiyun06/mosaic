@@ -792,6 +792,26 @@ NODE_TYPE_CONFIG: NodeTypeConfig[] = [
 
 ## 📝 更新历史
 
+### v1.4 (2026-01-22)
+**统一连接创建对话框**
+- ✨ 创建 `CreateConnectionDialog.tsx` - 单一表单对话框
+  - 替换多步骤选择流程（源节点选择 → 目标节点选择 → 配置面板）
+  - 源节点和目标节点横向并排选择（使用箭头图标分隔）
+  - Session Alignment 使用 3 个卡片式选择（类似 CreateNodeCard 风格）
+  - 实时显示当前选中策略的描述
+  - 固定高度的描述输入框（3 行，无原生滚动条）
+- 🎨 设计风格完全对齐 CreateNodeCard
+  - `rounded-3xl` 圆角
+  - 霓虹阴影 `shadow-[0_0_50px_rgba(34,211,238,0.4)]`
+  - 渐变光晕效果
+  - Framer Motion 动画
+- 🔧 InfiniteCanvas 状态简化
+  - 移除 `sourceSelectionOpen`、`targetSelectionOpen`、`connectionSourceNode`
+  - 添加 `createConnectionOpen` 统一管理
+  - 简化 `handleCreateConnection` 函数签名
+- 🗑️ 移除旧的多步骤对话框组件
+  - 保留 `TargetNodeSelectionDialog` 和 `ConnectionConfigPanel` 供未来使用
+
 ### v1.3 (2026-01-22)
 **画布连接和订阅管理功能 + 节点优化**
 - ✨ 实现拖拽创建连接功能（ReactFlow Handle）
