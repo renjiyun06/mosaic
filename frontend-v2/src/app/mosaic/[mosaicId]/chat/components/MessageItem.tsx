@@ -1,9 +1,14 @@
-import { useCallback, memo, useState } from "react"
-import { ChevronRight, ChevronDown, X } from "lucide-react"
+import { useCallback, memo, useState, useRef } from "react"
+import { ChevronRight, ChevronDown, X, Code2, FileText, Copy, Check } from "lucide-react"
 import { MessageRole, MessageType, type MessageOut } from "@/lib/types"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import { useTheme } from "@/contexts/theme-context"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
+import rehypeHighlight from "rehype-highlight"
+import rehypeRaw from "rehype-raw"
+import "highlight.js/styles/github-dark.css"
 
 interface ParsedMessage extends MessageOut {
   contentParsed: any
@@ -94,6 +99,8 @@ export const MessageItem = memo(function MessageItem({
 }: MessageItemProps) {
   const { theme } = useTheme()
   const [lightboxImage, setLightboxImage] = useState<string | null>(null)
+  const [showRaw, setShowRaw] = useState(false)
+  const [copiedCode, setCopiedCode] = useState<string | null>(null)
 
   // Don't render assistant_result messages (stats shown in header)
   if (msg.message_type === MessageType.ASSISTANT_RESULT) {
@@ -111,6 +118,17 @@ export const MessageItem = memo(function MessageItem({
   const handleToggle = useCallback(() => {
     onToggleCollapse(msg.message_id)
   }, [msg.message_id, onToggleCollapse])
+
+  // Handle code copy
+  const handleCopyCode = useCallback(async (code: string, blockId: string) => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopiedCode(blockId)
+      setTimeout(() => setCopiedCode(null), 2000)
+    } catch (error) {
+      console.error("Failed to copy code:", error)
+    }
+  }, [])
 
   // Get theme-specific classes for message bubble
   const getMessageBubbleClasses = () => {
@@ -160,17 +178,173 @@ export const MessageItem = memo(function MessageItem({
     return `${baseClasses} ${themeClasses} ${paddingClasses}`
   }
 
-  // Render message content with images
+  // Render message content with images and markdown
   const renderMessageContent = (content: string) => {
     const parts = parseMessageContent(content)
 
+    // Raw text mode - show original content
+    if (showRaw) {
+      return (
+        <div className="space-y-2">
+          {parts.map((part, index) => {
+            if (part.type === 'text') {
+              return (
+                <div key={index} className="whitespace-pre-wrap break-words font-mono text-xs bg-muted/30 p-2 rounded">
+                  {part.content}
+                </div>
+              )
+            } else {
+              return (
+                <div key={index} className="my-2">
+                  <Image
+                    src={part.content}
+                    alt="Uploaded image"
+                    width={300}
+                    height={300}
+                    className="rounded cursor-pointer hover:opacity-90 transition-opacity max-w-full h-auto"
+                    onClick={() => setLightboxImage(part.content)}
+                    unoptimized
+                  />
+                </div>
+              )
+            }
+          })}
+        </div>
+      )
+    }
+
+    // Markdown rendering mode
     return (
       <div className="space-y-2">
         {parts.map((part, index) => {
           if (part.type === 'text') {
             return (
-              <div key={index} className="whitespace-pre-wrap break-words">
-                {part.content}
+              <div key={index} className="markdown-content">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeHighlight, rehypeRaw]}
+                  components={{
+                    // Custom code block with copy button
+                    code({ node, inline, className, children, ...props }) {
+                      const match = /language-(\w+)/.exec(className || '')
+                      const language = match ? match[1] : ''
+                      const blockId = `${msg.message_id}-${index}-${language}`
+
+                      // Extract text content recursively
+                      const extractCodeText = (node: any): string => {
+                        if (typeof node === 'string') return node
+                        if (typeof node === 'number') return String(node)
+                        if (Array.isArray(node)) return node.map(extractCodeText).join('')
+                        if (node && typeof node === 'object' && node.props) {
+                          return extractCodeText(node.props.children)
+                        }
+                        return ''
+                      }
+
+                      const code = extractCodeText(children).replace(/\n$/, '')
+
+                      // More robust check for code blocks vs inline code
+                      // Code blocks: explicitly marked as !inline OR has a language class
+                      // Inline code: explicitly marked as inline OR no language class
+                      const isCodeBlock = inline === false || (inline !== true && className && /language-/.test(className))
+
+                      if (isCodeBlock && code) {
+                        const handleCopyCodeBlock = (e: React.MouseEvent) => {
+                          e.stopPropagation()
+                          e.preventDefault()
+
+                          // Try to extract text from the DOM element
+                          const button = e.currentTarget as HTMLElement
+                          const codeBlock = button.closest('.relative')?.querySelector('code')
+
+                          if (codeBlock) {
+                            const text = codeBlock.innerText || codeBlock.textContent || code
+                            handleCopyCode(text, blockId)
+                          } else {
+                            handleCopyCode(code, blockId)
+                          }
+                        }
+
+                        return (
+                          <div className="relative group my-2" data-code-block={blockId}>
+                            <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 bg-background/80 backdrop-blur hover:bg-background/90"
+                                onClick={handleCopyCodeBlock}
+                                title={copiedCode === blockId ? "Copied!" : "Copy code"}
+                              >
+                                {copiedCode === blockId ? (
+                                  <Check className="h-3.5 w-3.5" />
+                                ) : (
+                                  <Copy className="h-3.5 w-3.5" />
+                                )}
+                              </Button>
+                            </div>
+                            {language && (
+                              <div className="absolute left-3 top-2 text-xs text-muted-foreground opacity-60 z-10 pointer-events-none">
+                                {language}
+                              </div>
+                            )}
+                            <pre className={`${className} ${language ? 'pt-8' : ''}`}>
+                              <code className={className} {...props}>
+                                {children}
+                              </code>
+                            </pre>
+                          </div>
+                        )
+                      }
+
+                      // Inline code - prevent line breaks with stronger constraints
+                      return (
+                        <code
+                          className="inline-code-no-wrap"
+                          {...props}
+                        >
+                          {children}
+                        </code>
+                      )
+                    },
+                    // Custom styling for other elements (no copy functionality)
+                    p: ({ children }) => <p className="mb-2 leading-relaxed">{children}</p>,
+                    ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+                    ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+                    li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                    h1: ({ children }) => <h1 className="text-2xl font-bold mb-2 mt-4">{children}</h1>,
+                    h2: ({ children }) => <h2 className="text-xl font-bold mb-2 mt-3">{children}</h2>,
+                    h3: ({ children }) => <h3 className="text-lg font-bold mb-2 mt-2">{children}</h3>,
+                    h4: ({ children }) => <h4 className="text-base font-bold mb-2 mt-2">{children}</h4>,
+                    h5: ({ children }) => <h5 className="text-sm font-bold mb-2 mt-2">{children}</h5>,
+                    h6: ({ children }) => <h6 className="text-sm font-bold mb-2 mt-2">{children}</h6>,
+                    blockquote: ({ children }) => (
+                      <blockquote className="border-l-4 border-primary pl-4 italic my-2">{children}</blockquote>
+                    ),
+                    table: ({ children }) => (
+                      <div className="overflow-x-auto my-2">
+                        <table className="min-w-full border border-border">{children}</table>
+                      </div>
+                    ),
+                    th: ({ children }) => (
+                      <th className="border border-border px-3 py-2 bg-muted font-semibold text-left">{children}</th>
+                    ),
+                    td: ({ children }) => (
+                      <td className="border border-border px-3 py-2">{children}</td>
+                    ),
+                    a: ({ children, href }) => (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary hover:underline"
+                      >
+                        {children}
+                      </a>
+                    ),
+                  }}
+                >
+                  {part.content}
+                </ReactMarkdown>
               </div>
             )
           } else {
@@ -197,7 +371,25 @@ export const MessageItem = memo(function MessageItem({
     <div
       className={`flex ${isUser ? "justify-end" : "justify-start"} mb-3 sm:mb-4`}
     >
-      <div className={getMessageBubbleClasses()}>
+      <div className={`relative group ${getMessageBubbleClasses()}`}>
+        {/* Toggle raw/rendered view button - Only show for non-collapsible messages */}
+        {!isCollapsible && (
+          <div className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0 bg-background/90 backdrop-blur border shadow-sm"
+              onClick={() => setShowRaw(!showRaw)}
+              title={showRaw ? "Show rendered view" : "Show raw text"}
+            >
+              {showRaw ? (
+                <FileText className="h-3 w-3" />
+              ) : (
+                <Code2 className="h-3 w-3" />
+              )}
+            </Button>
+          </div>
+        )}
         {isThinking ? (
           <div>
             <div

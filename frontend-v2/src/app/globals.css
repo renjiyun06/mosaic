@@ -1047,4 +1047,197 @@
     width: 100% !important;
     height: 100% !important;
   }
+
+  /* ========================================
+     MARKDOWN CONTENT STYLES
+     ======================================== */
+
+  /* Markdown container */
+  .markdown-content {
+    @apply text-sm leading-relaxed;
+  }
+
+  /* Code blocks */
+  .markdown-content pre {
+    @apply my-2 overflow-x-auto rounded-md px-3 py-3 bg-muted/50;
+    max-width: 100%;
+    position: relative;
+  }
+
+  /* Code blocks with language labels need more top padding */
+  .markdown-content pre.pt-8 {
+    padding-top: 2rem !important; /* 32px to ensure language label doesn't overlap */
+  }
+
+  .markdown-content pre code {
+    @apply text-xs font-mono;
+    background: transparent !important;
+    padding: 0 !important;
+    display: block;
+  }
+
+  /* Inline code with MAXIMUM no-wrap enforcement */
+  .inline-code-no-wrap,
+  .markdown-content code:not(pre code) {
+    @apply bg-muted px-1.5 py-0.5 rounded text-xs font-mono;
+    /* Ultimate no-wrap solution */
+    display: inline !important;
+    white-space: pre !important; /* pre is stronger than nowrap */
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
+    word-wrap: normal !important;
+    hyphens: none !important;
+    text-wrap: nowrap !important;
+    flex-shrink: 0 !important;
+    flex-wrap: nowrap !important;
+    /* Force width to content */
+    min-width: fit-content !important;
+    width: max-content !important;
+    /* Handle overflow */
+    overflow: visible !important;
+    /* Reset any inherited properties */
+    line-height: inherit !important;
+    vertical-align: baseline !important;
+    position: relative !important;
+  }
+
+  /* Parent elements should wrap normally but respect inline code */
+  .markdown-content p,
+  .markdown-content li,
+  .markdown-content td,
+  .markdown-content th {
+    /* Allow text to wrap normally */
+    overflow-wrap: break-word;
+    word-break: normal;
+    /* But force inline-flex to prevent code breaking */
+    display: block;
+  }
+
+  /* Extra protection for inline code within elements */
+  .markdown-content p > code,
+  .markdown-content li > code,
+  .markdown-content td > code,
+  .markdown-content th > code,
+  .markdown-content span > code,
+  .markdown-content div > code {
+    display: inline !important;
+    white-space: pre !important;
+    word-break: keep-all !important;
+  }
+
+  /* If parent is flex, ensure inline code doesn't wrap */
+  .markdown-content .flex code:not(pre code),
+  .markdown-content [class*="flex"] code:not(pre code) {
+    flex-shrink: 0 !important;
+    white-space: pre !important;
+  }
+
+  /* But inline code should never break */
+  .markdown-content p .inline-code-no-wrap,
+  .markdown-content li .inline-code-no-wrap,
+  .markdown-content td .inline-code-no-wrap,
+  .markdown-content th .inline-code-no-wrap {
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+  }
+
+  /* Lists */
+  .markdown-content ul {
+    @apply list-disc list-inside mb-2 space-y-1;
+  }
+
+  .markdown-content ol {
+    @apply list-decimal list-inside mb-2 space-y-1;
+  }
+
+  .markdown-content li {
+    @apply leading-relaxed;
+  }
+
+  /* Headings */
+  .markdown-content h1 {
+    @apply text-2xl font-bold mb-2 mt-4;
+  }
+
+  .markdown-content h2 {
+    @apply text-xl font-bold mb-2 mt-3;
+  }
+
+  .markdown-content h3 {
+    @apply text-lg font-bold mb-2 mt-2;
+  }
+
+  .markdown-content h4 {
+    @apply text-base font-bold mb-2 mt-2;
+  }
+
+  /* Blockquotes */
+  .markdown-content blockquote {
+    @apply border-l-4 border-primary pl-4 italic my-2;
+  }
+
+  /* Tables */
+  .markdown-content table {
+    @apply min-w-full border border-border my-2;
+  }
+
+  .markdown-content th {
+    @apply border border-border px-3 py-2 bg-muted font-semibold text-left;
+  }
+
+  .markdown-content td {
+    @apply border border-border px-3 py-2;
+  }
+
+  /* Links */
+  .markdown-content a {
+    @apply text-primary hover:underline;
+  }
+
+  /* Paragraphs */
+  .markdown-content p {
+    @apply mb-2;
+  }
+
+  /* Horizontal rules */
+  .markdown-content hr {
+    @apply my-4 border-border;
+  }
+
+  /* Mobile optimization for code blocks */
+  @media (max-width: 640px) {
+    .markdown-content pre {
+      @apply text-xs;
+      max-width: calc(100vw - 6rem);
+    }
+
+    .markdown-content table {
+      @apply text-xs;
+    }
+  }
+
+  /* Highlight.js code block theme adaptation */
+  .hljs {
+    @apply bg-transparent;
+  }
+
+  /* Theme-specific code block styling */
+  [data-theme="cyberpunk"] .markdown-content pre {
+    @apply border border-primary/30;
+    box-shadow: 0 0 8px hsl(var(--primary) / 0.2);
+  }
+
+  [data-theme="glassmorphism"] .markdown-content pre {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(12px);
+    @apply border border-border/50;
+  }
+
+  [data-theme="terminal"] .markdown-content pre {
+    @apply bg-black/80 border border-primary/50 text-primary;
+  }
+
+  [data-theme="minimal"] .markdown-content pre {
+    @apply border-2 border-foreground/20;
+  }
 }
