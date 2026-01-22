@@ -1,17 +1,16 @@
 /**
  * Canvas Context Menu - Right-click menu for canvas
- * Provides quick actions like creating nodes, connections, showing connections, and toggling topology
+ * Provides quick actions like creating nodes, connections, and toggling topology
  */
 
 import { ReactNode } from "react"
 import * as ContextMenu from "@radix-ui/react-context-menu"
-import { Plus, Network, Eye, EyeOff, Link } from "lucide-react"
+import { Plus, Eye, EyeOff, Link } from "lucide-react"
 
 interface CanvasContextMenuProps {
   children: ReactNode
   onCreateNode: () => void
   onCreateConnection: () => void
-  onShowConnections: () => void
   showTopology: boolean
   onToggleTopology: () => void
 }
@@ -20,7 +19,6 @@ export function CanvasContextMenu({
   children,
   onCreateNode,
   onCreateConnection,
-  onShowConnections,
   showTopology,
   onToggleTopology,
 }: CanvasContextMenuProps) {
@@ -56,14 +54,6 @@ export function CanvasContextMenu({
           </ContextMenu.Item>
 
           <ContextMenu.Separator className="my-1 h-px bg-slate-700/50" />
-
-          <ContextMenu.Item
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-cyan-500/20 hover:text-cyan-300 outline-none cursor-pointer transition-colors"
-            onSelect={onShowConnections}
-          >
-            <Network className="h-4 w-4" />
-            Show Connections
-          </ContextMenu.Item>
 
           <ContextMenu.Item
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-cyan-500/20 hover:text-cyan-300 outline-none cursor-pointer transition-colors"

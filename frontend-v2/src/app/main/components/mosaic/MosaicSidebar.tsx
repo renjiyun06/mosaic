@@ -6,7 +6,6 @@ import { motion } from "framer-motion"
 import * as ContextMenu from "@radix-ui/react-context-menu"
 import * as Tooltip from "@radix-ui/react-tooltip"
 import {
-  Network,
   Plus,
   Circle,
   Edit,
@@ -38,11 +37,13 @@ export function MosaicSidebar({
 }: MosaicSidebarProps) {
   return (
     <Tooltip.Provider delayDuration={300}>
-      <div className="fixed left-0 top-0 bottom-0 w-20 bg-slate-950/90 backdrop-blur-xl border-r border-cyan-500/10 z-50">
+      <div className="fixed left-0 top-0 bottom-0 w-16 bg-gradient-to-b from-slate-950/95 via-slate-950/90 to-cyan-950/85 backdrop-blur-xl border-r border-cyan-500/20 shadow-[2px_0_30px_rgba(34,211,238,0.1)] z-50">
       <div className="flex flex-col items-center py-4 space-y-3">
-        {/* Logo / Home Icon */}
-        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-[0_0_30px_rgba(34,211,238,0.4)]">
-          <Network className="h-7 w-7 text-white" />
+        {/* Logo / Mosaic Text */}
+        <div className="py-2 relative">
+          <span className="font-mono font-bold text-xs tracking-wider bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent [text-shadow:0_0_20px_rgba(34,211,238,0.8)] drop-shadow-[0_0_15px_rgba(34,211,238,0.6)] drop-shadow-[0_0_25px_rgba(34,211,238,0.4)]">
+            MOSAIC
+          </span>
         </div>
 
         <div className="w-12 h-px bg-slate-800" />
@@ -61,7 +62,7 @@ export function MosaicSidebar({
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
                         className={cn(
-                          "relative w-14 h-14 rounded-xl cursor-pointer transition-all flex items-center justify-center",
+                          "relative w-12 h-12 rounded-xl cursor-pointer transition-all flex items-center justify-center",
                           currentMosaicId === mosaic.id
                             ? "bg-cyan-500/20 border-2 border-cyan-500 shadow-[0_0_20px_rgba(34,211,238,0.3)]"
                             : "bg-slate-800/50 border-2 border-transparent hover:border-cyan-500/30 hover:bg-slate-800/80"
@@ -70,7 +71,7 @@ export function MosaicSidebar({
                         {/* Mosaic First Letter */}
                         <span
                           className={cn(
-                            "font-bold text-xl font-mono",
+                            "font-bold text-lg font-mono",
                             currentMosaicId === mosaic.id ? "text-cyan-400" : "text-slate-400 group-hover:text-cyan-300"
                           )}
                         >
@@ -78,10 +79,10 @@ export function MosaicSidebar({
                         </span>
 
                         {/* Status Indicator */}
-                        <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-slate-950 flex items-center justify-center bg-slate-900">
+                        <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-slate-950 flex items-center justify-center bg-slate-900">
                           <Circle
                             className={cn(
-                              "h-2.5 w-2.5 fill-current",
+                              "h-2 w-2 fill-current",
                               mosaic.status === "running" ? "text-green-400 animate-pulse" : "text-slate-600"
                             )}
                           />
@@ -160,9 +161,9 @@ export function MosaicSidebar({
           onClick={onCreateNew}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="w-14 h-14 rounded-xl border-2 border-dashed border-slate-700 hover:border-cyan-500 cursor-pointer flex items-center justify-center transition-all group"
+          className="w-12 h-12 rounded-xl border-2 border-dashed border-slate-700 hover:border-cyan-500 cursor-pointer flex items-center justify-center transition-all group"
         >
-          <Plus className="h-6 w-6 text-slate-600 group-hover:text-cyan-400 transition-colors" />
+          <Plus className="h-5 w-5 text-slate-600 group-hover:text-cyan-400 transition-colors" />
         </motion.div>
       </div>
     </div>

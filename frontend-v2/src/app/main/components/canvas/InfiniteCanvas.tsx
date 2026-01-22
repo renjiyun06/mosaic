@@ -187,11 +187,10 @@ export function InfiniteCanvas() {
       />
 
       {/* Main Canvas Area - with left margin for sidebar */}
-      <div className="ml-20 h-full">
+      <div className="ml-16 h-full">
         <CanvasContextMenu
           onCreateNode={() => canvasState.setCreateNodeOpen(true)}
           onCreateConnection={handleCreateConnectionFromMenu}
-          onShowConnections={() => canvasState.setConnectionsSidebarOpen(true)}
           showTopology={canvasState.showTopology}
           onToggleTopology={canvasState.toggleTopology}
         >
@@ -207,6 +206,7 @@ export function InfiniteCanvas() {
             className="bg-slate-950"
             minZoom={0.2}
             maxZoom={1.5}
+            proOptions={{ hideAttribution: true }}
           >
             <Background
               variant={BackgroundVariant.Dots}
