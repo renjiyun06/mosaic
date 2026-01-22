@@ -153,7 +153,7 @@ export const MessageItem = memo(function MessageItem({
           themeClasses = "bg-foreground text-background border border-foreground"
           break
         default:
-          themeClasses = "bg-primary text-primary-foreground"
+          themeClasses = "bg-muted"
       }
     } else {
       // Assistant message bubble
