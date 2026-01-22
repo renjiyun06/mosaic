@@ -13,7 +13,12 @@ Mosaic SDK 的核心能力是**赋予 node 语义调用的能力**。
 ```python
 from mosaic.v2.sdk.client import MosaicSDK
 
-async with MosaicSDK(username="user", password="pass", base_url="http://localhost:8000") as sdk:
+async with MosaicSDK(
+    username="user",
+    password="pass",
+    base_url="http://localhost:8000",
+    auto_login=True
+) as sdk:
     async with sdk.get_mosaic("mosaic-name").get_node("node-id").connect() as node:
         # 语义调用 node
         result = await node.method_name(param1="value1", _instruction="具体指令")

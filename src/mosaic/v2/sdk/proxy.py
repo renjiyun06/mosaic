@@ -324,6 +324,7 @@ class SessionizedNode:
                 session_id=self.session_id,
                 method=method_name,
                 instruction=instruction,
+                return_schema=return_schema,
                 kwargs=kwargs
             )
 

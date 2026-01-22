@@ -2325,7 +2325,14 @@ class ClaudeCodeSession(MosaicSession):
                         "description": "The call ID from the programmable call request"
                     },
                     "result": {
-                        "description": "The result to return (can be any JSON-serializable value)"
+                        "type": "string",
+                        "description": (
+                            "The result to return as a JSON string. "
+                            "IMPORTANT: Must be a valid, compact JSON string without formatting whitespace. "
+                            "All special characters in field values must be properly escaped: "
+                            "quotes as \\\", newlines as \\n, tabs as \\t, backslashes as \\\\, etc. "
+                            "Example: '{\"status\":\"success\",\"message\":\"Line 1\\nLine 2\"}'"
+                        )
                     }
                 },
                 "required": ["call_id", "result"]
@@ -2374,21 +2381,63 @@ class ClaudeCodeSession(MosaicSession):
                         ]
                     }
 
-                # Schema validation if return_schema is provided
+                # Step 1: Parse JSON string to object
+                try:
+                    result_obj = json.loads(result)
+                    logger.debug(
+                        f"JSON parsing successful: session_id={self.session_id}, "
+                        f"call_id={call_id}, "
+                        f"result_obj={result_obj}"
+                    )
+                except json.JSONDecodeError as e:
+                    # JSON parsing failed - return error to agent for retry
+                    error_details = [
+                        "JSON Parsing Error:",
+                        f"- Message: {str(e)}",
+                        f"- Position: line {e.lineno}, column {e.colno}",
+                        "",
+                        "Your result must be a valid JSON string.",
+                        "Common issues:",
+                        "- Use double quotes (\") for strings, not single quotes (')",
+                        "- Escape special characters: \\\" for quotes, \\n for newlines, \\t for tabs, \\\\ for backslashes",
+                        "- Use json.dumps() to automatically handle escaping",
+                        "- Ensure the JSON is properly formatted",
+                        "",
+                        f"Your input:",
+                        result[:500] + ("..." if len(result) > 500 else ""),
+                        "",
+                        f"Please fix the JSON and call programmable_return again with the same call_id={call_id}"
+                    ]
+
+                    full_error = "\n".join(error_details)
+
+                    logger.warning(
+                        f"JSON parsing failed: session_id={self.session_id}, "
+                        f"call_id={call_id}, error={str(e)}"
+                    )
+
+                    # Don't set result, don't clean up - agent can retry
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": full_error
+                            }
+                        ]
+                    }
+
+                # Step 2: Schema validation if return_schema is provided
                 if command.return_schema:
                     try:
-                        jsonschema.validate(instance=result, schema=command.return_schema)
+                        jsonschema.validate(instance=result_obj, schema=command.return_schema)
                         logger.debug(
-                            f"Return value validation passed: session_id={self.session_id}, "
+                            f"Schema validation passed: session_id={self.session_id}, "
                             f"call_id={call_id}"
                         )
                     except JsonSchemaValidationError as e:
                         # Validation failed - return error to agent for retry
-                        error_msg = f"Return value validation failed: {e.message}"
-
-                        # Build detailed error message
                         error_details = [
-                            "Validation Error:",
+                            "Schema Validation Error:",
                             f"- Message: {e.message}",
                         ]
 
@@ -2403,15 +2452,15 @@ class ClaudeCodeSession(MosaicSession):
                         error_details.append(f"\nExpected Schema:")
                         error_details.append(json.dumps(command.return_schema, indent=2, ensure_ascii=False))
 
-                        error_details.append(f"\nYour Result:")
-                        error_details.append(json.dumps(result, indent=2, ensure_ascii=False))
+                        error_details.append(f"\nYour Parsed Result:")
+                        error_details.append(json.dumps(result_obj, indent=2, ensure_ascii=False))
 
-                        error_details.append(f"\nPlease fix the result and call programmable_return again with the same call_id={call_id}")
+                        error_details.append(f"\nPlease fix the result to match the schema and call programmable_return again with the same call_id={call_id}")
 
                         full_error = "\n".join(error_details)
 
                         logger.warning(
-                            f"Return value validation failed: session_id={self.session_id}, "
+                            f"Schema validation failed: session_id={self.session_id}, "
                             f"call_id={call_id}, error={e.message}"
                         )
 
@@ -2441,7 +2490,7 @@ class ClaudeCodeSession(MosaicSession):
                         }
 
                 # Validation passed (or no schema) - set the result
-                command.set_result(result)
+                command.set_result(result_obj)
 
                 # Clean up
                 self._pending_programmable_calls.pop(call_id, None)
