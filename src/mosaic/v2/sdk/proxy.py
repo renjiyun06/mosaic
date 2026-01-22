@@ -311,8 +311,11 @@ class SessionizedNode:
             mosaic_id = await self.node_proxy.mosaic_proxy._resolve_mosaic_id()
             node_id = self.node_proxy.node_id
 
-            # Build instruction from method name and kwargs
-            instruction = f"Call method '{method_name}' with the provided parameters"
+            # Get _instruction from kwargs and delete it from kwargs
+            instruction = kwargs.pop("_instruction", None)
+
+            # Get _return_schema from kwargs and delete it from kwargs
+            return_schema = kwargs.pop("_return_schema", None)
 
             # Execute programmable call
             result = await self.programmable_api.execute(
