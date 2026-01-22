@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Loader2, Download } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
+import { useTheme } from "@/contexts/theme-context"
 import { getLayoutedNodes } from "@/lib/layout"
 import type { TopologyOut } from "@/lib/types"
 import {
@@ -66,6 +67,7 @@ const getEventTypeLabel = (eventType: string): string => {
 function TopologyContent() {
   const params = useParams()
   const { token } = useAuth()
+  const { theme } = useTheme()
   const mosaicId = params.mosaicId as string
   const { getNodes, getEdges, getViewport } = useReactFlow()
 
@@ -254,6 +256,65 @@ function TopologyContent() {
         const nodeMinWidth = isMobile ? 80 : 100
         const nodeMinHeight = isMobile ? 38 : 45
 
+        // Get theme-specific node styles
+        const getNodeStyle = () => {
+          const baseStyle = {
+            padding: nodePadding,
+            borderRadius: 4,
+            minWidth: nodeMinWidth,
+            maxWidth: 200,
+            height: 'auto' as const,
+            minHeight: nodeMinHeight,
+            display: 'flex' as const,
+            alignItems: 'center' as const,
+            justifyContent: 'center' as const,
+          }
+
+          switch (theme) {
+            case 'cyberpunk':
+              return {
+                ...baseStyle,
+                background: 'hsl(var(--primary))',
+                color: 'hsl(var(--primary-foreground))',
+                border: '2px solid hsl(var(--primary))',
+                boxShadow: '0 0 16px hsl(var(--primary) / 0.4), inset 0 0 8px hsl(var(--primary) / 0.2)',
+              }
+            case 'glassmorphism':
+              return {
+                ...baseStyle,
+                background: 'hsl(var(--card) / 0.3)',
+                backdropFilter: 'blur(16px)',
+                color: 'hsl(var(--card-foreground))',
+                border: '1px solid hsl(var(--border) / 0.5)',
+                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+              }
+            case 'terminal':
+              return {
+                ...baseStyle,
+                background: '#000000',
+                color: '#00FF41',
+                border: '2px solid #00FF41',
+                fontFamily: 'monospace',
+                boxShadow: '0 0 8px #00FF41',
+              }
+            case 'minimal':
+              return {
+                ...baseStyle,
+                background: '#FFFFFF',
+                color: '#000000',
+                border: '2px solid #000000',
+                borderRadius: 2,
+              }
+            default:
+              return {
+                ...baseStyle,
+                background: '#3b82f6',
+                color: 'white',
+                border: '1px solid #222',
+              }
+          }
+        }
+
         // Convert nodes to React Flow nodes
         const initialNodes: Node[] = topology.nodes.map((node) => ({
           id: node.node_id,
@@ -290,20 +351,7 @@ function TopologyContent() {
           },
           position: { x: 0, y: 0 }, // Will be calculated by dagre
           draggable: true,
-          style: {
-            background: "#3b82f6",
-            color: "white",
-            border: "1px solid #222",
-            padding: nodePadding,
-            borderRadius: 4,
-            minWidth: nodeMinWidth,
-            maxWidth: 200,
-            height: 'auto',
-            minHeight: nodeMinHeight,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          },
+          style: getNodeStyle(),
         }))
 
         // Group subscriptions by (source, target) pair to calculate offsets
@@ -323,6 +371,76 @@ function TopologyContent() {
         const edgeLabelFontSize = isMobile ? 6 : 7
         const edgeStrokeWidth = isMobile ? 1.5 : 2
 
+        // Get theme-specific edge styles
+        const getEdgeStyle = (isSubscription: boolean) => {
+          const baseStyle = {
+            strokeDasharray: '5,5',
+            strokeWidth: edgeStrokeWidth,
+          }
+
+          switch (theme) {
+            case 'cyberpunk':
+              return {
+                ...baseStyle,
+                stroke: isSubscription ? 'hsl(var(--primary))' : '#6b7280',
+                filter: isSubscription ? 'drop-shadow(0 0 4px hsl(var(--primary)))' : 'none',
+              }
+            case 'glassmorphism':
+              return {
+                ...baseStyle,
+                stroke: isSubscription ? 'hsl(var(--primary) / 0.6)' : '#6b7280',
+                strokeWidth: edgeStrokeWidth * 1.2,
+              }
+            case 'terminal':
+              return {
+                ...baseStyle,
+                stroke: isSubscription ? '#00FF41' : '#00FF41',
+                filter: 'drop-shadow(0 0 2px #00FF41)',
+              }
+            case 'minimal':
+              return {
+                ...baseStyle,
+                stroke: isSubscription ? '#000000' : '#666666',
+                strokeDasharray: '0',
+              }
+            default:
+              return {
+                ...baseStyle,
+                stroke: isSubscription ? '#3b82f6' : '#6b7280',
+              }
+          }
+        }
+
+        const getEdgeMarkerColor = (isSubscription: boolean) => {
+          switch (theme) {
+            case 'cyberpunk':
+              return isSubscription ? 'hsl(var(--primary))' : '#6b7280'
+            case 'glassmorphism':
+              return isSubscription ? 'hsl(var(--primary) / 0.6)' : '#6b7280'
+            case 'terminal':
+              return '#00FF41'
+            case 'minimal':
+              return isSubscription ? '#000000' : '#666666'
+            default:
+              return isSubscription ? '#3b82f6' : '#6b7280'
+          }
+        }
+
+        const getEdgeLabelStyle = () => {
+          switch (theme) {
+            case 'cyberpunk':
+              return { fill: 'hsl(var(--primary))', fontWeight: 600, fontSize: edgeLabelFontSize }
+            case 'glassmorphism':
+              return { fill: 'hsl(var(--primary))', fontWeight: 600, fontSize: edgeLabelFontSize }
+            case 'terminal':
+              return { fill: '#00FF41', fontWeight: 600, fontSize: edgeLabelFontSize, fontFamily: 'monospace' }
+            case 'minimal':
+              return { fill: '#000000', fontWeight: 700, fontSize: edgeLabelFontSize }
+            default:
+              return { fill: '#3b82f6', fontWeight: 600, fontSize: edgeLabelFontSize }
+          }
+        }
+
         // Create edges from subscriptions with curvature offset for multiple edges
         const subscriptionEdges: Edge[] = []
         subscriptionGroups.forEach((subs, key) => {
@@ -338,23 +456,15 @@ function TopologyContent() {
               type: "custom",
               animated: true,
               label: getEventTypeLabel(sub.event_type),
-              labelStyle: {
-                fill: "#3b82f6",
-                fontWeight: 600,
-                fontSize: edgeLabelFontSize,
-              },
+              labelStyle: getEdgeLabelStyle(),
               labelBgStyle: {
                 fill: "#ffffff",
                 fillOpacity: 0.9,
               },
-              style: {
-                stroke: "#3b82f6",
-                strokeDasharray: "5,5",
-                strokeWidth: edgeStrokeWidth
-              },
+              style: getEdgeStyle(true),
               markerEnd: {
                 type: "arrowclosed" as const,
-                color: "#3b82f6",
+                color: getEdgeMarkerColor(true),
               },
               data: { offset },
             })
@@ -373,14 +483,10 @@ function TopologyContent() {
             target: conn.target_node_id,
             type: "custom",
             animated: true,
-            style: {
-              stroke: "#6b7280",
-              strokeDasharray: "5,5",
-              strokeWidth: edgeStrokeWidth
-            },
+            style: getEdgeStyle(false),
             markerEnd: {
               type: "arrowclosed" as const,
-              color: "#6b7280",
+              color: getEdgeMarkerColor(false),
             },
             data: { offset: 0 },
           }))
@@ -404,13 +510,13 @@ function TopologyContent() {
     }
 
     fetchTopology()
-  }, [mosaicId, token, isMobile])
+  }, [mosaicId, token, isMobile, theme])
 
   // Loading state
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[300px] sm:min-h-[400px]">
-        <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-muted-foreground icon-primary" />
       </div>
     )
   }
@@ -439,7 +545,7 @@ function TopologyContent() {
             size="sm"
             className="flex items-center gap-2"
           >
-            <Download className="h-4 w-4" />
+            <Download className="h-4 w-4 icon-primary" />
             {isExporting && exportFormat === 'svg' ? '导出中...' : '导出SVG'}
           </Button>
           <Button
@@ -449,7 +555,7 @@ function TopologyContent() {
             size="sm"
             className="flex items-center gap-2"
           >
-            <Download className="h-4 w-4" />
+            <Download className="h-4 w-4 icon-primary" />
             {isExporting && exportFormat === 'png' ? '导出中...' : '导出PNG'}
           </Button>
         </div>

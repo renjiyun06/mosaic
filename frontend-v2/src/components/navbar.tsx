@@ -20,6 +20,8 @@ import {
 } from "./ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar"
 import { useAuth } from "@/contexts/auth-context"
+import { useTheme } from "@/contexts/theme-context"
+import { ThemeSwitcher } from "@/components/theme-switcher"
 import { apiClient } from "@/lib/api"
 import type { MosaicOut } from "@/lib/types"
 
@@ -39,6 +41,7 @@ export function Navbar({
   const pathname = usePathname()
   const router = useRouter()
   const { user, logout } = useAuth()
+  const { theme } = useTheme()
   const [mosaics, setMosaics] = useState<MosaicOut[]>([])
 
   // Extract mosaic ID and current page from pathname
@@ -69,8 +72,31 @@ export function Navbar({
     await logout()
   }
 
+  // Theme-aware classes
+  const getNavbarClasses = () => {
+    const baseClasses = "sticky top-0 z-50 w-full border-b"
+
+    switch (theme) {
+      case 'cyberpunk':
+        return `${baseClasses} bg-background/80 backdrop-blur-xl border-primary/30 shadow-lg shadow-primary/10`
+      case 'glassmorphism':
+        return `${baseClasses} backdrop-blur-2xl bg-card/40 border-border/50`
+      case 'terminal':
+        return `${baseClasses} bg-background border-primary/40`
+      case 'minimal':
+        return `${baseClasses} bg-background border-border`
+      default:
+        return `${baseClasses} bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60`
+    }
+  }
+
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <header className={getNavbarClasses()}>
+      {/* Cyberpunk top glow line */}
+      {theme === 'cyberpunk' && (
+        <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
+      )}
+
       <div className="flex h-11 items-center">
         {/* Mobile: hamburger + logo */}
         <div className="flex items-center px-3 sm:px-6 lg:hidden flex-1">
@@ -81,14 +107,28 @@ export function Navbar({
               onClick={onMenuClick}
               className="-ml-2 mr-2"
             >
-              <Menu className="h-5 w-5" />
+              <Menu className="h-5 w-5 icon-primary" />
               <span className="sr-only">打开菜单</span>
             </Button>
           )}
           <div className="mr-4 flex items-center">
             <Link href="/" className="flex items-center space-x-2">
-              <Boxes className="h-5 w-5 sm:h-6 sm:w-6" />
-              <span className="font-bold text-sm sm:text-base">Mosaic</span>
+              <Boxes
+                className={`h-5 w-5 sm:h-6 sm:w-6 icon-primary ${
+                  theme === 'cyberpunk'
+                    ? 'text-primary drop-shadow-[0_0_8px_hsl(var(--primary)/0.6)]'
+                    : ''
+                }`}
+              />
+              <span className={`font-bold text-sm sm:text-base ${
+                theme === 'cyberpunk'
+                  ? 'bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent drop-shadow-[0_0_8px_hsl(var(--primary)/0.4)]'
+                  : theme === 'terminal'
+                  ? 'text-primary font-mono'
+                  : ''
+              }`}>
+                Mosaic
+              </span>
             </Link>
           </div>
         </div>
@@ -102,10 +142,22 @@ export function Navbar({
           }}
         >
           <Link href="/" className="flex items-center space-x-2 min-w-max">
-            <Boxes className="h-6 w-6 flex-shrink-0" />
+            <Boxes
+              className={`h-6 w-6 flex-shrink-0 icon-primary ${
+                theme === 'cyberpunk'
+                  ? 'text-primary drop-shadow-[0_0_8px_hsl(var(--primary)/0.6)]'
+                  : ''
+              }`}
+            />
             <span
               className={`font-bold transition-all duration-300 ${
                 sidebarCollapsed ? 'opacity-0 w-0' : 'opacity-100'
+              } ${
+                theme === 'cyberpunk'
+                  ? 'bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent'
+                  : theme === 'terminal'
+                  ? 'text-primary font-mono'
+                  : ''
               }`}
             >
               Mosaic
@@ -115,13 +167,16 @@ export function Navbar({
 
         {/* Right side content */}
         <div className="flex flex-1 items-center justify-end space-x-1 sm:space-x-2 px-3 sm:px-6 lg:px-6">
+          {/* Theme Switcher */}
+          <ThemeSwitcher />
+
           {currentMosaic && mosaics.length > 0 && (
             <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="gap-1 sm:gap-2 text-sm sm:text-base px-2 sm:px-4">
                   <span className="hidden sm:inline">{currentMosaic.name}</span>
                   <span className="sm:hidden truncate max-w-[120px]">{currentMosaic.name}</span>
-                  <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 opacity-50" />
+                  <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 opacity-50 icon-secondary" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-[180px] sm:w-[200px]">
@@ -169,13 +224,13 @@ export function Navbar({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
                   <Link href="/user/settings" className="cursor-pointer text-sm">
-                    <Settings className="mr-2 h-4 w-4" />
+                    <Settings className="mr-2 h-4 w-4 icon-secondary" />
                     <span>账户设置</span>
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-sm">
-                  <LogOut className="mr-2 h-4 w-4" />
+                  <LogOut className="mr-2 h-4 w-4 icon-destructive" />
                   <span>退出登录</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>

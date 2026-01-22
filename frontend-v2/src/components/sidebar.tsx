@@ -40,6 +40,7 @@ import {
 } from "./ui/tooltip"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
+import { useTheme } from "@/contexts/theme-context"
 import type { MosaicOut } from "@/lib/types"
 import { MosaicStatus } from "@/lib/types"
 
@@ -126,6 +127,7 @@ export function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname()
   const { token } = useAuth()
+  const { theme } = useTheme()
   const [mosaic, setMosaic] = useState<MosaicOut | null>(null)
   const [loading, setLoading] = useState(true)
   const [operating, setOperating] = useState(false)
@@ -257,6 +259,22 @@ export function Sidebar({
 
   const currentWidth = collapsed ? 55 : width
 
+  // Theme-aware sidebar classes
+  const getSidebarClasses = () => {
+    const baseClasses = "flex h-full w-full flex-col border-r overflow-y-auto overflow-x-hidden"
+
+    switch (theme) {
+      case 'cyberpunk':
+        return `${baseClasses} backdrop-blur-xl bg-background/80 border-primary/30`
+      case 'glassmorphism':
+        return `${baseClasses} glass-card border-border/50`
+      case 'terminal':
+        return `${baseClasses} bg-background border-primary/40`
+      default:
+        return `${baseClasses} bg-background border-border`
+    }
+  }
+
   return (
     <>
       {/* Wrapper for sidebar and close button */}
@@ -274,7 +292,7 @@ export function Sidebar({
             className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-[60] rounded-full bg-background border shadow-md p-2 hover:bg-accent transition-colors lg:hidden"
             aria-label="关闭侧边栏"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-4 w-4 icon-primary" />
           </button>
         )}
 
@@ -292,7 +310,7 @@ export function Sidebar({
 
 
         {/* Sidebar Content with overflow */}
-        <div className="flex h-full w-full flex-col border-r bg-background overflow-y-auto overflow-x-hidden">
+        <div className={getSidebarClasses()}>
           {/* Mosaic Status Card */}
           <div
             className={cn(
@@ -306,7 +324,7 @@ export function Sidebar({
             }}>
             {loading ? (
               <div className="flex items-center justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground icon-secondary" />
               </div>
             ) : mosaic ? (
             <div className="space-y-3">
@@ -327,12 +345,17 @@ export function Sidebar({
                 </div>
                 <Badge
                   variant={mosaic.status === MosaicStatus.RUNNING ? "default" : "secondary"}
-                  className="ml-2"
+                  className={cn(
+                    "ml-2",
+                    theme === 'cyberpunk' && mosaic.status === MosaicStatus.RUNNING &&
+                      "bg-status-running/20 border border-status-running/50 text-status-running shadow-[0_0_12px_hsl(var(--status-running)/0.5)]"
+                  )}
                 >
                   <Circle
                     className={cn(
-                      "mr-1 h-2 w-2 fill-current",
-                      mosaic.status === MosaicStatus.RUNNING && "text-green-500"
+                      "mr-1 h-2 w-2 fill-current icon-success",
+                      mosaic.status === MosaicStatus.RUNNING && "text-green-500",
+                      theme === 'cyberpunk' && mosaic.status === MosaicStatus.RUNNING && "status-pulse"
                     )}
                   />
                   {mosaic.status === MosaicStatus.RUNNING ? "运行中" : "已停止"}
@@ -349,12 +372,12 @@ export function Sidebar({
                 >
                   {operating ? (
                     <>
-                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin icon-primary" />
                       停止中...
                     </>
                   ) : (
                     <>
-                      <Square className="mr-1 h-3 w-3" />
+                      <Square className="mr-1 h-3 w-3 icon-destructive" />
                       停止 Mosaic
                     </>
                   )}
@@ -369,12 +392,12 @@ export function Sidebar({
                 >
                   {operating ? (
                     <>
-                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin icon-primary" />
                       启动中...
                     </>
                   ) : (
                     <>
-                      <Play className="mr-1 h-3 w-3" />
+                      <Play className="mr-1 h-3 w-3 icon-success" />
                       启动 Mosaic
                     </>
                   )}
@@ -412,10 +435,16 @@ export function Sidebar({
                   collapsed ? "justify-center" : "gap-3",
                   isActive
                     ? "bg-accent text-accent-foreground font-medium"
-                    : "text-muted-foreground"
+                    : "text-muted-foreground",
+                  theme === 'cyberpunk' && "hover:shadow-[0_0_16px_hsl(var(--primary)/0.3)] hover:border-l-2 hover:border-l-primary",
+                  theme === 'glassmorphism' && "hover:backdrop-blur-xl"
                 )}
               >
-                <item.icon className="h-4 w-4 shrink-0" />
+                <item.icon className={cn(
+                  "h-4 w-4 shrink-0",
+                  isActive ? "icon-primary" : "icon-secondary",
+                  theme === 'cyberpunk' && isActive && "text-primary drop-shadow-[0_0_6px_hsl(var(--primary)/0.6)]"
+                )} />
                 {!collapsed && <span>{item.title}</span>}
               </Link>
             )

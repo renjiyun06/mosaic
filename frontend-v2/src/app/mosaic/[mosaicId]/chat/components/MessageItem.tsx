@@ -3,6 +3,7 @@ import { ChevronRight, ChevronDown, X } from "lucide-react"
 import { MessageRole, MessageType, type MessageOut } from "@/lib/types"
 import Image from "next/image"
 import { Button } from "@/components/ui/button"
+import { useTheme } from "@/contexts/theme-context"
 
 interface ParsedMessage extends MessageOut {
   contentParsed: any
@@ -91,6 +92,7 @@ export const MessageItem = memo(function MessageItem({
   isCollapsed,
   onToggleCollapse,
 }: MessageItemProps) {
+  const { theme } = useTheme()
   const [lightboxImage, setLightboxImage] = useState<string | null>(null)
 
   // Don't render assistant_result messages (stats shown in header)
@@ -109,6 +111,54 @@ export const MessageItem = memo(function MessageItem({
   const handleToggle = useCallback(() => {
     onToggleCollapse(msg.message_id)
   }, [msg.message_id, onToggleCollapse])
+
+  // Get theme-specific classes for message bubble
+  const getMessageBubbleClasses = () => {
+    const baseClasses = "max-w-[85%] sm:max-w-[80%] md:max-w-[70%] rounded-lg"
+    const paddingClasses = isCollapsible ? "px-2 py-1" : "px-3 sm:px-4 py-2"
+
+    let themeClasses = ""
+
+    if (isUser) {
+      // User message bubble
+      switch (theme) {
+        case 'cyberpunk':
+          themeClasses = "bg-primary text-primary-foreground neon-border shadow-[0_0_12px_hsl(var(--primary)/0.4)]"
+          break
+        case 'glassmorphism':
+          themeClasses = "glass-card text-foreground border border-border/50"
+          break
+        case 'terminal':
+          themeClasses = "bg-black text-primary border border-primary font-mono"
+          break
+        case 'minimal':
+          themeClasses = "bg-foreground text-background border border-foreground"
+          break
+        default:
+          themeClasses = "bg-primary text-primary-foreground"
+      }
+    } else {
+      // Assistant message bubble
+      switch (theme) {
+        case 'cyberpunk':
+          themeClasses = "bg-card/50 border border-primary/30 shadow-[0_0_8px_hsl(var(--primary)/0.2)]"
+          break
+        case 'glassmorphism':
+          themeClasses = "glass-card border border-border/50"
+          break
+        case 'terminal':
+          themeClasses = "bg-black/80 border border-primary/50 font-mono"
+          break
+        case 'minimal':
+          themeClasses = "bg-background border-2 border-foreground/20"
+          break
+        default:
+          themeClasses = "bg-muted"
+      }
+    }
+
+    return `${baseClasses} ${themeClasses} ${paddingClasses}`
+  }
 
   // Render message content with images
   const renderMessageContent = (content: string) => {
@@ -147,11 +197,7 @@ export const MessageItem = memo(function MessageItem({
     <div
       className={`flex ${isUser ? "justify-end" : "justify-start"} mb-3 sm:mb-4`}
     >
-      <div
-        className={`max-w-[85%] sm:max-w-[80%] md:max-w-[70%] rounded-lg ${
-          isUser ? "bg-primary text-primary-foreground" : "bg-muted"
-        } ${isCollapsible ? "px-2 py-1" : "px-3 sm:px-4 py-2"}`}
-      >
+      <div className={getMessageBubbleClasses()}>
         {isThinking ? (
           <div>
             <div

@@ -1,20 +1,37 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { useTheme } from "@/contexts/theme-context"
 
 const Card = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div
-    ref={ref}
-    className={cn(
-      "rounded-xl border bg-card text-card-foreground shadow",
-      className
-    )}
-    {...props}
-  />
-))
+>(({ className, ...props }, ref) => {
+  const { theme } = useTheme()
+
+  const getThemeClasses = () => {
+    switch (theme) {
+      case 'cyberpunk':
+        return 'glass-card border-primary/30 shadow-[0_0_12px_hsl(var(--primary)/0.2)]'
+      case 'glassmorphism':
+        return 'glass-card border-border/50'
+      case 'terminal':
+        return 'bg-black/90 border-primary/50 shadow-[0_0_8px_hsl(var(--primary)/0.3)]'
+      case 'minimal':
+        return 'rounded-sm border-2 border-foreground/20 shadow-none'
+      default:
+        return 'rounded-xl border bg-card text-card-foreground shadow'
+    }
+  }
+
+  return (
+    <div
+      ref={ref}
+      className={cn(getThemeClasses(), className)}
+      {...props}
+    />
+  )
+})
 Card.displayName = "Card"
 
 const CardHeader = React.forwardRef<

@@ -1123,7 +1123,7 @@ export default function ChatPage() {
             className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
             onClick={(e) => e.stopPropagation()}
           >
-            <MoreVertical className="h-3.5 w-3.5" />
+            <MoreVertical className="h-3.5 w-3.5 icon-secondary" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
@@ -1215,9 +1215,9 @@ export default function ChatPage() {
                     className="shrink-0"
                   >
                     {isExpanded ? (
-                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground icon-secondary" />
                     ) : (
-                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground icon-secondary" />
                     )}
                   </button>
                 ) : (
@@ -1418,9 +1418,9 @@ export default function ChatPage() {
                         className="h-7 text-xs"
                       >
                         {isCopied ? (
-                          <Check className="h-3.5 w-3.5 mr-1.5 text-green-600" />
+                          <Check className="h-3.5 w-3.5 mr-1.5 text-green-600 icon-success" />
                         ) : (
-                          <Copy className="h-3.5 w-3.5 mr-1.5" />
+                          <Copy className="h-3.5 w-3.5 mr-1.5 icon-primary" />
                         )}
                         {isCopied ? '已复制' : '复制地址'}
                       </Button>
@@ -1439,18 +1439,18 @@ export default function ChatPage() {
                 {/* Cost */}
                 {currentStats.total_cost_usd !== undefined && (
                   <div className="flex items-center gap-1">
-                    <Coins className="h-3.5 w-3.5" />
+                    <Coins className="h-3.5 w-3.5 icon-secondary" />
                     <span className="font-mono">${currentStats.total_cost_usd.toFixed(2)}</span>
                   </div>
                 )}
                 {/* Tokens: Input / Output */}
                 {(currentStats.total_input_tokens !== undefined || currentStats.total_output_tokens !== undefined) && (
                   <div className="flex items-center gap-1">
-                    <BarChart3 className="h-3.5 w-3.5" />
+                    <BarChart3 className="h-3.5 w-3.5 icon-secondary" />
                     {currentStats.total_input_tokens !== undefined && (
                       <>
                         <span className="font-mono">{currentStats.total_input_tokens.toLocaleString()}</span>
-                        <ArrowUp className="h-3 w-3" />
+                        <ArrowUp className="h-3 w-3 icon-secondary" />
                       </>
                     )}
                     {currentStats.total_input_tokens !== undefined && currentStats.total_output_tokens !== undefined && (
@@ -1459,7 +1459,7 @@ export default function ChatPage() {
                     {currentStats.total_output_tokens !== undefined && (
                       <>
                         <span className="font-mono">{currentStats.total_output_tokens.toLocaleString()}</span>
-                        <ArrowDown className="h-3 w-3" />
+                        <ArrowDown className="h-3 w-3 icon-secondary" />
                       </>
                     )}
                   </div>
@@ -1513,7 +1513,7 @@ export default function ChatPage() {
             </div>
           ) : !isConnected ? (
             <div className="flex-1 flex items-center justify-center">
-              <Loader2 className="h-6 w-6 sm:h-7 sm:w-7 md:h-8 md:w-8 animate-spin" />
+              <Loader2 className="h-6 w-6 sm:h-7 sm:w-7 md:h-8 md:w-8 animate-spin icon-primary" />
               <span className="ml-2 text-sm sm:text-base">连接中...</span>
             </div>
           ) : (
@@ -1540,7 +1540,7 @@ export default function ChatPage() {
           !activeSessionId ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center text-muted-foreground">
-                <Folder className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 mx-auto mb-3 sm:mb-4 opacity-30" />
+                <Folder className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 mx-auto mb-3 sm:mb-4 opacity-30 icon-secondary" />
                 <p className="text-sm sm:text-base px-4">请选择一个会话查看工作区</p>
               </div>
             </div>
@@ -1605,7 +1605,7 @@ export default function ChatPage() {
                       className="h-6 w-6 p-0"
                       onClick={() => setSessionViewMode('tree')}
                     >
-                      <Network className="h-3.5 w-3.5" />
+                      <Network className={`h-3.5 w-3.5 ${sessionViewMode === 'tree' ? 'icon-foreground' : 'icon-secondary'}`} />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>树形视图</TooltipContent>
@@ -1618,7 +1618,7 @@ export default function ChatPage() {
                       className="h-6 w-6 p-0"
                       onClick={() => setSessionViewMode('grouped')}
                     >
-                      <FolderTree className="h-3.5 w-3.5" />
+                      <FolderTree className={`h-3.5 w-3.5 ${sessionViewMode === 'grouped' ? 'icon-foreground' : 'icon-secondary'}`} />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>节点分组</TooltipContent>
@@ -1637,9 +1637,9 @@ export default function ChatPage() {
                     onClick={() => setSessionListMode(mode => mode === 'detailed' ? 'compact' : 'detailed')}
                   >
                     {sessionListMode === 'detailed' ? (
-                      <LayoutList className="h-4 w-4" />
+                      <LayoutList className="h-4 w-4 icon-secondary" />
                     ) : (
-                      <List className="h-4 w-4" />
+                      <List className="h-4 w-4 icon-secondary" />
                     )}
                   </Button>
                 </TooltipTrigger>
@@ -1702,9 +1702,9 @@ export default function ChatPage() {
                   <div className="flex items-center gap-2">
                     {/* Expand/collapse icon */}
                     {node.expanded ? (
-                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground icon-secondary" />
                     ) : (
-                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground icon-secondary" />
                     )}
 
                     {/* Node name */}
@@ -1736,11 +1736,11 @@ export default function ChatPage() {
                               disabled={nodeControlLoading[node.node_id]}
                             >
                               {nodeControlLoading[node.node_id] ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                <Loader2 className="h-3.5 w-3.5 animate-spin icon-primary" />
                               ) : node.status === NodeStatus.RUNNING ? (
-                                <Square className="h-3.5 w-3.5 text-red-600" />
+                                <Square className="h-3.5 w-3.5 text-red-600 icon-destructive" />
                               ) : (
-                                <Play className="h-3.5 w-3.5 text-green-600" />
+                                <Play className="h-3.5 w-3.5 text-green-600 icon-success" />
                               )}
                             </Button>
                           </TooltipTrigger>
@@ -1764,7 +1764,7 @@ export default function ChatPage() {
                               }}
                               disabled={node.sessions.filter(s => s.status === SessionStatus.CLOSED).length === 0}
                             >
-                              <Archive className="h-3.5 w-3.5" />
+                              <Archive className="h-3.5 w-3.5 icon-secondary" />
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1787,7 +1787,7 @@ export default function ChatPage() {
                               }}
                               disabled={node.status !== NodeStatus.RUNNING || !isConnected}
                             >
-                              <Plus className="h-3.5 w-3.5" />
+                              <Plus className="h-3.5 w-3.5 icon-primary" />
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1989,7 +1989,7 @@ export default function ChatPage() {
             >
               {closing ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin icon-primary" />
                   关闭中...
                 </>
               ) : (
@@ -2047,7 +2047,7 @@ export default function ChatPage() {
             >
               {batchArchiving ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin icon-primary" />
                   归档中...
                 </>
               ) : (
@@ -2068,7 +2068,7 @@ export default function ChatPage() {
               className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-50 rounded-full bg-background border shadow-md p-2 hover:bg-accent transition-colors"
               aria-label="关闭会话列表"
             >
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-4 w-4 icon-primary" />
             </button>
 
           <SheetHeader className="h-11 border-b px-3 flex flex-row items-center justify-between shrink-0">
@@ -2098,9 +2098,9 @@ export default function ChatPage() {
                     onClick={() => setSessionListMode(mode => mode === 'detailed' ? 'compact' : 'detailed')}
                   >
                     {sessionListMode === 'detailed' ? (
-                      <LayoutList className="h-4 w-4" />
+                      <LayoutList className="h-4 w-4 icon-secondary" />
                     ) : (
-                      <List className="h-4 w-4" />
+                      <List className="h-4 w-4 icon-secondary" />
                     )}
                   </Button>
                 </TooltipTrigger>
@@ -2199,7 +2199,7 @@ export default function ChatPage() {
                                 }}
                                 disabled={node.sessions.filter(s => s.status === SessionStatus.CLOSED).length === 0}
                               >
-                                <Archive className="h-3.5 w-3.5" />
+                                <Archive className="h-3.5 w-3.5 icon-secondary" />
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
@@ -2223,7 +2223,7 @@ export default function ChatPage() {
                                 }}
                                 disabled={node.status !== NodeStatus.RUNNING || !isConnected}
                               >
-                                <Plus className="h-3.5 w-3.5" />
+                                <Plus className="h-3.5 w-3.5 icon-primary" />
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
