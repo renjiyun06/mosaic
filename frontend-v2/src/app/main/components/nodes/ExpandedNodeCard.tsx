@@ -32,6 +32,7 @@ import { SessionStatus, RuntimeStatus, MessageType, type SessionOut, type Messag
 import { useWebSocket } from "@/contexts/websocket-context"
 import type { WSMessage } from "@/contexts/websocket-context"
 import { useVoiceInput } from "@/hooks/use-voice-input"
+import { useSoundEffects } from "../../hooks/useSoundEffects"
 import { NodeSettingsMenu } from "./NodeSettingsMenu"
 import { MessageBubble } from "./MessageBubble"
 
@@ -80,6 +81,7 @@ const CircularProgress = ({ percentage }: { percentage: number }) => {
 
 export function ExpandedNodeCard({ data, selected }: NodeProps) {
   const { isConnected, sendMessage: wsSendMessage, interrupt, subscribe } = useWebSocket()
+  const { playMessageSent, playButtonClick } = useSoundEffects()
 
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [inputMessage, setInputMessage] = useState("")
@@ -479,6 +481,10 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
   const handleSendMessage = () => {
     if (inputMessage.trim() && selectedSession?.status === SessionStatus.ACTIVE && selectedSessionId) {
       console.log('[ExpandedNodeCard] Sending message:', inputMessage)
+
+      // Play cyberpunk whoosh sound
+      playMessageSent()
+
       wsSendMessage(selectedSessionId, inputMessage)
       setInputMessage("")
 
@@ -498,6 +504,9 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
 
   // Smart button handler - voice/send/stop based on state
   const handleSmartButtonClick = async () => {
+    // Play button click sound
+    playButtonClick()
+
     // Priority 1: Interrupt assistant if busy
     if (selectedSession?.runtime_status === RuntimeStatus.BUSY) {
       if (selectedSessionId) {
@@ -941,6 +950,8 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                         className={cn(
                           "h-8 w-8 rounded-lg border transition-all duration-200",
                           "flex items-center justify-center cursor-pointer",
+                          // Active state: scale down + cyan neon pulse (cyberpunk feedback)
+                          "active:scale-95 active:shadow-[0_0_30px_rgba(34,211,238,0.8)]",
                           // Busy state (interrupt)
                           selectedSession?.runtime_status === RuntimeStatus.BUSY &&
                             "bg-red-500/20 border-red-400/30 hover:bg-red-500/30 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)]",
