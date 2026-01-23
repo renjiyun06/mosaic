@@ -33,46 +33,46 @@ interface MessageBubbleProps {
   isCollapsed?: boolean
 }
 
-// Message type icon configuration (Cyberpunk style)
+// Message type icon configuration (Cyberpunk style - enhanced visibility)
 const MESSAGE_ICON_CONFIG = {
   [MessageType.ASSISTANT_THINKING]: {
     Icon: Brain,
     color: "text-cyan-400",
-    bgColor: "bg-cyan-500/10",
-    borderColor: "border-cyan-400/20",
-    glowColor: "shadow-[0_0_12px_rgba(34,211,238,0.3)]",
+    bgColor: "bg-cyan-500/15",
+    borderColor: "border-cyan-400/30",
+    glowColor: "shadow-[0_0_20px_rgba(34,211,238,0.4)]",
     label: "Thinking...",
   },
   [MessageType.SYSTEM_MESSAGE]: {
     Icon: Bell,
-    color: "text-magenta-400",
-    bgColor: "bg-magenta-500/10",
-    borderColor: "border-magenta-400/20",
-    glowColor: "shadow-[0_0_12px_rgba(255,0,255,0.3)]",
+    color: "text-yellow-400",
+    bgColor: "bg-yellow-500/40",
+    borderColor: "border-yellow-400/50",
+    glowColor: "shadow-[0_0_20px_rgba(250,204,21,0.4)]",
     label: "System",
   },
   [MessageType.ASSISTANT_TOOL_USE]: {
     Icon: Wrench,
     color: "text-green-400",
-    bgColor: "bg-green-500/10",
-    borderColor: "border-green-400/20",
-    glowColor: "shadow-[0_0_12px_rgba(0,255,0,0.3)]",
+    bgColor: "bg-green-500/15",
+    borderColor: "border-green-400/30",
+    glowColor: "shadow-[0_0_20px_rgba(0,255,0,0.4)]",
     label: (toolName?: string) => toolName || "Tool",
   },
   [MessageType.ASSISTANT_TOOL_OUTPUT]: {
     Icon: FileOutput,
     color: "text-cyan-300",
-    bgColor: "bg-cyan-500/10",
-    borderColor: "border-cyan-400/20",
-    glowColor: "shadow-[0_0_12px_rgba(34,211,238,0.3)]",
+    bgColor: "bg-cyan-500/15",
+    borderColor: "border-cyan-400/30",
+    glowColor: "shadow-[0_0_20px_rgba(34,211,238,0.4)]",
     label: (toolName?: string) => `${toolName || "Tool"} Output`,
   },
   [MessageType.ASSISTANT_PRE_COMPACT]: {
     Icon: Minimize2,
     color: "text-yellow-400",
-    bgColor: "bg-yellow-500/10",
-    borderColor: "border-yellow-400/20",
-    glowColor: "shadow-[0_0_12px_rgba(250,204,21,0.3)]",
+    bgColor: "bg-yellow-500/15",
+    borderColor: "border-yellow-400/30",
+    glowColor: "shadow-[0_0_20px_rgba(250,204,21,0.4)]",
     label: "Compacting...",
   },
 }
@@ -147,7 +147,7 @@ export function MessageBubble({ message, onToggleCollapse, isCollapsed = false }
     typeof iconConfig.label === "function" ? iconConfig.label(toolName) : iconConfig.label
 
   if (isCollapsed) {
-    // Collapsed state: compact view (no border, subtle background)
+    // Collapsed state: compact view with subtle border (no glow - intentionally de-emphasized)
     return (
       <div className="nodrag flex justify-start">
         <motion.div
@@ -155,14 +155,15 @@ export function MessageBubble({ message, onToggleCollapse, isCollapsed = false }
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.15 }}
           className={cn(
-            "group flex items-center gap-2 rounded-lg px-3 py-1.5",
+            "group flex items-center gap-2 rounded-lg px-3 py-1.5 border",
             "transition-all duration-200",
-            // UX: No border for system messages (visual hierarchy)
+            // Subtle styling: background + border (no glow - de-emphasized)
             iconConfig.bgColor,
+            iconConfig.borderColor,
             // UX: Cursor pointer on clickable
             "cursor-pointer",
-            // UX: Subtle hover feedback
-            "hover:bg-opacity-20"
+            // UX: Enhanced background on hover
+            "hover:bg-opacity-30"
           )}
           onClick={handleToggle}
           role="button"
@@ -191,7 +192,7 @@ export function MessageBubble({ message, onToggleCollapse, isCollapsed = false }
     )
   }
 
-  // Expanded state: full content (no border, subtle background)
+  // Expanded state: full content with subtle border (no glow - intentionally de-emphasized)
   return (
     <div className="nodrag flex justify-start">
       <motion.div
@@ -199,9 +200,10 @@ export function MessageBubble({ message, onToggleCollapse, isCollapsed = false }
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.15 }}
         className={cn(
-          "rounded-lg w-full",
-          // UX: No border for system messages, only subtle background
-          iconConfig.bgColor
+          "rounded-lg w-full border",
+          // Subtle styling: background + border (no glow - de-emphasized)
+          iconConfig.bgColor,
+          iconConfig.borderColor
         )}
       >
       {/* Header (clickable to collapse) */}
@@ -241,31 +243,31 @@ export function MessageBubble({ message, onToggleCollapse, isCollapsed = false }
       <div className="px-3 py-2 select-text cursor-text">
         {message.message_type === MessageType.ASSISTANT_TOOL_USE ? (
           // Tool use: show JSON formatted
-          <pre className="text-xs font-mono text-slate-400 whitespace-pre-wrap break-words leading-relaxed overflow-x-auto">
+          <pre className="text-xs font-mono text-slate-200 whitespace-pre-wrap break-words leading-relaxed overflow-x-auto">
             {JSON.stringify(message.contentParsed?.tool_input, null, 2)}
           </pre>
         ) : message.message_type === MessageType.ASSISTANT_TOOL_OUTPUT ? (
           // Tool output: handle null/empty
-          <div className="text-xs font-mono text-slate-400 whitespace-pre-wrap break-words leading-relaxed">
+          <div className="text-xs font-mono text-slate-200 whitespace-pre-wrap break-words leading-relaxed">
             {(() => {
               const output = message.contentParsed?.tool_output
               if (output === undefined || output === null) {
-                return <span className="text-slate-500 italic">Tool executed, no output</span>
+                return <span className="text-slate-400 italic">Tool executed, no output</span>
               }
               if (typeof output === "string") {
-                return output.trim() || <span className="text-slate-500 italic">Empty string</span>
+                return output.trim() || <span className="text-slate-400 italic">Empty string</span>
               }
               return <pre className="overflow-x-auto">{JSON.stringify(output, null, 2)}</pre>
             })()}
           </div>
         ) : message.message_type === MessageType.ASSISTANT_PRE_COMPACT ? (
           // Pre-compact: info message
-          <p className="text-xs text-slate-500 italic">
+          <p className="text-xs text-slate-300 italic">
             Session context will be compacted to save tokens
           </p>
         ) : (
-          // Default: message content
-          <p className="text-xs font-mono text-slate-400 whitespace-pre-wrap break-words leading-relaxed">
+          // Default: message content (includes system messages)
+          <p className="text-xs font-mono text-slate-200 whitespace-pre-wrap break-words leading-relaxed">
             {messageContent}
           </p>
         )}
