@@ -524,13 +524,13 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
 
   return (
     <div className="flex h-[600px]" style={{ transformOrigin: "center" }}>
-      {/* Left: Chat Area (900px) */}
+      {/* Left: Chat Area (1000px - increased for better spacing) */}
       <motion.div
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ type: "spring", damping: 20, stiffness: 200 }}
         className={cn(
-          "group relative flex h-[600px] w-[900px] flex-col overflow-hidden rounded-3xl backdrop-blur-2xl transition-all",
+          "group relative flex h-[600px] w-[1000px] flex-col overflow-hidden rounded-3xl backdrop-blur-2xl transition-all",
           // Conditional border: remove right border when workspace expanded
           workspaceExpanded ? "rounded-r-none border-2 border-r-0" : "border-2",
           selected
@@ -669,24 +669,32 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                         : "border-white/10 bg-white/5 hover:border-cyan-400/30 hover:bg-white/10"
                     )}
                   >
-                    {/* Simplified: Status dot + Topic + Menu */}
+                    {/* Fixed layout: Status dot + Topic (truncated) + Menu button (fixed space) */}
                     <div className="flex items-center gap-2">
+                      {/* Status indicator - fixed size */}
                       <Circle className={cn("h-2 w-2 shrink-0", statusColor)} />
-                      <span
-                        className={cn(
-                          "flex-1 truncate text-xs font-medium",
-                          isSelected ? "text-cyan-300" : "text-white"
-                        )}
-                        title={session.topic || session.session_id}
-                      >
-                        {session.topic || session.session_id.slice(0, 8)}
-                      </span>
+
+                      {/* Topic text - truncate with min-w-0 fix */}
+                      <div className="min-w-0 flex-1">
+                        <span
+                          className={cn(
+                            "block truncate text-xs font-medium",
+                            isSelected ? "text-cyan-300" : "text-white"
+                          )}
+                          title={session.topic || session.session_id}
+                        >
+                          {session.topic || session.session_id.slice(0, 8)}
+                        </span>
+                      </div>
+
+                      {/* Menu button - fixed space (20px width) */}
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
                           console.log("Menu for", session.session_id)
                         }}
-                        className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                        className="shrink-0 w-5 h-5 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
+                        aria-label="Session menu"
                       >
                         <MoreVertical className="h-3.5 w-3.5 text-slate-400 hover:text-cyan-300" />
                       </button>
