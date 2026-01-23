@@ -174,17 +174,179 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
     []
   )
 
+  // Load sessions for this node
+  const loadSessions = useCallback(async () => {
+    if (!data.mosaicId) {
+      console.warn('[ExpandedNodeCard] mosaicId not available')
+      return
+    }
+
+    try {
+      setLoadingSessions(true)
+      const response = await apiClient.listSessions(data.mosaicId, undefined, {
+        page: 1,
+        page_size: 1000,
+      })
+
+      // Filter sessions for this node (active + closed only)
+      const nodeSessions = response.items.filter(
+        (s) =>
+          s.node_id === data.id &&
+          (s.status === SessionStatus.ACTIVE || s.status === SessionStatus.CLOSED)
+      )
+
+      // Sort by created_at (newest first)
+      nodeSessions.sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
+
+      setSessions(nodeSessions)
+      console.log('[ExpandedNodeCard] Loaded sessions:', nodeSessions.length)
+    } catch (error) {
+      console.error('[ExpandedNodeCard] Failed to load sessions:', error)
+    } finally {
+      setLoadingSessions(false)
+    }
+  }, [data.mosaicId, data.id])
+
+  // Toggle message collapse state
+  const toggleCollapse = useCallback((messageId: string) => {
+    setCollapsedMessages((prev) => {
+      const next = new Set(prev)
+      if (next.has(messageId)) {
+        next.delete(messageId)
+      } else {
+        next.add(messageId)
+      }
+      return next
+    })
+  }, [])
+
+  // Load messages for selected session
+  const loadMessages = useCallback(async (sessionId: string) => {
+    if (!data.mosaicId) {
+      console.warn('[ExpandedNodeCard] mosaicId not available')
+      return
+    }
+
+    try {
+      setLoadingMessages(true)
+      const response = await apiClient.listMessages(data.mosaicId, {
+        nodeId: data.id,
+        sessionId,
+        page: 1,
+        pageSize: 9999,
+      })
+
+      // Parse JSON payload
+      const parsed: ParsedMessage[] = response.items.map((msg) => ({
+        ...msg,
+        contentParsed:
+          typeof msg.payload === 'string' ? JSON.parse(msg.payload) : msg.payload,
+      }))
+
+      setMessages(parsed)
+
+      // Update max sequence number from loaded messages
+      if (parsed.length > 0) {
+        const maxSeq = Math.max(...parsed.map((msg) => msg.sequence))
+        maxSequenceRef.current = maxSeq
+        console.log('[ExpandedNodeCard] Loaded messages, max sequence:', maxSeq)
+      } else {
+        maxSequenceRef.current = 0
+      }
+
+      // Auto-collapse: thinking, system, tool use/output, pre_compact
+      const collapsibleIds = parsed
+        .filter(
+          (msg) =>
+            msg.message_type === MessageType.ASSISTANT_THINKING ||
+            msg.message_type === MessageType.SYSTEM_MESSAGE ||
+            msg.message_type === MessageType.ASSISTANT_TOOL_USE ||
+            msg.message_type === MessageType.ASSISTANT_TOOL_OUTPUT ||
+            msg.message_type === MessageType.ASSISTANT_PRE_COMPACT
+        )
+        .map((msg) => msg.message_id)
+
+      setCollapsedMessages(new Set(collapsibleIds))
+
+      // Extract session stats from the last assistant_result message
+      const lastResult = [...parsed]
+        .reverse()
+        .find((msg) => msg.message_type === MessageType.ASSISTANT_RESULT)
+
+      if (lastResult && lastResult.contentParsed) {
+        const stats = {
+          total_cost_usd: lastResult.contentParsed.total_cost_usd,
+          total_input_tokens: lastResult.contentParsed.total_input_tokens,
+          total_output_tokens: lastResult.contentParsed.total_output_tokens,
+          context_usage: lastResult.contentParsed.context_usage,
+          context_percentage: lastResult.contentParsed.context_percentage,
+        }
+        setSessionStats(stats)
+        console.log('[ExpandedNodeCard] Loaded stats:', stats)
+      } else {
+        setSessionStats(null)
+      }
+
+      console.log('[ExpandedNodeCard] Loaded messages:', parsed.length)
+
+      // Scroll to bottom after loading messages
+      requestAnimationFrame(() => {
+        if (messageListRef.current) {
+          messageListRef.current.scrollTop = messageListRef.current.scrollHeight
+        }
+      })
+    } catch (error) {
+      console.error('[ExpandedNodeCard] Failed to load messages:', error)
+    } finally {
+      setLoadingMessages(false)
+    }
+  }, [data.mosaicId, data.id])
+
   // Load sessions when component mounts
   useEffect(() => {
     loadSessions()
-  }, [data.id, data.mosaicId])
+  }, [data.id, data.mosaicId, loadSessions])
 
   // Load messages when session changes
   useEffect(() => {
     if (selectedSessionId && data.mosaicId) {
       loadMessages(selectedSessionId)
     }
-  }, [selectedSessionId, data.id, data.mosaicId])
+  }, [selectedSessionId, data.id, data.mosaicId, loadMessages])
+
+  // Global notification listener - Listen for session lifecycle events
+  useEffect(() => {
+    const unsubscribe = subscribe('*', (message) => {
+      // Check if it's an error message
+      if ('type' in message && message.type === 'error') {
+        return
+      }
+
+      const wsMessage = message as WSMessage
+
+      // Only handle notification messages
+      if (wsMessage.role !== 'notification') {
+        return
+      }
+
+      console.log('[ExpandedNodeCard] Received global notification:', wsMessage.message_type)
+
+      // Refresh session list on session lifecycle events
+      // Note: session_started/session_ended may not have node_id field,
+      // so we refresh all sessions and filter by node_id in loadSessions()
+      if (wsMessage.message_type === 'session_started' ||
+          wsMessage.message_type === 'session_ended') {
+        console.log('[ExpandedNodeCard] Refreshing sessions due to session lifecycle event')
+        loadSessions()
+      }
+    })
+
+    return () => {
+      unsubscribe()
+    }
+  }, [subscribe, data.id, loadSessions])
 
   // WebSocket subscription for real-time messages
   useEffect(() => {
@@ -304,7 +466,7 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
     return () => {
       unsubscribe()
     }
-  }, [selectedSessionId, subscribe, data.mosaicId, data.id])
+  }, [selectedSessionId, subscribe, data.mosaicId, data.id, loadMessages, playResultReceived])
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -377,135 +539,56 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
     }
   }, [workspaceExpanded, data.mosaicId, data.id])
 
-  // Load sessions for this node
-  const loadSessions = async () => {
-    if (!data.mosaicId) {
-      console.warn('[ExpandedNodeCard] mosaicId not available')
-      return
-    }
+  // When newlyCreatedSessionId is set, refresh session list and auto-select
+  useEffect(() => {
+    if (data.newlyCreatedSessionId) {
+      console.log('[ExpandedNodeCard] Detected newlyCreatedSessionId:', data.newlyCreatedSessionId)
+      console.log('[ExpandedNodeCard] Refreshing session list to include new session...')
 
-    try {
-      setLoadingSessions(true)
-      const response = await apiClient.listSessions(data.mosaicId, undefined, {
-        page: 1,
-        page_size: 1000,
-      })
+      // Refresh session list and then select the new session
+      const refreshAndSelect = async () => {
+        try {
+          // Wait for sessions to be loaded
+          await loadSessions()
 
-      // Filter sessions for this node (active + closed only)
-      const nodeSessions = response.items.filter(
-        (s) =>
-          s.node_id === data.id &&
-          (s.status === SessionStatus.ACTIVE || s.status === SessionStatus.CLOSED)
-      )
+          console.log('[ExpandedNodeCard] Sessions refreshed, checking for new session...')
 
-      // Sort by created_at (newest first)
-      nodeSessions.sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      )
+          // Small delay to ensure state is updated
+          await new Promise(resolve => setTimeout(resolve, 100))
 
-      setSessions(nodeSessions)
-      console.log('[ExpandedNodeCard] Loaded sessions:', nodeSessions.length)
-    } catch (error) {
-      console.error('[ExpandedNodeCard] Failed to load sessions:', error)
-    } finally {
-      setLoadingSessions(false)
-    }
-  }
+          // Re-fetch sessions from API to ensure we have the latest data
+          if (!data.mosaicId) return
 
-  // Toggle message collapse state
-  const toggleCollapse = useCallback((messageId: string) => {
-    setCollapsedMessages((prev) => {
-      const next = new Set(prev)
-      if (next.has(messageId)) {
-        next.delete(messageId)
-      } else {
-        next.add(messageId)
-      }
-      return next
-    })
-  }, [])
+          const response = await apiClient.listSessions(data.mosaicId, undefined, {
+            page: 1,
+            page_size: 1000,
+          })
 
-  // Load messages for selected session
-  const loadMessages = async (sessionId: string) => {
-    if (!data.mosaicId) {
-      console.warn('[ExpandedNodeCard] mosaicId not available')
-      return
-    }
+          const nodeSessions = response.items.filter(
+            (s) =>
+              s.node_id === data.id &&
+              (s.status === SessionStatus.ACTIVE || s.status === SessionStatus.CLOSED)
+          )
 
-    try {
-      setLoadingMessages(true)
-      const response = await apiClient.listMessages(data.mosaicId, {
-        nodeId: data.id,
-        sessionId,
-        page: 1,
-        pageSize: 9999,
-      })
+          // Check if the newly created session exists
+          const sessionExists = nodeSessions.some(s => s.session_id === data.newlyCreatedSessionId)
 
-      // Parse JSON payload
-      const parsed: ParsedMessage[] = response.items.map((msg) => ({
-        ...msg,
-        contentParsed:
-          typeof msg.payload === 'string' ? JSON.parse(msg.payload) : msg.payload,
-      }))
-
-      setMessages(parsed)
-
-      // Update max sequence number from loaded messages
-      if (parsed.length > 0) {
-        const maxSeq = Math.max(...parsed.map((msg) => msg.sequence))
-        maxSequenceRef.current = maxSeq
-        console.log('[ExpandedNodeCard] Loaded messages, max sequence:', maxSeq)
-      } else {
-        maxSequenceRef.current = 0
-      }
-
-      // Auto-collapse: thinking, system, tool use/output, pre_compact
-      const collapsibleIds = parsed
-        .filter(
-          (msg) =>
-            msg.message_type === MessageType.ASSISTANT_THINKING ||
-            msg.message_type === MessageType.SYSTEM_MESSAGE ||
-            msg.message_type === MessageType.ASSISTANT_TOOL_USE ||
-            msg.message_type === MessageType.ASSISTANT_TOOL_OUTPUT ||
-            msg.message_type === MessageType.ASSISTANT_PRE_COMPACT
-        )
-        .map((msg) => msg.message_id)
-
-      setCollapsedMessages(new Set(collapsibleIds))
-
-      // Extract session stats from the last assistant_result message
-      const lastResult = [...parsed]
-        .reverse()
-        .find((msg) => msg.message_type === MessageType.ASSISTANT_RESULT)
-
-      if (lastResult && lastResult.contentParsed) {
-        const stats = {
-          total_cost_usd: lastResult.contentParsed.total_cost_usd,
-          total_input_tokens: lastResult.contentParsed.total_input_tokens,
-          total_output_tokens: lastResult.contentParsed.total_output_tokens,
-          context_usage: lastResult.contentParsed.context_usage,
-          context_percentage: lastResult.contentParsed.context_percentage,
+          if (sessionExists) {
+            console.log('[ExpandedNodeCard] Auto-selecting newly created session:', data.newlyCreatedSessionId)
+            setSelectedSessionId(data.newlyCreatedSessionId)
+            // Notify parent that session has been selected (clear the flag)
+            data.onSessionSelected?.()
+          } else {
+            console.log('[ExpandedNodeCard] Newly created session not found in list')
+          }
+        } catch (error) {
+          console.error('[ExpandedNodeCard] Failed to refresh and select session:', error)
         }
-        setSessionStats(stats)
-        console.log('[ExpandedNodeCard] Loaded stats:', stats)
-      } else {
-        setSessionStats(null)
       }
 
-      console.log('[ExpandedNodeCard] Loaded messages:', parsed.length)
-
-      // Scroll to bottom after loading messages
-      requestAnimationFrame(() => {
-        if (messageListRef.current) {
-          messageListRef.current.scrollTop = messageListRef.current.scrollHeight
-        }
-      })
-    } catch (error) {
-      console.error('[ExpandedNodeCard] Failed to load messages:', error)
-    } finally {
-      setLoadingMessages(false)
+      refreshAndSelect()
     }
-  }
+  }, [data.newlyCreatedSessionId, data.mosaicId, data.id, data.onSessionSelected, loadSessions])
 
   const handleSendMessage = () => {
     if (inputMessage.trim() && selectedSession?.status === SessionStatus.ACTIVE && selectedSessionId) {

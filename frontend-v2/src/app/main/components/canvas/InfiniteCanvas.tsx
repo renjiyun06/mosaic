@@ -57,6 +57,7 @@ import {
 } from "../shared"
 import { mockConnections } from "../../constants"
 import { useWebSocket } from "@/contexts/websocket-context"
+import { apiClient } from "@/lib/api"
 
 // Node types configuration
 const nodeTypes = {
@@ -105,6 +106,10 @@ export function InfiniteCanvas() {
   // Create session state
   const [createSessionDialogOpen, setCreateSessionDialogOpen] = useState(false)
   const [selectedNodeForSession, setSelectedNodeForSession] = useState<string | null>(null)
+  const [newlyCreatedSession, setNewlyCreatedSession] = useState<{
+    nodeId: string
+    sessionId: string
+  } | null>(null)
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
@@ -174,20 +179,38 @@ export function InfiniteCanvas() {
     )
   }, [canvasState.showTopology, nodeManagement.setEdges])
 
-  // Inject edit/delete/createSession handlers into nodes
+  // Inject edit/delete/createSession handlers and newlyCreatedSession into nodes
   useEffect(() => {
+    if (newlyCreatedSession) {
+      console.log("[InfiniteCanvas] Injecting newlyCreatedSessionId into nodes:", newlyCreatedSession)
+      console.log("[InfiniteCanvas] Current nodes:", nodeManagement.nodes.map(n => ({ id: n.id, type: n.type, expanded: n.data?.expanded })))
+    }
+
     nodeManagement.setNodes((nds) =>
-      nds.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          onEdit: () => handleNodeEdit(node.id),
-          onDelete: () => handleNodeDelete(node.id),
-          onCreateSession: (nodeId: string) => handleCreateSession(nodeId),
-        },
-      }))
+      nds.map((node) => {
+        // Match using node.data.id (complete node_id like 'node-5')
+        const newlyCreatedSessionId = newlyCreatedSession?.nodeId === node.data.id
+          ? newlyCreatedSession.sessionId
+          : undefined
+
+        if (newlyCreatedSessionId) {
+          console.log("[InfiniteCanvas] ✅ Found matching node! Injecting newlyCreatedSessionId for node:", node.data.id, newlyCreatedSessionId)
+        }
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            onEdit: () => handleNodeEdit(node.id),
+            onDelete: () => handleNodeDelete(node.id),
+            onCreateSession: (nodeId: string) => handleCreateSession(nodeId),
+            newlyCreatedSessionId,
+            onSessionSelected: () => setNewlyCreatedSession(null),
+          },
+        }
+      })
     )
-  }, [nodeManagement.apiNodes.length]) // Re-run when nodes are loaded
+  }, [nodeManagement.nodes.length, newlyCreatedSession]) // Re-run when nodes count changes or newlyCreatedSession changes
 
   // ReactFlow event handlers
   const onNodesChange = useCallback(
@@ -335,11 +358,90 @@ export function InfiniteCanvas() {
 
   // Handle session creation from dialog
   const handleSessionCreate = async (sessionData: { mode: string; model: string }) => {
-    if (!selectedNodeForSession) return
-    console.log("Creating session:", { nodeId: selectedNodeForSession, ...sessionData })
-    // TODO: Integrate with API to create session
-    setCreateSessionDialogOpen(false)
-    setSelectedNodeForSession(null)
+    if (!selectedNodeForSession || !mosaicManagement.currentMosaicId) return
+
+    try {
+      console.log("[InfiniteCanvas] Creating session:", {
+        mosaicId: mosaicManagement.currentMosaicId,
+        nodeId: selectedNodeForSession,
+        ...sessionData
+      })
+
+      // Call API to create session
+      const newSession = await apiClient.createSession(
+        mosaicManagement.currentMosaicId,
+        selectedNodeForSession,
+        {
+          mode: sessionData.mode,
+          model: sessionData.model,
+        }
+      )
+
+      console.log("[InfiniteCanvas] Session created successfully:", newSession.session_id)
+      console.log("[InfiniteCanvas] Waiting for session_started notification...")
+
+      // Wait for session_started notification from WebSocket
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          unsubscribe()
+          reject(new Error("Timeout waiting for session_started notification"))
+        }, 30000) // 30 second timeout
+
+        const unsubscribe = subscribe('*', (message) => {
+          // Check if it's an error message
+          if ("type" in message && message.type === "error") {
+            return
+          }
+
+          const wsMessage = message as import("@/contexts/websocket-context").WSMessage
+
+          // Only handle notification messages
+          if (wsMessage.role !== "notification") {
+            return
+          }
+
+          // Check if this is the session_started notification for our new session
+          if (wsMessage.message_type === "session_started") {
+            const payload = wsMessage.payload as any
+            if (payload?.session_id === newSession.session_id) {
+              console.log("[InfiniteCanvas] Received session_started notification for:", newSession.session_id)
+              clearTimeout(timeout)
+              unsubscribe()
+              resolve()
+            }
+          }
+        })
+      })
+
+      console.log("[InfiniteCanvas] Session started, proceeding with UI updates")
+
+      // Ensure node is expanded so ExpandedNodeCard can handle the auto-selection
+      // Find node by complete node_id (e.g., 'node-5')
+      const targetNode = nodeManagement.nodes.find(n => n.data.id === selectedNodeForSession)
+      if (targetNode && !targetNode.data.expanded) {
+        console.log("[InfiniteCanvas] Expanding node to show session list")
+        // toggleNodeExpansion uses ReactFlow ID (e.g., '5')
+        nodeManagement.toggleNodeExpansion(targetNode.id)
+
+        // Wait for node expansion to complete and state to update
+        await new Promise(resolve => setTimeout(resolve, 200))
+      }
+
+      // Set flag to trigger ExpandedNodeCard to refresh its session list
+      setNewlyCreatedSession({
+        nodeId: selectedNodeForSession,
+        sessionId: newSession.session_id,
+      })
+
+      console.log("[InfiniteCanvas] Signaling ExpandedNodeCard to refresh and select session")
+
+      // Note: Dialog will be closed by CreateSessionDialog's onClose callback
+      // ExpandedNodeCard will refresh its session list and auto-select the new session
+    } catch (error) {
+      console.error("[InfiniteCanvas] Failed to create session:", error)
+      // Re-throw error so CreateSessionDialog can handle it
+      throw error
+    }
   }
 
   // Confirm edit node

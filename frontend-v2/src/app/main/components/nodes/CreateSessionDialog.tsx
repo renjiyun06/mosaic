@@ -65,14 +65,20 @@ export function CreateSessionDialog({ nodeId, onClose, onCreate }: CreateSession
   const [model, setModel] = useState<string>("sonnet")
   const [creating, setCreating] = useState(false)
 
-  const handleCreate = async () => {
+  const handleCreate = async (e?: React.MouseEvent) => {
+    // Prevent event bubbling to backdrop
+    e?.stopPropagation()
+
     try {
       setCreating(true)
+      console.log("[CreateSessionDialog] Starting session creation...")
       await onCreate({ mode, model })
+      console.log("[CreateSessionDialog] Session creation completed, closing dialog")
       onClose()
     } catch (error) {
-      console.error("Failed to create session:", error)
-      // Keep dialog open on error
+      console.error("[CreateSessionDialog] Failed to create session:", error)
+      // Keep dialog open on error - do NOT call onClose()
+      alert("Failed to create session. Please check the console for details.")
     } finally {
       setCreating(false)
     }
