@@ -30,38 +30,65 @@ export function useNodeManagement(currentMosaicId: number | null) {
     }))
   )
 
-  // Load nodes and connections when Mosaic changes
-  useEffect(() => {
-    const loadMosaicData = async () => {
-      if (!currentMosaicId || !token) {
-        setNodes([])
-        setApiNodes([])
-        setApiConnections([])
-        return
-      }
-
-      try {
-        setLoadingNodes(true)
-        const [nodesData, connectionsData] = await Promise.all([
-          apiClient.listNodes(currentMosaicId),
-          apiClient.listConnections(currentMosaicId),
-        ])
-
-        setApiNodes(nodesData)
-        setApiConnections(connectionsData)
-
-        // Transform API nodes to ReactFlow nodes (inject mosaicId)
-        const flowNodes = transformApiNodesToFlowNodes(nodesData, currentMosaicId)
-        setNodes(flowNodes)
-      } catch (error) {
-        console.error("Failed to load mosaic data:", error)
-      } finally {
-        setLoadingNodes(false)
-      }
+  // Load nodes and connections - extracted as a separate function
+  const refreshNodes = useCallback(async () => {
+    if (!currentMosaicId || !token) {
+      setNodes([])
+      setApiNodes([])
+      setApiConnections([])
+      return
     }
 
-    loadMosaicData()
+    try {
+      setLoadingNodes(true)
+      const [nodesData, connectionsData] = await Promise.all([
+        apiClient.listNodes(currentMosaicId),
+        apiClient.listConnections(currentMosaicId),
+      ])
+
+      setApiNodes(nodesData)
+      setApiConnections(connectionsData)
+
+      // Update nodes while preserving UI state (expanded, position, z-index)
+      setNodes((prevNodes) => {
+        // If no previous nodes, create fresh nodes
+        if (prevNodes.length === 0) {
+          return transformApiNodesToFlowNodes(nodesData, currentMosaicId)
+        }
+
+        // Merge new data with existing UI state
+        return prevNodes.map((prevNode) => {
+          // Find matching API node
+          const apiNode = nodesData.find((n) => String(n.id) === prevNode.id)
+
+          if (!apiNode) {
+            // Node was deleted, keep it for now (will be filtered out if needed)
+            return prevNode
+          }
+
+          // Update node data while preserving UI state
+          return {
+            ...prevNode,
+            data: {
+              ...prevNode.data,
+              // Update from API
+              status: apiNode.status,
+              // Preserve UI state: expanded, position, z-index, etc.
+            },
+          }
+        })
+      })
+    } catch (error) {
+      console.error("Failed to load mosaic data:", error)
+    } finally {
+      setLoadingNodes(false)
+    }
   }, [currentMosaicId, token])
+
+  // Load nodes and connections when Mosaic changes
+  useEffect(() => {
+    refreshNodes()
+  }, [refreshNodes])
 
   // Create new node
   const handleCreateNode = useCallback(async (nodeData: any) => {
@@ -222,5 +249,6 @@ export function useNodeManagement(currentMosaicId: number | null) {
     handleEditNode,
     handleDeleteNode,
     toggleNodeExpansion,
+    refreshNodes,
   }
 }

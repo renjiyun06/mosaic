@@ -56,6 +56,7 @@ import {
   AmbientParticles,
 } from "../shared"
 import { mockConnections } from "../../constants"
+import { useWebSocket } from "@/contexts/websocket-context"
 
 // Node types configuration
 const nodeTypes = {
@@ -68,6 +69,7 @@ export function InfiniteCanvas() {
   const mosaicManagement = useMosaicManagement()
   const nodeManagement = useNodeManagement(mosaicManagement.currentMosaicId)
   const canvasState = useCanvasState()
+  const { subscribe } = useWebSocket()
 
   // Connection configuration state (kept for backward compatibility)
   const [pendingConnection, setPendingConnection] = useState<{
@@ -109,6 +111,55 @@ export function InfiniteCanvas() {
     onOpenCommand: () => canvasState.setCommandOpen(true),
     onCloseCommand: () => canvasState.setCommandOpen(false),
   })
+
+  // Global notification listener - Listen for session lifecycle events
+  useEffect(() => {
+    const unsubscribe = subscribe('*', (message) => {
+      // Check if it's an error message
+      if ("type" in message && message.type === "error") {
+        return
+      }
+
+      const wsMessage = message as import("@/contexts/websocket-context").WSMessage
+
+      // Only handle notification messages
+      if (wsMessage.role !== "notification") {
+        return
+      }
+
+      console.log("[InfiniteCanvas] Received notification:", wsMessage.message_type, wsMessage.payload)
+
+      // Handle different notification types
+      switch (wsMessage.message_type) {
+        case "session_started":
+          console.log("[InfiniteCanvas] Session started, refreshing nodes")
+          nodeManagement.refreshNodes()
+          break
+
+        case "session_ended":
+          console.log("[InfiniteCanvas] Session ended, refreshing nodes")
+          nodeManagement.refreshNodes()
+          break
+
+        case "topic_updated":
+          console.log("[InfiniteCanvas] Topic updated, refreshing nodes")
+          nodeManagement.refreshNodes()
+          break
+
+        case "runtime_status_changed":
+          console.log("[InfiniteCanvas] Runtime status changed, refreshing nodes")
+          nodeManagement.refreshNodes()
+          break
+
+        default:
+          console.log("[InfiniteCanvas] Unknown notification type:", wsMessage.message_type)
+      }
+    })
+
+    return () => {
+      unsubscribe()
+    }
+  }, [subscribe, nodeManagement.refreshNodes])
 
   // Update edges visibility based on topology toggle
   useEffect(() => {

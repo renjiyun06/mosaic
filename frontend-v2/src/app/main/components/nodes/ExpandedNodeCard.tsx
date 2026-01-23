@@ -79,7 +79,7 @@ const CircularProgress = ({ percentage }: { percentage: number }) => {
 }
 
 export function ExpandedNodeCard({ data, selected }: NodeProps) {
-  const { isConnected, sendMessage: wsSendMessage, subscribe } = useWebSocket()
+  const { isConnected, sendMessage: wsSendMessage, interrupt, subscribe } = useWebSocket()
 
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [inputMessage, setInputMessage] = useState("")
@@ -223,9 +223,17 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
         return
       }
 
-      // Skip notification messages
+      // Handle notification messages
       if (wsMessage.role === 'notification') {
-        console.log('[ExpandedNodeCard] Skipping notification message:', wsMessage)
+        console.log('[ExpandedNodeCard] Received notification:', wsMessage.message_type)
+
+        // Refresh sessions when runtime status changes or topic updates
+        if (wsMessage.message_type === 'runtime_status_changed' ||
+            wsMessage.message_type === 'topic_updated') {
+          console.log('[ExpandedNodeCard] Refreshing sessions due to notification')
+          loadSessions()
+        }
+
         return
       }
 
@@ -492,8 +500,10 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
   const handleSmartButtonClick = async () => {
     // Priority 1: Interrupt assistant if busy
     if (selectedSession?.runtime_status === RuntimeStatus.BUSY) {
-      // TODO: Implement interrupt functionality
-      console.log('[ExpandedNodeCard] Interrupt requested')
+      if (selectedSessionId) {
+        console.log('[ExpandedNodeCard] Interrupt requested for session:', selectedSessionId)
+        interrupt(selectedSessionId)
+      }
       return
     }
 
@@ -525,10 +535,7 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
   return (
     <div className="flex h-[600px]" style={{ transformOrigin: "center" }}>
       {/* Left: Chat Area (1000px - increased for better spacing) */}
-      <motion.div
-        initial={{ scale: 0.8, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ type: "spring", damping: 20, stiffness: 200 }}
+      <div
         className={cn(
           "group relative flex h-[600px] w-[1000px] flex-col overflow-hidden rounded-3xl backdrop-blur-2xl transition-all",
           // Conditional border: remove right border when workspace expanded
@@ -637,16 +644,18 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
             className="flex-1 overflow-y-auto p-3 space-y-2 cyberpunk-scrollbar-thin"
             onWheel={(e) => handleManualScroll(e, sessionListRef)}
           >
-            {loadingSessions ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <Loader2 className="mb-2 h-8 w-8 animate-spin text-cyan-400" />
-                <p className="text-xs text-slate-400">Loading sessions...</p>
-              </div>
-            ) : sessions.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <MessageSquare className="mb-2 h-8 w-8 text-slate-500" />
-                <p className="text-xs text-slate-400">No sessions</p>
-              </div>
+            {sessions.length === 0 ? (
+              loadingSessions ? (
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <Loader2 className="mb-2 h-8 w-8 animate-spin text-cyan-400" />
+                  <p className="text-xs text-slate-400">Loading sessions...</p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <MessageSquare className="mb-2 h-8 w-8 text-slate-500" />
+                  <p className="text-xs text-slate-400">No sessions</p>
+                </div>
+              )
             ) : (
               sessions.map((session) => {
                 const isSelected = selectedSessionId === session.session_id
@@ -660,10 +669,11 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                 return (
                   <motion.div
                     key={session.session_id}
+                    initial={false}
                     onClick={() => setSelectedSessionId(session.session_id)}
                     whileHover={{ x: 3 }}
                     className={cn(
-                      "group cursor-pointer rounded-xl border p-2.5 transition-all",
+                      "group cursor-pointer rounded-xl border p-2.5 transition-colors duration-200",
                       isSelected
                         ? "border-cyan-400/50 bg-cyan-500/20 shadow-[0_0_15px_rgba(34,211,238,0.2)]"
                         : "border-white/10 bg-white/5 hover:border-cyan-400/30 hover:bg-white/10"
@@ -744,7 +754,7 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                       ) : (
                         <div className="flex items-center gap-1.5">
                           <Circle className="h-2 w-2 fill-green-400 text-green-400 animate-pulse" />
-                          <span className="text-[10px] font-medium leading-none text-green-400">ACTIVE</span>
+                          <span className="text-[10px] font-medium leading-none text-green-400">IDLE</span>
                         </div>
                       )
                     ) : (
@@ -970,7 +980,7 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
           )}
         </div>
       </div>
-      </motion.div>
+      </div>
 
       {/* Right: Workspace Panel (700px, slides in from right) */}
       <AnimatePresence>
