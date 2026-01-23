@@ -7,6 +7,7 @@ import { Settings, ArrowRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { type NodeProps } from "@xyflow/react"
 import { NODE_TYPE_CONFIG } from "../../constants"
+import { NodeSettingsMenu } from "./NodeSettingsMenu"
 
 export function CollapsedNodeCard({ data, selected }: NodeProps) {
   const incomingCount = data.incomingConnections || 0
@@ -16,19 +17,23 @@ export function CollapsedNodeCard({ data, selected }: NodeProps) {
   const nodeConfig = NODE_TYPE_CONFIG.find(config => config.value === data.type)
   const IconComponent = nodeConfig?.icon
 
+  // Only Claude Code nodes can be expanded
+  const isClaudeCode = data.type === "claude_code"
+
   return (
     <motion.div
         initial={{ opacity: 0, scale: 0.8 }}
         animate={{ opacity: 1, scale: 1 }}
         whileHover={{ y: -2 }}
-        onClick={() => data.onExpand()}
+        onDoubleClick={isClaudeCode ? () => data.onExpand() : undefined}
+        style={{ transformOrigin: "center" }}
         className={cn(
           "group relative w-64 rounded-2xl border backdrop-blur-xl transition-all duration-300",
           selected
             ? "border-cyan-400/80 shadow-[0_0_30px_rgba(34,211,238,0.4)]"
             : "border-white/20 shadow-[0_0_15px_rgba(59,130,246,0.2)]",
           "bg-gradient-to-br from-slate-900/90 to-slate-800/90",
-          "cursor-pointer"
+          isClaudeCode ? "cursor-pointer" : "cursor-default"
         )}
       >
 
@@ -97,11 +102,13 @@ export function CollapsedNodeCard({ data, selected }: NodeProps) {
           <span className="text-sm font-medium">{nodeConfig?.label || data.type}</span>
         </div>
 
-        {/* Active Sessions Count - Compact */}
-        <div className="flex justify-between text-xs text-slate-400">
-          <span>Active Sessions</span>
-          <span className="font-mono text-cyan-300">{data.sessions || 0}</span>
-        </div>
+        {/* Active Sessions Count - Only for Claude Code nodes */}
+        {isClaudeCode && (
+          <div className="flex justify-between text-xs text-slate-400">
+            <span>Active Sessions</span>
+            <span className="font-mono text-cyan-300">{data.sessions || 0}</span>
+          </div>
+        )}
       </div>
 
       {/* Footer actions */}
@@ -118,12 +125,18 @@ export function CollapsedNodeCard({ data, selected }: NodeProps) {
         >
           Stop
         </button>
-        <button
-          onClick={(e) => e.stopPropagation()}
-          className="rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-white/10"
+        <NodeSettingsMenu
+          nodeId={data.id}
+          onEdit={() => data.onEdit?.()}
+          onDelete={() => data.onDelete?.()}
         >
-          <Settings className="h-3.5 w-3.5" />
-        </button>
+          <button
+            onClick={(e) => e.stopPropagation()}
+            className="rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-300 transition-colors hover:bg-white/10"
+          >
+            <Settings className="h-3.5 w-3.5" />
+          </button>
+        </NodeSettingsMenu>
       </div>
 
       {/* Glow effect on running nodes */}

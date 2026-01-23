@@ -4,7 +4,7 @@
 
 import { useState } from "react"
 import { motion } from "framer-motion"
-import { Plus, X, Check } from "lucide-react"
+import { Plus, X, Check, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { NODE_TYPE_CONFIG } from "../../constants"
 
@@ -16,16 +16,39 @@ interface CreateNodeCardProps {
 export function CreateNodeCard({ onClose, onCreate }: CreateNodeCardProps) {
   const [nodeId, setNodeId] = useState("")
   const [nodeType, setNodeType] = useState<"claude_code" | "email" | "scheduler" | "aggregator">("claude_code")
+  const [description, setDescription] = useState("")
+  const [config, setConfig] = useState("{}")
   const [autoStart, setAutoStart] = useState(true)
+  const [configError, setConfigError] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
 
-  const handleCreate = () => {
-    if (nodeId.trim()) {
-      onCreate({
+  const handleCreate = async () => {
+    if (!nodeId.trim()) return
+
+    // Validate JSON config
+    try {
+      JSON.parse(config)
+      setConfigError(null)
+    } catch (e) {
+      setConfigError("Invalid JSON format")
+      return
+    }
+
+    try {
+      setCreating(true)
+      await onCreate({
         id: nodeId,
         type: nodeType,
+        description: description.trim() || undefined,
+        config: config.trim() ? JSON.parse(config) : {},
         autoStart,
       })
       onClose()
+    } catch (error) {
+      console.error("Failed to create node:", error)
+      // Keep dialog open on error
+    } finally {
+      setCreating(false)
     }
   }
 
@@ -60,7 +83,7 @@ export function CreateNodeCard({ onClose, onCreate }: CreateNodeCardProps) {
       </div>
 
       {/* Form */}
-      <div className="relative z-10 space-y-5 p-6">
+      <div className="relative z-10 space-y-5 p-6 max-h-[60vh] overflow-y-auto cyberpunk-scrollbar">
         {/* Node ID Input */}
         <div className="space-y-2">
           <label className="block text-sm font-medium text-slate-300">Node ID</label>
@@ -113,6 +136,51 @@ export function CreateNodeCard({ onClose, onCreate }: CreateNodeCardProps) {
           </div>
         </div>
 
+        {/* Description */}
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-slate-300">Description (Optional)</label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Describe the purpose of this node..."
+            maxLength={1000}
+            rows={3}
+            className="w-full rounded-xl border border-white/20 bg-slate-800/50 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none focus:ring-2 focus:ring-cyan-400/20 backdrop-blur-xl transition-all resize-none cyberpunk-scrollbar-thin"
+          />
+          <div className="text-xs text-slate-500 text-right">
+            {description.length}/1000
+          </div>
+        </div>
+
+        {/* JSON Config */}
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-slate-300">Configuration (JSON)</label>
+          <textarea
+            value={config}
+            onChange={(e) => {
+              setConfig(e.target.value)
+              setConfigError(null)
+            }}
+            placeholder='{"key": "value"}'
+            rows={6}
+            className={cn(
+              "w-full rounded-xl border bg-slate-800/50 px-4 py-3 font-mono text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 backdrop-blur-xl transition-all resize-none cyberpunk-scrollbar-thin",
+              configError
+                ? "border-red-400/50 focus:border-red-400/50 focus:ring-red-400/20"
+                : "border-white/20 focus:border-cyan-400/50 focus:ring-cyan-400/20"
+            )}
+          />
+          {configError && (
+            <div className="text-xs text-red-400 flex items-center gap-1">
+              <span className="inline-block w-1 h-1 rounded-full bg-red-400" />
+              {configError}
+            </div>
+          )}
+          <div className="text-xs text-slate-500">
+            Enter valid JSON configuration for the node
+          </div>
+        </div>
+
         {/* Auto Start Toggle */}
         <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 p-4">
           <div>
@@ -139,21 +207,32 @@ export function CreateNodeCard({ onClose, onCreate }: CreateNodeCardProps) {
       <div className="relative z-10 flex gap-3 border-t border-white/10 bg-slate-900/50 p-5">
         <button
           onClick={onClose}
-          className="flex-1 rounded-xl border border-white/20 bg-white/5 py-3 text-sm font-medium text-slate-300 transition-all hover:bg-white/10"
+          disabled={creating}
+          className={cn(
+            "flex-1 rounded-xl border border-white/20 bg-white/5 py-3 text-sm font-medium text-slate-300 transition-all",
+            creating ? "opacity-50 cursor-not-allowed" : "hover:bg-white/10"
+          )}
         >
           Cancel
         </button>
         <button
           onClick={handleCreate}
-          disabled={!nodeId.trim()}
+          disabled={!nodeId.trim() || creating}
           className={cn(
-            "flex-1 rounded-xl border py-3 text-sm font-medium transition-all",
-            nodeId.trim()
+            "flex-1 rounded-xl border py-3 text-sm font-medium transition-all flex items-center justify-center gap-2",
+            nodeId.trim() && !creating
               ? "border-cyan-400/50 bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 hover:shadow-[0_0_20px_rgba(34,211,238,0.3)] cursor-pointer"
               : "border-white/10 bg-white/5 text-slate-500 cursor-not-allowed"
           )}
         >
-          Create Node
+          {creating ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Creating...
+            </>
+          ) : (
+            "Create Node"
+          )}
         </button>
       </div>
     </motion.div>

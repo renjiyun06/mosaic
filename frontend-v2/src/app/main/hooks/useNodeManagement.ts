@@ -50,8 +50,8 @@ export function useNodeManagement(currentMosaicId: number | null) {
         setApiNodes(nodesData)
         setApiConnections(connectionsData)
 
-        // Transform API nodes to ReactFlow nodes
-        const flowNodes = transformApiNodesToFlowNodes(nodesData)
+        // Transform API nodes to ReactFlow nodes (inject mosaicId)
+        const flowNodes = transformApiNodesToFlowNodes(nodesData, currentMosaicId)
         setNodes(flowNodes)
       } catch (error) {
         console.error("Failed to load mosaic data:", error)
@@ -64,27 +64,80 @@ export function useNodeManagement(currentMosaicId: number | null) {
   }, [currentMosaicId, token])
 
   // Create new node
-  const handleCreateNode = useCallback((nodeData: any) => {
-    const newNodeId = String(nodes.length + 1)
-    const newNode: Node = {
-      id: newNodeId,
-      type: "collapsedNode",
-      position: { x: 400, y: 300 }, // Center-ish position
-      data: {
-        nodeId: newNodeId,
-        id: nodeData.id,
-        type: nodeData.type === "claude_code" ? "Claude Code" : nodeData.type,
-        status: nodeData.autoStart ? "running" : "stopped",
-        sessions: 0,
-        messages: 0,
-        activity: 0,
-        expanded: false,
-        incomingConnections: 0,
-        outgoingConnections: 0,
-      },
+  const handleCreateNode = useCallback(async (nodeData: any) => {
+    if (!currentMosaicId || !token) return
+
+    try {
+      // Call API to create node
+      await apiClient.createNode(currentMosaicId, {
+        node_id: nodeData.id,
+        node_type: nodeData.type,
+        description: nodeData.description,
+        config: nodeData.config,
+        auto_start: nodeData.autoStart,
+      })
+
+      // Refresh node list
+      const nodesData = await apiClient.listNodes(currentMosaicId)
+      setApiNodes(nodesData)
+
+      // Transform and update ReactFlow nodes
+      const flowNodes = transformApiNodesToFlowNodes(nodesData, currentMosaicId)
+      setNodes(flowNodes)
+    } catch (error) {
+      console.error("Failed to create node:", error)
+      throw error
     }
-    setNodes((nds) => [...nds, newNode])
-  }, [nodes.length])
+  }, [currentMosaicId, token])
+
+  // Edit node
+  const handleEditNode = useCallback(async (
+    nodeId: string,
+    data: {
+      description?: string | null
+      config?: Record<string, any> | null
+      auto_start?: boolean | null
+    }
+  ) => {
+    if (!currentMosaicId || !token) return
+
+    try {
+      // Call API to update node
+      await apiClient.updateNode(currentMosaicId, nodeId, data)
+
+      // Refresh node list
+      const nodesData = await apiClient.listNodes(currentMosaicId)
+      setApiNodes(nodesData)
+
+      // Transform and update ReactFlow nodes
+      const flowNodes = transformApiNodesToFlowNodes(nodesData, currentMosaicId)
+      setNodes(flowNodes)
+    } catch (error) {
+      console.error("Failed to edit node:", error)
+      throw error
+    }
+  }, [currentMosaicId, token])
+
+  // Delete node
+  const handleDeleteNode = useCallback(async (nodeId: string) => {
+    if (!currentMosaicId || !token) return
+
+    try {
+      // Call API to delete node
+      await apiClient.deleteNode(currentMosaicId, nodeId)
+
+      // Refresh node list
+      const nodesData = await apiClient.listNodes(currentMosaicId)
+      setApiNodes(nodesData)
+
+      // Transform and update ReactFlow nodes
+      const flowNodes = transformApiNodesToFlowNodes(nodesData, currentMosaicId)
+      setNodes(flowNodes)
+    } catch (error) {
+      console.error("Failed to delete node:", error)
+      throw error
+    }
+  }, [currentMosaicId, token])
 
   // Toggle node expansion
   const toggleNodeExpansion = useCallback((nodeId: string) => {
@@ -92,9 +145,29 @@ export function useNodeManagement(currentMosaicId: number | null) {
       nds.map((node) => {
         if (node.id === nodeId) {
           const isExpanding = !node.data.expanded
+
+          // Card dimensions (collapsed: 256x220, expanded: 900x600)
+          const collapsedWidth = 256
+          const collapsedHeight = 220
+          const expandedWidth = 900
+          const expandedHeight = 600
+
+          // Calculate position offset to keep center point fixed
+          let newPosition = { ...node.position }
+          if (isExpanding) {
+            // Expanding: move top-left up and left to keep center fixed
+            newPosition.x -= (expandedWidth - collapsedWidth) / 2
+            newPosition.y -= (expandedHeight - collapsedHeight) / 2
+          } else {
+            // Collapsing: move top-left down and right to keep center fixed
+            newPosition.x += (expandedWidth - collapsedWidth) / 2
+            newPosition.y += (expandedHeight - collapsedHeight) / 2
+          }
+
           return {
             ...node,
             type: isExpanding ? "expandedNode" : "collapsedNode",
+            position: newPosition,
             data: {
               ...node.data,
               expanded: isExpanding,
@@ -146,6 +219,8 @@ export function useNodeManagement(currentMosaicId: number | null) {
     setNodes,
     setEdges,
     handleCreateNode,
+    handleEditNode,
+    handleDeleteNode,
     toggleNodeExpansion,
   }
 }

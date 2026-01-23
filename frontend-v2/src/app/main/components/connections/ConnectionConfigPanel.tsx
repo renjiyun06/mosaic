@@ -155,7 +155,7 @@ export function ConnectionConfigPanel({
               placeholder="Describe the purpose of this connection..."
               rows={3}
               maxLength={500}
-              className="w-full resize-none rounded-lg border border-white/10 bg-slate-800/50 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none focus:ring-2 focus:ring-cyan-400/20 backdrop-blur-xl"
+              className="w-full resize-none rounded-lg border border-white/10 bg-slate-800/50 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none focus:ring-2 focus:ring-cyan-400/20 backdrop-blur-xl cyberpunk-scrollbar-thin"
             />
             <div className="text-right text-xs text-slate-400">
               {description.length}/500

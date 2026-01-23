@@ -124,7 +124,7 @@ export function SubscriptionManagementPanel({
             </div>
 
             {/* Subscriptions List */}
-            <div className="h-[calc(100vh-200px)] overflow-y-auto p-6">
+            <div className="h-[calc(100vh-200px)] overflow-y-auto p-6 cyberpunk-scrollbar">
               <div className="mb-4">
                 <button
                   onClick={onAddSubscription}

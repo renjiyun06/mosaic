@@ -22,11 +22,12 @@ export const getConnectionsForNode = (nodeId: string, connections: ConnectionOut
 /**
  * Transform API nodes to ReactFlow nodes
  */
-export const transformApiNodesToFlowNodes = (apiNodes: NodeOut[]): Node[] => {
+export const transformApiNodesToFlowNodes = (apiNodes: NodeOut[], mosaicId: number | null): Node[] => {
   return apiNodes.map((node, index) => ({
     id: String(node.id),
     type: "collapsedNode",
     position: { x: 100 + index * 250, y: 100 + (index % 2) * 300 },
+    style: { zIndex: 1 }, // Initialize with base z-index
     data: {
       nodeId: String(node.id),
       id: node.node_id,
@@ -36,6 +37,7 @@ export const transformApiNodesToFlowNodes = (apiNodes: NodeOut[]): Node[] => {
       messages: 0,
       activity: 0,
       expanded: false,
+      mosaicId, // Inject mosaicId for session/message loading
     },
   }))
 }

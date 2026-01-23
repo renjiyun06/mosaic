@@ -1240,4 +1240,156 @@
   [data-theme="minimal"] .markdown-content pre {
     @apply border-2 border-foreground/20;
   }
+
+  /* ========================================
+     CUSTOM SCROLLBAR STYLES
+     ======================================== */
+
+  /* Cyberpunk Scrollbar - Default for main canvas */
+  .cyberpunk-scrollbar {
+    /* Firefox */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(34, 211, 238, 0.4) rgba(15, 23, 42, 0.3);
+  }
+
+  /* Webkit browsers (Chrome, Safari, Edge) */
+  .cyberpunk-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .cyberpunk-scrollbar::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.3);
+    border-radius: 4px;
+  }
+
+  .cyberpunk-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(34, 211, 238, 0.4);
+    border-radius: 4px;
+    transition: all 0.3s ease;
+  }
+
+  .cyberpunk-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(34, 211, 238, 0.6);
+    box-shadow:
+      0 0 8px rgba(34, 211, 238, 0.5),
+      0 0 12px rgba(34, 211, 238, 0.3);
+  }
+
+  .cyberpunk-scrollbar::-webkit-scrollbar-thumb:active {
+    background: rgba(34, 211, 238, 0.8);
+    box-shadow:
+      0 0 12px rgba(34, 211, 238, 0.7),
+      0 0 16px rgba(34, 211, 238, 0.5);
+  }
+
+  /* Thin scrollbar variant for textareas and small containers */
+  .cyberpunk-scrollbar-thin {
+    /* Firefox */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(34, 211, 238, 0.3) rgba(15, 23, 42, 0.2);
+  }
+
+  .cyberpunk-scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .cyberpunk-scrollbar-thin::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.2);
+    border-radius: 3px;
+  }
+
+  .cyberpunk-scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(34, 211, 238, 0.3);
+    border-radius: 3px;
+    transition: all 0.3s ease;
+  }
+
+  .cyberpunk-scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: rgba(34, 211, 238, 0.5);
+    box-shadow:
+      0 0 6px rgba(34, 211, 238, 0.4),
+      0 0 10px rgba(34, 211, 238, 0.2);
+  }
+
+  .cyberpunk-scrollbar-thin::-webkit-scrollbar-thumb:active {
+    background: rgba(34, 211, 238, 0.7);
+    box-shadow:
+      0 0 10px rgba(34, 211, 238, 0.6),
+      0 0 14px rgba(34, 211, 238, 0.4);
+  }
+
+  /* Minimal scrollbar - for cleaner look */
+  .minimal-scrollbar {
+    /* Firefox */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
+  }
+
+  .minimal-scrollbar::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .minimal-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .minimal-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.3);
+    border-radius: 2px;
+    transition: background 0.3s ease;
+  }
+
+  .minimal-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.5);
+  }
+
+  /* Hide scrollbar completely - for inline scrolling without visible scrollbar */
+  .scrollbar-hide {
+    /* Firefox */
+    scrollbar-width: none;
+    /* IE and Edge */
+    -ms-overflow-style: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ========================================
+     MARQUEE ANIMATION - For long text overflow
+     ======================================== */
+
+  /* Marquee keyframes - smooth slide left and back */
+  @keyframes marquee-slide {
+    0%, 10% {
+      transform: translateX(0);
+    }
+    40%, 60% {
+      transform: translateX(calc(-1 * var(--scroll-distance, 500px)));
+    }
+    100% {
+      transform: translateX(0);
+    }
+  }
+
+  /* Marquee container */
+  .marquee-container {
+    position: relative;
+    width: 100%;
+  }
+
+  /* Marquee text - default state */
+  .marquee-text {
+    display: inline-block;
+    transition: filter 0.3s ease;
+  }
+
+  /* Trigger animation on hover - smooth linear slide */
+  .group\/topic:hover .marquee-text {
+    animation: marquee-slide 8s linear infinite;
+    animation-delay: 0.2s;
+  }
 }

@@ -62,7 +62,7 @@ export function ConnectionsSidebar({
             </div>
 
             {/* Connection List */}
-            <div className="h-[calc(100vh-88px)] overflow-y-auto p-6">
+            <div className="h-[calc(100vh-88px)] overflow-y-auto p-6 cyberpunk-scrollbar">
               <div className="space-y-3">
                 {connections.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-20 text-center">

@@ -101,7 +101,7 @@ export function TargetNodeSelectionDialog({
         </div>
 
         {/* Node List */}
-        <div className="max-h-[400px] overflow-y-auto p-4">
+        <div className="max-h-[400px] overflow-y-auto p-4 cyberpunk-scrollbar">
           {filteredNodes.length === 0 ? (
             <div className="py-12 text-center">
               <p className="text-sm text-slate-400">

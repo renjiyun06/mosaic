@@ -792,6 +792,145 @@ NODE_TYPE_CONFIG: NodeTypeConfig[] = [
 
 ## 📝 更新历史
 
+### v1.8 (2026-01-23)
+**工作区面板集成 - 边看代码边聊天**
+- ✨ 新增右侧展开式工作区面板
+  - 节点级别功能（1个节点 = 1个工作区，节点下有多个会话）
+  - 工作区按钮放置在节点 Header 区域
+  - 尺寸：700px × 600px，从右侧滑入
+  - 通过 iframe 嵌入 code-server（`http://192.168.1.5:20001/`）
+- 🎨 无缝拼接设计（Cyberpunk Style）
+  - 聊天区展开时：`border-r-0` + `rounded-r-none`（移除右边框和右圆角）
+  - 工作区面板：`border-l-0` + `rounded-l-none`（移除左边框和左圆角）
+  - 共享青色霓虹边框：`border-cyan-400/80`
+  - 共享霓虹光晕：`shadow-[0_0_40px_rgba(34,211,238,0.5)]`
+  - 结果：看起来像一个完整的、无缝拼接的节点卡片
+- ⚡ 流畅动画（基于 UI/UX Pro Max 最佳实践）
+  - Framer Motion 配置：300ms ease-out，GPU 加速
+  - 使用 `transform: translateX()` 而非 `width`（避免 reflow）
+  - `AnimatePresence` 管理进入/退出动画
+  - 动画参数：`duration: 0.3, ease: [0.4, 0, 0.2, 1]`（Tailwind ease-out）
+- 🎯 工作区面板功能
+  - 顶部栏（48px，与状态栏对齐）：Workspace 标题 + Copy URL + Close 按钮
+  - iframe 区域：全高度显示 code-server
+  - 加载状态：Loader2 动画 + "Loading workspace..." 提示
+  - 剪贴板权限：`allow="clipboard-read; clipboard-write"`
+- 🔘 "Open Workspace" 按钮（节点 Header）
+  - 位置：节点 Header 右侧，与 Settings/Minimize 并列
+  - 图标 + 文字：`<Code2>` + "Open Workspace" / "Close Workspace"
+  - 状态指示：展开时青色高亮 + 霓虹光晕
+  - 交互反馈：Hover 效果 + Focus Ring + cursor-pointer
+  - 无障碍：`aria-label` 支持屏幕阅读器
+- ✅ UI/UX 最佳实践清单
+  - Animation Duration: 300ms（推荐 150-500ms）✓
+  - Easing Function: ease-out for entering ✓
+  - Transform Performance: 使用 translateX()，避免 width ✓
+  - Focus States: focus:ring-2 可见 focus ring ✓
+  - Hover Feedback: hover:shadow 青色霓虹光晕 ✓
+  - Cursor Pointer: 所有可点击元素 ✓
+  - Color + Icon: 按钮使用图标+文字 ✓
+  - ARIA Labels: 图标按钮有 aria-label ✓
+  - Loading States: iframe 加载时显示 Loader2 ✓
+  - Seamless Border: 拼接处无边框，共享光晕 ✓
+- 📐 布局变化
+  - 初始状态：900px（聊天区）
+  - 工作区展开后：1600px（900 + 700）
+  - 用户可边看代码边在左侧选择不同会话聊天
+
+### v1.7 (2026-01-23)
+**统一弹出菜单风格设计**
+- 🎨 统一三个弹出菜单的赛博朋克风格
+  - **MosaicSidebar 右键菜单** - Mosaic 实例右键操作菜单
+  - **CanvasContextMenu** - 画布空白处右键菜单
+  - **NodeSettingsMenu** - 节点设置下拉菜单
+- ✨ 统一设计规范
+  - 边框：`border-cyan-400/20` 青色主题色
+  - 阴影：`shadow-[0_0_30px_rgba(34,211,238,0.2)]` 青色霓虹发光
+  - 顶部装饰线：渐变霓虫线 `from-transparent via-cyan-400/50 to-transparent`
+  - 背景：`bg-slate-900/95 backdrop-blur-xl` 玻璃态效果
+  - 内边距：`p-1.5` 统一 6px
+  - 分隔线：`bg-slate-700/50` 统一半透明灰色
+  - 菜单项 Hover：青色/绿色/红色根据操作类型区分
+- 🔧 NodeSettingsMenu 优化
+  - 修复边框颜色（白色 → 青色）
+  - 修复阴影效果（黑色 → 青色霓虹）
+  - 修改弹出方向（左下 → 右下，`align="start"`）
+- 🔧 MosaicSidebar 补充
+  - 添加顶部霓虹装饰线
+  - 调整内边距从 `p-1` 到 `p-1.5`
+- 🐛 修复 Tooltip UX 问题
+  - 右键菜单关闭后 Tooltip 延迟 500ms 才能再次显示
+  - 避免菜单关闭后立即弹出 Tooltip 的尴尬体验
+  - 使用双重状态追踪 + useRef 清理 timeout
+- 🎯 简化 Tooltip 内容
+  - 移除节点数量和运行状态显示
+  - 只保留 Mosaic 完整名称
+  - 调整内边距为 `px-3 py-2`，更紧凑简洁
+
+### v1.6 (2026-01-23)
+**节点编辑和删除功能完整实现**
+- ✨ 新增 `NodeSettingsMenu.tsx` - Settings 按钮下拉菜单
+  - 使用 @radix-ui/react-dropdown-menu
+  - 包含 Edit Node 和 Delete Node 两个选项
+  - 青色霓虹顶部装饰 + 自动边界检测
+- ✨ 新增 `EditNodeDialog.tsx` - 编辑节点对话框
+  - 可编辑 Description（Textarea，1000 字符限制）
+  - 可编辑 Configuration（JSON Textarea，带格式验证）
+  - 可编辑 Auto Start（Toggle 开关）
+  - 青色霓虫边框 + 弹簧动画 + 加载状态
+- ✨ 新增 `DeleteNodeDialog.tsx` - 删除节点确认对话框
+  - 智能警告系统（显示活动会话和连接数）
+  - 红色霓虫边框 + 警告图标
+  - "不可撤销" 提示 + 二次确认
+  - 加载状态 + 错误处理
+- 🔧 `CollapsedNodeCard.tsx` 和 `ExpandedNodeCard.tsx`
+  - 集成 NodeSettingsMenu 组件
+  - Settings 按钮触发下拉菜单
+- 🔧 `useNodeManagement.ts`
+  - 添加 handleEditNode 函数（调用 updateNode API）
+  - 添加 handleDeleteNode 函数（调用 deleteNode API）
+  - 成功后自动刷新节点列表
+- 🔧 `InfiniteCanvas.tsx`
+  - 添加编辑/删除对话框状态管理
+  - 通过 useEffect 注入 onEdit 和 onDelete 回调到所有节点
+  - 渲染 EditNodeDialog 和 DeleteNodeDialog 组件
+- ✅ UX 最佳实践
+  - 二次确认防止误删
+  - 智能警告显示依赖关系
+  - 加载状态和错误处理
+  - 视觉区分（编辑青色 vs 删除红色）
+
+### v1.5 (2026-01-23)
+**创建节点完整实现 + 赛博朋克滚动条统一**
+- ✨ CreateNodeCard 补充缺失字段
+  - 添加 Description 字段（Textarea，最多 1000 字符，带字符计数）
+  - 添加 Configuration 字段（JSON Textarea，带 JSON 验证和错误提示）
+  - 保持赛博朋克风格一致（青色边框、霓虹光效、半透明背景）
+  - 表单内容支持滚动（max-h-[60vh]）
+  - 创建按钮显示加载状态（Loader2 动画）
+- 🔧 API 对接完成（useNodeManagement.ts）
+  - `handleCreateNode` 改为异步函数
+  - 调用 `apiClient.createNode` API
+  - 传递完整节点数据：node_id、node_type、description、config、auto_start
+  - 创建成功后自动刷新节点列表
+- 🎨 赛博朋克滚动条统一（globals.css）
+  - 创建 3 种滚动条样式：
+    - `cyberpunk-scrollbar` - 标准宽度（8px），用于大型容器
+    - `cyberpunk-scrollbar-thin` - 窄宽度（6px），用于 Textarea 和小型容器
+    - `minimal-scrollbar` - 极简样式（4px），透明轨道
+  - 应用到 13 个滚动区域：
+    - CreateNodeCard（表单容器、Description、Config）
+    - ConnectionsSidebar、SubscriptionManagementPanel
+    - ExpandedNodeCard（会话列表、消息区域）
+    - CommandPalette、TargetNodeSelectionDialog
+    - MosaicSidebar、MosaicDialog
+    - CreateConnectionDialog、ConnectionConfigPanel
+  - 技术特性：
+    - 跨浏览器支持（Webkit + Firefox）
+    - 交互效果（Hover 青色增强 + 霓虹光晕）
+    - 平滑过渡动画（0.3s ease）
+    - 青色霓虹色系（#22d3ee）+ 半透明材质
+
 ### v1.4 (2026-01-22)
 **统一连接创建对话框**
 - ✨ 创建 `CreateConnectionDialog.tsx` - 单一表单对话框
@@ -889,6 +1028,6 @@ NODE_TYPE_CONFIG: NodeTypeConfig[] = [
 
 ---
 
-**文档版本**: v1.3
-**最后更新**: 2026-01-22
+**文档版本**: v1.7
+**最后更新**: 2026-01-23
 **维护者**: Mosaic Development Team

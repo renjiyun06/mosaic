@@ -57,7 +57,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                   <X className="h-5 w-5" />
                 </button>
               </div>
-              <Command.List className="max-h-96 overflow-y-auto p-2">
+              <Command.List className="max-h-96 overflow-y-auto p-2 cyberpunk-scrollbar">
                 <Command.Empty className="py-10 text-center text-sm text-slate-400">
                   No results found.
                 </Command.Empty>

@@ -3,6 +3,7 @@
  */
 
 import { motion } from "framer-motion"
+import { useState, useRef, useEffect } from "react"
 import * as ContextMenu from "@radix-ui/react-context-menu"
 import * as Tooltip from "@radix-ui/react-tooltip"
 import {
@@ -35,6 +36,39 @@ export function MosaicSidebar({
   onDelete,
   onToggleStatus,
 }: MosaicSidebarProps) {
+  // Track which mosaic has an open context menu
+  const [contextMenuOpenFor, setContextMenuOpenFor] = useState<number | null>(null)
+  // Track which mosaic should have tooltip disabled (after menu closes)
+  const [tooltipDisabledFor, setTooltipDisabledFor] = useState<number | null>(null)
+  const tooltipTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  const handleContextMenuChange = (mosaicId: number, open: boolean) => {
+    setContextMenuOpenFor(open ? mosaicId : null)
+
+    if (!open) {
+      // Clear any existing timeout
+      if (tooltipTimeoutRef.current) {
+        clearTimeout(tooltipTimeoutRef.current)
+      }
+
+      // When menu closes, disable tooltip for a short time
+      setTooltipDisabledFor(mosaicId)
+      tooltipTimeoutRef.current = setTimeout(() => {
+        setTooltipDisabledFor(null)
+        tooltipTimeoutRef.current = null
+      }, 500) // 500ms delay before tooltip can show again
+    }
+  }
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (tooltipTimeoutRef.current) {
+        clearTimeout(tooltipTimeoutRef.current)
+      }
+    }
+  }, [])
+
   return (
     <Tooltip.Provider delayDuration={300}>
       <div className="fixed left-0 top-0 bottom-0 w-16 bg-gradient-to-b from-slate-950/95 via-slate-950/90 to-cyan-950/85 backdrop-blur-xl border-r border-cyan-500/20 shadow-[2px_0_30px_rgba(34,211,238,0.1)] z-50">
@@ -49,12 +83,12 @@ export function MosaicSidebar({
         <div className="w-12 h-px bg-slate-800" />
 
         {/* Mosaic Instance List */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 py-2 px-2 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 py-2 px-2 cyberpunk-scrollbar-thin">
           {mosaics.map((mosaic) => (
             <div key={mosaic.id} className="relative group">
               {/* Mosaic Icon with Right-Click Context Menu and Tooltip */}
-              <Tooltip.Root>
-                <ContextMenu.Root>
+              <Tooltip.Root open={contextMenuOpenFor === mosaic.id || tooltipDisabledFor === mosaic.id ? false : undefined}>
+                <ContextMenu.Root onOpenChange={(open) => handleContextMenuChange(mosaic.id, open)}>
                   <ContextMenu.Trigger asChild>
                     <Tooltip.Trigger asChild>
                       <motion.div
@@ -94,9 +128,11 @@ export function MosaicSidebar({
                   {/* Context Menu Portal */}
                   <ContextMenu.Portal>
                     <ContextMenu.Content
-                      className="min-w-[12rem] rounded-xl border border-cyan-400/20 bg-slate-900/95 backdrop-blur-xl shadow-[0_0_30px_rgba(34,211,238,0.2)] p-1 z-[100]"
+                      className="min-w-[12rem] rounded-xl border border-cyan-400/20 bg-slate-900/95 backdrop-blur-xl shadow-[0_0_30px_rgba(34,211,238,0.2)] p-1.5 z-[100]"
                       collisionPadding={10}
                     >
+                      {/* Neon top accent */}
+                      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/50 to-transparent" />
                       {mosaic.status === "running" ? (
                         <ContextMenu.Item
                           className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-red-500/20 hover:text-red-300 outline-none cursor-pointer transition-colors"
@@ -140,13 +176,9 @@ export function MosaicSidebar({
                   <Tooltip.Content
                     side="right"
                     sideOffset={16}
-                    className="rounded-xl border border-cyan-400/30 bg-slate-900/95 backdrop-blur-xl shadow-[0_0_30px_rgba(34,211,238,0.2)] p-3 z-[60]"
+                    className="rounded-xl border border-cyan-400/30 bg-slate-900/95 backdrop-blur-xl shadow-[0_0_30px_rgba(34,211,238,0.2)] px-3 py-2 z-[60]"
                   >
                     <div className="font-semibold text-sm text-cyan-300">{mosaic.name}</div>
-                    <div className="text-xs text-slate-400 mt-1">{mosaic.node_count} nodes</div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      {mosaic.status === "running" ? "Running" : "Stopped"}
-                    </div>
                   </Tooltip.Content>
                 </Tooltip.Portal>
               </Tooltip.Root>

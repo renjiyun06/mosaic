@@ -112,7 +112,7 @@ export function MosaicDialog({
                     placeholder="Describe the purpose of this Mosaic instance..."
                     rows={3}
                     maxLength={500}
-                    className="w-full rounded-xl border border-white/20 bg-slate-800/50 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none focus:ring-2 focus:ring-cyan-400/20 backdrop-blur-xl transition-all resize-none"
+                    className="w-full rounded-xl border border-white/20 bg-slate-800/50 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none focus:ring-2 focus:ring-cyan-400/20 backdrop-blur-xl transition-all resize-none cyberpunk-scrollbar-thin"
                   />
                 </div>
               </div>
