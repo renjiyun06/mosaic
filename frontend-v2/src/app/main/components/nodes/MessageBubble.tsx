@@ -112,7 +112,7 @@ export function MessageBubble({ message, onToggleCollapse, isCollapsed = false }
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.2 }}
-        className={cn("flex", isUser ? "justify-end" : "justify-start")}
+        className={cn("nodrag flex", isUser ? "justify-end" : "justify-start")}
       >
         <div
           className={cn(
@@ -131,7 +131,7 @@ export function MessageBubble({ message, onToggleCollapse, isCollapsed = false }
           )}
         >
           {/* Message content only - no role label, no timestamp (UX: clean and minimal) */}
-          <p className="text-xs text-white whitespace-pre-wrap break-words leading-relaxed">
+          <p className="text-xs text-white whitespace-pre-wrap break-words leading-relaxed select-text cursor-text">
             {messageContent}
           </p>
         </div>
@@ -149,7 +149,7 @@ export function MessageBubble({ message, onToggleCollapse, isCollapsed = false }
   if (isCollapsed) {
     // Collapsed state: compact view (no border, subtle background)
     return (
-      <div className="flex justify-start">
+      <div className="nodrag flex justify-start">
         <motion.div
           initial={{ opacity: 0, y: 5 }}
           animate={{ opacity: 1, y: 0 }}
@@ -193,7 +193,7 @@ export function MessageBubble({ message, onToggleCollapse, isCollapsed = false }
 
   // Expanded state: full content (no border, subtle background)
   return (
-    <div className="flex justify-start">
+    <div className="nodrag flex justify-start">
       <motion.div
         initial={{ opacity: 0, y: 5 }}
         animate={{ opacity: 1, y: 0 }}
@@ -238,7 +238,7 @@ export function MessageBubble({ message, onToggleCollapse, isCollapsed = false }
       </div>
 
       {/* Content - subtle padding, no extra borders */}
-      <div className="px-3 py-2">
+      <div className="px-3 py-2 select-text cursor-text">
         {message.message_type === MessageType.ASSISTANT_TOOL_USE ? (
           // Tool use: show JSON formatted
           <pre className="text-xs font-mono text-slate-400 whitespace-pre-wrap break-words leading-relaxed overflow-x-auto">

@@ -23,6 +23,13 @@ export function useSoundEffects() {
   }, [])
 
   /**
+   * Play result sound when agent reply is completed
+   */
+  const playResultReceived = useCallback(() => {
+    soundEffects.playResult()
+  }, [])
+
+  /**
    * Enable or disable sound effects
    */
   const setEnabled = useCallback((enabled: boolean) => {
@@ -39,6 +46,7 @@ export function useSoundEffects() {
   return {
     playMessageSent,
     playButtonClick,
+    playResultReceived,
     setEnabled,
     setVolume,
     isEnabled: soundEffects.isEnabled(),

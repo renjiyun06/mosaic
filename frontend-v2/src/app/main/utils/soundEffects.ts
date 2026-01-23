@@ -99,6 +99,68 @@ class SoundEffects {
   }
 
   /**
+   * Play result notification sound (agent reply completed)
+   * Three-note ascending sequence: 600Hz -> 800Hz -> 1000Hz
+   * Total duration: 280ms
+   * Creates a "task completed" / "dish served" notification effect
+   */
+  playResult(): void {
+    if (!this.enabled) return
+
+    try {
+      const ctx = this.getAudioContext()
+      const now = ctx.currentTime
+
+      // Note timings (in seconds)
+      const note1Start = now
+      const note1Duration = 0.08 // 80ms
+      const note2Start = now + note1Duration
+      const note2Duration = 0.08 // 80ms
+      const note3Start = now + note1Duration + note2Duration
+      const note3Duration = 0.12 // 120ms (longer for emphasis)
+
+      // Play three ascending notes
+      this.playNote(600, note1Start, note1Duration, this.volume * 0.6)
+      this.playNote(800, note2Start, note2Duration, this.volume * 0.65)
+      this.playNote(1000, note3Start, note3Duration, this.volume * 0.7)
+    } catch (error) {
+      console.warn("Failed to play result sound:", error)
+    }
+  }
+
+  /**
+   * Helper method to play a single note
+   * @param frequency - Frequency in Hz
+   * @param startTime - When to start (AudioContext time)
+   * @param duration - How long to play (seconds)
+   * @param volume - Volume level (0.0 - 1.0)
+   */
+  private playNote(
+    frequency: number,
+    startTime: number,
+    duration: number,
+    volume: number
+  ): void {
+    const ctx = this.getAudioContext()
+    const oscillator = ctx.createOscillator()
+    const gainNode = ctx.createGain()
+
+    oscillator.connect(gainNode)
+    gainNode.connect(ctx.destination)
+
+    oscillator.frequency.value = frequency
+
+    // Envelope: quick attack, sustain, quick release
+    gainNode.gain.setValueAtTime(0, startTime)
+    gainNode.gain.linearRampToValueAtTime(volume, startTime + 0.01) // 10ms attack
+    gainNode.gain.setValueAtTime(volume, startTime + duration - 0.02) // sustain
+    gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + duration) // 20ms release
+
+    oscillator.start(startTime)
+    oscillator.stop(startTime + duration)
+  }
+
+  /**
    * Enable or disable sound effects
    */
   setEnabled(enabled: boolean): void {

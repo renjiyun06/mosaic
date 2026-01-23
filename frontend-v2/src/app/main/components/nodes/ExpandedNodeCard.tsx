@@ -81,7 +81,7 @@ const CircularProgress = ({ percentage }: { percentage: number }) => {
 
 export function ExpandedNodeCard({ data, selected }: NodeProps) {
   const { isConnected, sendMessage: wsSendMessage, interrupt, subscribe } = useWebSocket()
-  const { playMessageSent, playButtonClick } = useSoundEffects()
+  const { playMessageSent, playButtonClick, playResultReceived } = useSoundEffects()
 
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [inputMessage, setInputMessage] = useState("")
@@ -250,6 +250,9 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
         }
         setSessionStats(stats)
         console.log('[ExpandedNodeCard] Updated stats:', stats)
+
+        // Play completion sound when agent reply is finished
+        playResultReceived()
       }
 
       // All non-notification messages should have message_id
@@ -650,7 +653,7 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
           {/* Session list scroll area */}
           <div
             ref={sessionListRef}
-            className="flex-1 overflow-y-auto p-3 space-y-2 cyberpunk-scrollbar-thin"
+            className="nodrag flex-1 overflow-y-auto p-3 space-y-2 cyberpunk-scrollbar-thin select-text"
             onWheel={(e) => handleManualScroll(e, sessionListRef)}
           >
             {sessions.length === 0 ? (
@@ -749,7 +752,7 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
           ) : (
             <>
               {/* Session Status Bar - Top of message area */}
-              <div className="flex items-center gap-3 border-b border-cyan-400/20 bg-slate-900/50 px-4 py-2.5 backdrop-blur-sm">
+              <div className="nodrag flex items-center gap-3 border-b border-cyan-400/20 bg-slate-900/50 px-4 py-2.5 backdrop-blur-sm">
                 {/* Left: Status indicator + Session topic */}
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                   {/* Status dot with icon (Accessibility: color + icon) */}
@@ -894,7 +897,7 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
               </div>
 
               {/* Input area - Smart merged button design */}
-              <div className="border-t border-cyan-400/20 bg-slate-900/50 p-3">
+              <div className="nodrag border-t border-cyan-400/20 bg-slate-900/50 p-3">
                 {/* Container with visual border */}
                 <div
                   className={cn(
@@ -1007,7 +1010,7 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
               opacity: { duration: 0.2 },
             }}
             className={cn(
-              "relative flex h-[600px] w-[700px] flex-col overflow-hidden rounded-3xl rounded-l-none backdrop-blur-2xl",
+              "nodrag relative flex h-[600px] w-[700px] flex-col overflow-hidden rounded-3xl rounded-l-none backdrop-blur-2xl",
               // Seamless border connection: no left border
               "border-2 border-l-0",
               selected
