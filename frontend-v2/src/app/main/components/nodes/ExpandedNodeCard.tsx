@@ -22,11 +22,16 @@ import {
   X,
   Loader2,
   Copy,
+  Mic,
+  StopCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { type NodeProps } from "@xyflow/react"
 import { apiClient } from "@/lib/api"
 import { SessionStatus, RuntimeStatus, MessageType, type SessionOut, type MessageOut } from "@/lib/types"
+import { useWebSocket } from "@/contexts/websocket-context"
+import type { WSMessage } from "@/contexts/websocket-context"
+import { useVoiceInput } from "@/hooks/use-voice-input"
 import { NodeSettingsMenu } from "./NodeSettingsMenu"
 import { MessageBubble } from "./MessageBubble"
 
@@ -74,15 +79,20 @@ const CircularProgress = ({ percentage }: { percentage: number }) => {
 }
 
 export function ExpandedNodeCard({ data, selected }: NodeProps) {
+  const { isConnected, sendMessage: wsSendMessage, subscribe } = useWebSocket()
+
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [inputMessage, setInputMessage] = useState("")
   const [workspaceExpanded, setWorkspaceExpanded] = useState(false)
   const topicTextRef = useRef<HTMLSpanElement>(null)
   const [scrollDistance, setScrollDistance] = useState(0)
 
-  // Refs for scrollable containers
+  // Refs for scrollable containers and sequence tracking
   const sessionListRef = useRef<HTMLDivElement>(null)
   const messageListRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const maxSequenceRef = useRef<number>(0)
+  const prevMessageCountRef = useRef<number>(0)
 
   // API State
   const [sessions, setSessions] = useState<SessionOut[]>([])
@@ -91,8 +101,35 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set())
 
+  // Session statistics state
+  const [sessionStats, setSessionStats] = useState<{
+    total_cost_usd?: number
+    total_input_tokens?: number
+    total_output_tokens?: number
+    context_usage?: number
+    context_percentage?: number
+  } | null>(null)
+
   // Hardcoded code-server URL for testing
   const codeServerUrl = "http://192.168.1.5:20001/?folder=/home/ren/mosaic/users/1/1/1"
+
+  // Voice input state - save input before recording
+  const savedInputRef = useRef("")
+
+  // Voice input hook
+  const { isRecording, isSupported, interimText, finalText, start, stop } = useVoiceInput(
+    (final, interim) => {
+      // Update input with saved text + final + interim
+      const newText = savedInputRef.current + final
+      setInputMessage(newText)
+    },
+    {
+      lang: "zh-CN",
+      onError: (error) => {
+        console.error("Voice recognition error:", error)
+      }
+    }
+  )
 
   // Get selected session
   const selectedSession = sessions.find((s) => s.session_id === selectedSessionId)
@@ -144,6 +181,145 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
       loadMessages(selectedSessionId)
     }
   }, [selectedSessionId, data.id, data.mosaicId])
+
+  // WebSocket subscription for real-time messages
+  useEffect(() => {
+    if (!selectedSessionId) return
+
+    const unsubscribe = subscribe(selectedSessionId, (message) => {
+      console.log('[ExpandedNodeCard] Received message:', message)
+
+      // Check if it's an error message
+      if ('type' in message && message.type === 'error') {
+        console.error('[ExpandedNodeCard] WebSocket error:', message.message)
+        return
+      }
+
+      const wsMessage = message as WSMessage
+
+      // Verify session_id matches
+      if (wsMessage.session_id !== selectedSessionId) {
+        console.warn('[ExpandedNodeCard] Ignoring message from different session:', wsMessage.session_id)
+        return
+      }
+
+      // Check for sequence gap (message loss detection)
+      if (maxSequenceRef.current > 0) {
+        const expectedSequence = maxSequenceRef.current + 1
+        if (wsMessage.sequence > expectedSequence) {
+          console.warn(
+            `[ExpandedNodeCard] Sequence gap detected! Expected ${expectedSequence}, got ${wsMessage.sequence}. Reloading messages...`
+          )
+          loadMessages(selectedSessionId)
+          return
+        }
+      }
+
+      // Update max sequence number
+      maxSequenceRef.current = Math.max(maxSequenceRef.current, wsMessage.sequence)
+
+      // Skip terminal messages
+      if (wsMessage.message_type === 'terminal_output' || wsMessage.message_type === 'terminal_status') {
+        return
+      }
+
+      // Skip notification messages
+      if (wsMessage.role === 'notification') {
+        console.log('[ExpandedNodeCard] Skipping notification message:', wsMessage)
+        return
+      }
+
+      // Update session statistics if this is a result message
+      if (wsMessage.message_type === 'assistant_result' && wsMessage.payload) {
+        const stats = {
+          total_cost_usd: wsMessage.payload.total_cost_usd,
+          total_input_tokens: wsMessage.payload.total_input_tokens,
+          total_output_tokens: wsMessage.payload.total_output_tokens,
+          context_usage: wsMessage.payload.context_usage,
+          context_percentage: wsMessage.payload.context_percentage,
+        }
+        setSessionStats(stats)
+        console.log('[ExpandedNodeCard] Updated stats:', stats)
+      }
+
+      // All non-notification messages should have message_id
+      if (!wsMessage.message_id) {
+        console.error('[ExpandedNodeCard] Non-notification message missing message_id:', wsMessage)
+        return
+      }
+
+      // Add message to list
+      const newMessage: ParsedMessage = {
+        id: 0,
+        message_id: wsMessage.message_id,
+        user_id: 0,
+        mosaic_id: data.mosaicId!,
+        node_id: data.id,
+        session_id: selectedSessionId,
+        role: wsMessage.role as any,
+        message_type: wsMessage.message_type as MessageType,
+        payload: wsMessage.payload,
+        contentParsed: wsMessage.payload,
+        sequence: wsMessage.sequence,
+        created_at: wsMessage.timestamp,
+      }
+
+      // Add message with deduplication check
+      setMessages((prev) => {
+        // Check if message already exists (prevent duplicates)
+        if (prev.some((msg) => msg.message_id === wsMessage.message_id)) {
+          console.log('[ExpandedNodeCard] Duplicate message detected, skipping:', wsMessage.message_id)
+          return prev
+        }
+        return [...prev, newMessage]
+      })
+
+      // Auto-collapse certain message types
+      if (
+        wsMessage.message_type === 'assistant_thinking' ||
+        wsMessage.message_type === 'system_message' ||
+        wsMessage.message_type === 'assistant_tool_use' ||
+        wsMessage.message_type === 'assistant_tool_output' ||
+        wsMessage.message_type === 'assistant_pre_compact'
+      ) {
+        setCollapsedMessages((prev) => new Set(prev).add(wsMessage.message_id!))
+      }
+    })
+
+    return () => {
+      unsubscribe()
+    }
+  }, [selectedSessionId, subscribe, data.mosaicId, data.id])
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    if (messages.length > prevMessageCountRef.current && messageListRef.current) {
+      requestAnimationFrame(() => {
+        if (messageListRef.current) {
+          messageListRef.current.scrollTop = messageListRef.current.scrollHeight
+        }
+      })
+    }
+    prevMessageCountRef.current = messages.length
+  }, [messages])
+
+  // Auto-resize textarea based on content
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+
+    // Reset height to auto to get the correct scrollHeight
+    textarea.style.height = "auto"
+
+    // Calculate new height (min 1 line, max 8 lines)
+    const lineHeight = 20 // line height for single line
+    const padding = 10 // top + bottom padding (py-2.5 = 10px total)
+    const minHeight = lineHeight + padding // 1 line + padding = 30px
+    const maxHeight = lineHeight * 8 + padding // max 8 lines + padding = 170px
+
+    const newHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)
+    textarea.style.height = `${newHeight}px`
+  }, [inputMessage])
 
   // Calculate scroll distance based on text width
   useEffect(() => {
@@ -235,6 +411,15 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
 
       setMessages(parsed)
 
+      // Update max sequence number from loaded messages
+      if (parsed.length > 0) {
+        const maxSeq = Math.max(...parsed.map((msg) => msg.sequence))
+        maxSequenceRef.current = maxSeq
+        console.log('[ExpandedNodeCard] Loaded messages, max sequence:', maxSeq)
+      } else {
+        maxSequenceRef.current = 0
+      }
+
       // Auto-collapse: thinking, system, tool use/output, pre_compact
       const collapsibleIds = parsed
         .filter(
@@ -248,7 +433,34 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
         .map((msg) => msg.message_id)
 
       setCollapsedMessages(new Set(collapsibleIds))
+
+      // Extract session stats from the last assistant_result message
+      const lastResult = [...parsed]
+        .reverse()
+        .find((msg) => msg.message_type === MessageType.ASSISTANT_RESULT)
+
+      if (lastResult && lastResult.contentParsed) {
+        const stats = {
+          total_cost_usd: lastResult.contentParsed.total_cost_usd,
+          total_input_tokens: lastResult.contentParsed.total_input_tokens,
+          total_output_tokens: lastResult.contentParsed.total_output_tokens,
+          context_usage: lastResult.contentParsed.context_usage,
+          context_percentage: lastResult.contentParsed.context_percentage,
+        }
+        setSessionStats(stats)
+        console.log('[ExpandedNodeCard] Loaded stats:', stats)
+      } else {
+        setSessionStats(null)
+      }
+
       console.log('[ExpandedNodeCard] Loaded messages:', parsed.length)
+
+      // Scroll to bottom after loading messages
+      requestAnimationFrame(() => {
+        if (messageListRef.current) {
+          messageListRef.current.scrollTop = messageListRef.current.scrollHeight
+        }
+      })
     } catch (error) {
       console.error('[ExpandedNodeCard] Failed to load messages:', error)
     } finally {
@@ -257,11 +469,49 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
   }
 
   const handleSendMessage = () => {
-    if (inputMessage.trim() && selectedSession?.status === SessionStatus.ACTIVE) {
-      console.log("Sending:", inputMessage)
-      // TODO: Implement WebSocket message sending
+    if (inputMessage.trim() && selectedSession?.status === SessionStatus.ACTIVE && selectedSessionId) {
+      console.log('[ExpandedNodeCard] Sending message:', inputMessage)
+      wsSendMessage(selectedSessionId, inputMessage)
       setInputMessage("")
+
+      // Reset textarea height
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto"
+      }
     }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && e.ctrlKey) {
+      e.preventDefault()
+      handleSendMessage()
+    }
+  }
+
+  // Smart button handler - voice/send/stop based on state
+  const handleSmartButtonClick = async () => {
+    // Priority 1: Interrupt assistant if busy
+    if (selectedSession?.runtime_status === RuntimeStatus.BUSY) {
+      // TODO: Implement interrupt functionality
+      console.log('[ExpandedNodeCard] Interrupt requested')
+      return
+    }
+
+    // Priority 2: Stop recording if recording
+    if (isRecording) {
+      await stop()
+      return
+    }
+
+    // Priority 3: Send message if has content
+    if (inputMessage.trim()) {
+      handleSendMessage()
+      return
+    }
+
+    // Default: Start voice recording
+    savedInputRef.current = inputMessage
+    await start()
   }
 
   // Format token number with K suffix
@@ -533,6 +783,47 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                   <span className="rounded-md bg-blue-500/20 px-2 py-1 font-mono font-medium text-blue-300">
                     {selectedSession.mode}
                   </span>
+
+                  {/* Divider */}
+                  {sessionStats && <div className="h-4 w-px bg-cyan-400/20" />}
+
+                  {/* Cost */}
+                  {sessionStats?.total_cost_usd !== undefined && (
+                    <div className="flex items-center gap-1">
+                      <Coins className="h-3.5 w-3.5 text-slate-400" />
+                      <span className="font-mono text-slate-300">${sessionStats.total_cost_usd.toFixed(2)}</span>
+                    </div>
+                  )}
+
+                  {/* Tokens: Input / Output */}
+                  {(sessionStats?.total_input_tokens !== undefined || sessionStats?.total_output_tokens !== undefined) && (
+                    <div className="flex items-center gap-1">
+                      <BarChart3 className="h-3.5 w-3.5 text-slate-400" />
+                      {sessionStats.total_input_tokens !== undefined && (
+                        <>
+                          <span className="font-mono text-slate-300">{formatTokens(sessionStats.total_input_tokens)}</span>
+                          <ArrowUp className="h-3 w-3 text-green-400" />
+                        </>
+                      )}
+                      {sessionStats.total_input_tokens !== undefined && sessionStats.total_output_tokens !== undefined && (
+                        <span className="mx-0.5 text-slate-500">/</span>
+                      )}
+                      {sessionStats.total_output_tokens !== undefined && (
+                        <>
+                          <span className="font-mono text-slate-300">{formatTokens(sessionStats.total_output_tokens)}</span>
+                          <ArrowDown className="h-3 w-3 text-blue-400" />
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Context Usage */}
+                  {sessionStats?.context_percentage !== undefined && sessionStats.context_percentage > 0 && (
+                    <div className="flex items-center gap-1">
+                      <CircularProgress percentage={sessionStats.context_percentage} />
+                      <span className="font-mono text-slate-300">{sessionStats.context_percentage.toFixed(1)}%</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -575,42 +866,96 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                 )}
               </div>
 
-              {/* Input area */}
+              {/* Input area - Smart merged button design */}
               <div className="border-t border-cyan-400/20 bg-slate-900/50 p-3">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={inputMessage}
-                    onChange={(e) => setInputMessage(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault()
-                        handleSendMessage()
+                {/* Container with visual border */}
+                <div
+                  className={cn(
+                    "rounded-xl border backdrop-blur-sm transition-all duration-200",
+                    isRecording || selectedSession?.runtime_status === RuntimeStatus.BUSY
+                      ? "border-red-400/30 bg-slate-900/50"
+                      : "border-cyan-400/30 bg-slate-900/50",
+                    "hover:border-cyan-400/50",
+                    "focus-within:border-cyan-400/60 focus-within:shadow-[0_0_20px_rgba(34,211,238,0.15)]"
+                  )}
+                >
+                  {/* Vertical flex layout: textarea on top, button at bottom-right */}
+                  <div className="flex flex-col">
+                    {/* Textarea - top area, full width */}
+                    <textarea
+                      ref={textareaRef}
+                      value={isRecording ? savedInputRef.current + finalText + interimText : inputMessage}
+                      onChange={(e) => setInputMessage(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder={
+                        isRecording
+                          ? "🎤 Listening..."
+                          : selectedSession.status === SessionStatus.CLOSED
+                          ? "Session closed, cannot send messages"
+                          : data.status !== "running"
+                          ? "Node not running"
+                          : "Type your message... (Ctrl+Enter to send)"
                       }
-                    }}
-                    placeholder={
-                      selectedSession.status === SessionStatus.CLOSED
-                        ? "Session closed, cannot send messages"
-                        : data.status !== "running"
-                        ? "Node not running"
-                        : "Type your message... (Enter to send)"
-                    }
-                    disabled={
-                      selectedSession.status === SessionStatus.CLOSED || data.status !== "running"
-                    }
-                    className="flex-1 rounded-xl border border-white/10 bg-slate-800/50 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none focus:ring-2 focus:ring-cyan-400/20 backdrop-blur-xl disabled:opacity-50 disabled:cursor-not-allowed"
-                  />
-                  <button
-                    onClick={handleSendMessage}
-                    disabled={
-                      !inputMessage.trim() ||
-                      selectedSession.status === SessionStatus.CLOSED ||
-                      data.status !== "running"
-                    }
-                    className="group rounded-xl border border-cyan-400/30 bg-cyan-500/20 px-4 transition-all hover:border-cyan-400/50 hover:bg-cyan-500/30 hover:shadow-[0_0_15px_rgba(34,211,238,0.3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
-                  >
-                    <Send className="h-4 w-4 text-cyan-300" />
-                  </button>
+                      disabled={
+                        isRecording ||
+                        selectedSession.status === SessionStatus.CLOSED ||
+                        data.status !== "running"
+                      }
+                      className={cn(
+                        "w-full resize-none overflow-y-auto border-0 bg-transparent px-3 pt-2.5 pb-1",
+                        "text-sm leading-5 text-white placeholder:text-slate-500",
+                        "focus:outline-none focus-visible:ring-0",
+                        "disabled:opacity-70 disabled:cursor-not-allowed",
+                        "cyberpunk-scrollbar-thin"
+                      )}
+                      style={{ minHeight: "30px", maxHeight: "170px" }}
+                    />
+
+                    {/* Bottom area: button aligned to right */}
+                    <div className="flex justify-end px-2 pb-2">
+                      <button
+                        onClick={handleSmartButtonClick}
+                        disabled={
+                          (!inputMessage.trim() && !isRecording && !isSupported) ||
+                          (selectedSession.status === SessionStatus.CLOSED && !isRecording) ||
+                          (data.status !== "running" && !isRecording)
+                        }
+                        className={cn(
+                          "h-8 w-8 rounded-lg border transition-all duration-200",
+                          "flex items-center justify-center cursor-pointer",
+                          // Busy state (interrupt)
+                          selectedSession?.runtime_status === RuntimeStatus.BUSY &&
+                            "bg-red-500/20 border-red-400/30 hover:bg-red-500/30 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)]",
+                          // Recording state (stop)
+                          isRecording &&
+                            selectedSession?.runtime_status !== RuntimeStatus.BUSY &&
+                            "bg-red-500/20 border-red-400/30 hover:bg-red-500/30 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)]",
+                          // Has content (send)
+                          !isRecording &&
+                            selectedSession?.runtime_status !== RuntimeStatus.BUSY &&
+                            inputMessage.trim() &&
+                            "bg-cyan-500/20 border-cyan-400/30 hover:bg-cyan-500/30 hover:shadow-[0_0_15px_rgba(34,211,238,0.3)]",
+                          // Empty (voice)
+                          !isRecording &&
+                            selectedSession?.runtime_status !== RuntimeStatus.BUSY &&
+                            !inputMessage.trim() &&
+                            "bg-slate-800/30 border-slate-600/30 hover:bg-slate-700/30 hover:border-cyan-400/30",
+                          "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
+                        )}
+                      >
+                        {/* Icon based on state priority */}
+                        {selectedSession?.runtime_status === RuntimeStatus.BUSY ? (
+                          <StopCircle className="h-4 w-4 text-red-400" />
+                        ) : isRecording ? (
+                          <Circle className="h-4 w-4 text-red-400 fill-current animate-pulse" />
+                        ) : inputMessage.trim() ? (
+                          <Send className="h-4 w-4 text-cyan-400" />
+                        ) : (
+                          <Mic className="h-4 w-4 text-slate-400" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </>
