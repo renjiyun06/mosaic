@@ -22,6 +22,7 @@ import {
   X,
   Loader2,
   Copy,
+  Check,
   Mic,
   StopCircle,
 } from "lucide-react"
@@ -86,6 +87,7 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [inputMessage, setInputMessage] = useState("")
   const [workspaceExpanded, setWorkspaceExpanded] = useState(false)
+  const [copiedUrl, setCopiedUrl] = useState(false)
   const topicTextRef = useRef<HTMLSpanElement>(null)
   const [scrollDistance, setScrollDistance] = useState(0)
 
@@ -112,8 +114,8 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
     context_percentage?: number
   } | null>(null)
 
-  // Hardcoded code-server URL for testing
-  const codeServerUrl = "http://192.168.1.5:20001/?folder=/home/ren/mosaic/users/1/1/1"
+  // Code-server URL state (fetched from API)
+  const [codeServerUrl, setCodeServerUrl] = useState<string | null>(null)
 
   // Voice input state - save input before recording
   const savedInputRef = useRef("")
@@ -350,6 +352,30 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
       }
     }
   }, [selectedSession?.topic])
+
+  // Load code-server URL when workspace expands
+  useEffect(() => {
+    const loadCodeServerUrl = async () => {
+      if (!data.mosaicId) {
+        console.warn('[ExpandedNodeCard] mosaicId not available for code-server URL')
+        return
+      }
+
+      try {
+        console.log('[ExpandedNodeCard] Loading code-server URL for node:', data.id)
+        const result = await apiClient.getCodeServerUrl(data.mosaicId, data.id)
+        setCodeServerUrl(result.url)
+        console.log('[ExpandedNodeCard] Code-server URL loaded:', result.url)
+      } catch (error) {
+        console.error('[ExpandedNodeCard] Failed to load code-server URL:', error)
+        setCodeServerUrl(null)
+      }
+    }
+
+    if (workspaceExpanded && data.mosaicId) {
+      loadCodeServerUrl()
+    }
+  }, [workspaceExpanded, data.mosaicId, data.id])
 
   // Load sessions for this node
   const loadSessions = async () => {
@@ -1030,46 +1056,64 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                 <span className="text-sm font-medium text-cyan-400">Workspace</span>
               </div>
 
-              {/* Middle: Code-Server URL copy button */}
-              <button
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(codeServerUrl)
-                  } catch (err) {
-                    console.error("Failed to copy:", err)
-                  }
-                }}
-                className={cn(
-                  "flex items-center gap-1.5 rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-400 transition-all duration-200",
-                  // UX Best Practice: hover feedback
-                  "hover:border-cyan-400/30 hover:bg-cyan-400/10 hover:text-cyan-400",
-                  // UX Best Practice: focus state
-                  "focus:outline-none focus:ring-2 focus:ring-cyan-400/50",
-                  // UX Best Practice: cursor
-                  "cursor-pointer"
-                )}
-                aria-label="Copy code-server URL"
-              >
-                <Copy className="h-3 w-3" />
-                <span>Copy URL</span>
-              </button>
+              {/* Right: Action buttons (Copy + Close) */}
+              <div className="flex items-center gap-2">
+                {/* Copy URL button - Icon only, Cyberpunk success feedback */}
+                <button
+                  onClick={async () => {
+                    if (!codeServerUrl) return
 
-              {/* Right: Close button */}
-              <button
-                onClick={() => setWorkspaceExpanded(false)}
-                className={cn(
-                  "rounded-lg border border-white/10 bg-white/5 p-1.5 text-slate-400 transition-all duration-200",
-                  // UX Best Practice: hover feedback
-                  "hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-400 hover:shadow-[0_0_10px_rgba(34,211,238,0.3)]",
-                  // UX Best Practice: focus state
-                  "focus:outline-none focus:ring-2 focus:ring-cyan-400/50",
-                  // UX Best Practice: cursor
-                  "cursor-pointer"
-                )}
-                aria-label="Close workspace"
-              >
-                <X className="h-4 w-4" />
-              </button>
+                    try {
+                      await navigator.clipboard.writeText(codeServerUrl)
+                      // UX Best Practice: Success feedback
+                      setCopiedUrl(true)
+                      // Auto-reset after 2 seconds
+                      setTimeout(() => setCopiedUrl(false), 2000)
+                    } catch (err) {
+                      console.error("Failed to copy:", err)
+                    }
+                  }}
+                  disabled={!codeServerUrl}
+                  className={cn(
+                    "rounded-lg border p-1.5 transition-all duration-200",
+                    // UX Best Practice: cursor
+                    "cursor-pointer disabled:cursor-not-allowed disabled:opacity-50",
+                    // Success state - Cyberpunk cyan neon glow
+                    copiedUrl
+                      ? "border-cyan-400/50 bg-cyan-500/20 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.6)]"
+                      : "border-white/10 bg-white/5 text-slate-400",
+                    // Hover state (only when not copied)
+                    !copiedUrl && "hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-400 hover:shadow-[0_0_10px_rgba(34,211,238,0.3)]",
+                    // UX Best Practice: focus state
+                    "focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
+                  )}
+                  aria-label={copiedUrl ? "URL copied" : "Copy code-server URL"}
+                >
+                  {/* Icon swap: Copy → Check (UX Best Practice) */}
+                  {copiedUrl ? (
+                    <Check className="h-4 w-4 text-cyan-300" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </button>
+
+                {/* Close button */}
+                <button
+                  onClick={() => setWorkspaceExpanded(false)}
+                  className={cn(
+                    "rounded-lg border border-white/10 bg-white/5 p-1.5 text-slate-400 transition-all duration-200",
+                    // UX Best Practice: hover feedback
+                    "hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-400 hover:shadow-[0_0_10px_rgba(34,211,238,0.3)]",
+                    // UX Best Practice: focus state
+                    "focus:outline-none focus:ring-2 focus:ring-cyan-400/50",
+                    // UX Best Practice: cursor
+                    "cursor-pointer"
+                  )}
+                  aria-label="Close workspace"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             {/* iframe Container */}
