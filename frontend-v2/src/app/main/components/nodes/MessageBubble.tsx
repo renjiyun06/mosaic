@@ -204,7 +204,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onToggleColl
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.15 }}
         className={cn(
-          "rounded-lg max-w-[75%] border",
+          "rounded-lg max-w-[60%] border",
           // Subtle styling: background + border (no glow - de-emphasized)
           iconConfig.bgColor,
           iconConfig.borderColor
