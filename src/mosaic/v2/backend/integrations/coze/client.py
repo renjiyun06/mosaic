@@ -467,21 +467,30 @@ class CozeClient:
             # Wait a bit after clicking
             await asyncio.sleep(0.5)
 
-            # Move cursor to end to preserve the auto-filled @skill_name
-            await input_box.press("End")
+            # Get current content to preserve auto-filled skill name
+            logger.debug("Getting current input box content...")
+            current_content = await input_box.evaluate("el => el.textContent")
 
-            # Replace newlines in prompt to prevent premature submission
-            # Newlines in type() are treated as Enter key presses
-            sanitized_prompt = prompt.replace('\n', ' ').replace('\r', ' ')
+            # Prepare full content (skill name + prompt)
+            # Add space to separate skill name from prompt
+            full_content = current_content.strip() + " " + prompt
 
-            # Type the sanitized prompt (with delay to simulate human typing)
-            # Add a space before the prompt to separate from @skill_name
-            await input_box.type(" " + sanitized_prompt, delay=50)
+            # Set content directly using JavaScript for instant filling
+            # This avoids timeout issues with long prompts
+            logger.debug(f"Setting content directly (length: {len(full_content)} chars)...")
+            await input_box.evaluate("""
+                (el, content) => {
+                    el.textContent = content;
+                    // Trigger input event to notify the page
+                    const inputEvent = new Event('input', { bubbles: true });
+                    el.dispatchEvent(inputEvent);
+                }
+            """, full_content)
 
-            # Wait before submitting to ensure all content is typed
-            await asyncio.sleep(1)
+            # Wait a moment for the content to be processed
+            await asyncio.sleep(0.5)
 
-            # Submit the task
+            # Submit the task using Ctrl+Enter
             logger.debug("Submitting task...")
             await input_box.press("Enter")
 
