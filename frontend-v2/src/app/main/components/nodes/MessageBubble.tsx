@@ -8,7 +8,7 @@
  * - Smooth transitions (200ms)
  */
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, memo } from "react"
 import { motion } from "framer-motion"
 import {
   Brain,
@@ -77,7 +77,11 @@ const MESSAGE_ICON_CONFIG = {
   },
 }
 
-export function MessageBubble({ message, onToggleCollapse, isCollapsed = false }: MessageBubbleProps) {
+/**
+ * Performance optimization: Memoize component to prevent re-renders when props don't change
+ * This is critical when there are many messages (50+) in the list
+ */
+export const MessageBubble = memo(function MessageBubble({ message, onToggleCollapse, isCollapsed = false }: MessageBubbleProps) {
   const isUser = message.role === "user"
   const isCollapsibleType =
     message.message_type === MessageType.ASSISTANT_THINKING ||
@@ -275,4 +279,4 @@ export function MessageBubble({ message, onToggleCollapse, isCollapsed = false }
     </motion.div>
     </div>
   )
-}
+})
