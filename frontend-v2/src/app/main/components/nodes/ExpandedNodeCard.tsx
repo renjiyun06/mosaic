@@ -12,7 +12,6 @@ import {
   Settings,
   Bot,
   Circle,
-  MoreVertical,
   ChevronRight,
   Coins,
   BarChart3,
@@ -35,6 +34,7 @@ import type { WSMessage } from "@/contexts/websocket-context"
 import { useVoiceInput } from "@/hooks/use-voice-input"
 import { useSoundEffects } from "../../hooks/useSoundEffects"
 import { NodeSettingsMenu } from "./NodeSettingsMenu"
+import { SessionMenu } from "./SessionMenu"
 import { MessageBubble } from "./MessageBubble"
 
 // Parsed message type (JSON payload)
@@ -788,49 +788,50 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                     : "fill-gray-400 text-gray-400"
 
                 return (
-                  <motion.div
+                  <SessionMenu
                     key={session.session_id}
-                    initial={false}
-                    onClick={() => setSelectedSessionId(session.session_id)}
-                    whileHover={{ x: 3 }}
-                    className={cn(
-                      "group cursor-pointer rounded-xl border p-2.5 transition-colors duration-200",
-                      isSelected
-                        ? "border-cyan-400/50 bg-cyan-500/20 shadow-[0_0_15px_rgba(34,211,238,0.2)]"
-                        : "border-white/10 bg-white/5 hover:border-cyan-400/30 hover:bg-white/10"
-                    )}
+                    sessionId={session.session_id}
+                    sessionStatus={session.status}
+                    onCloseSession={() => {
+                      console.log('[SessionMenu] Close session:', session.session_id)
+                      // TODO: Implement close session functionality
+                    }}
+                    onArchiveSession={() => {
+                      console.log('[SessionMenu] Archive session:', session.session_id)
+                      // TODO: Implement archive session functionality
+                    }}
                   >
-                    {/* Fixed layout: Status dot + Topic (truncated) + Menu button (fixed space) */}
-                    <div className="flex items-center gap-2">
-                      {/* Status indicator - fixed size */}
-                      <Circle className={cn("h-2 w-2 shrink-0", statusColor)} />
+                    <motion.div
+                      initial={false}
+                      onClick={() => setSelectedSessionId(session.session_id)}
+                      whileHover={{ x: 3 }}
+                      className={cn(
+                        "group cursor-pointer rounded-xl border p-2.5 transition-colors duration-200",
+                        isSelected
+                          ? "border-cyan-400/50 bg-cyan-500/20 shadow-[0_0_15px_rgba(34,211,238,0.2)]"
+                          : "border-white/10 bg-white/5 hover:border-cyan-400/30 hover:bg-white/10"
+                      )}
+                    >
+                      {/* Fixed layout: Status dot + Topic (truncated) */}
+                      <div className="flex items-center gap-2">
+                        {/* Status indicator - fixed size */}
+                        <Circle className={cn("h-2 w-2 shrink-0", statusColor)} />
 
-                      {/* Topic text - truncate with min-w-0 fix */}
-                      <div className="min-w-0 flex-1">
-                        <span
-                          className={cn(
-                            "block truncate text-xs font-medium",
-                            isSelected ? "text-cyan-300" : "text-white"
-                          )}
-                          title={session.topic || session.session_id}
-                        >
-                          {session.topic || session.session_id.slice(0, 8)}
-                        </span>
+                        {/* Topic text - truncate with min-w-0 fix */}
+                        <div className="min-w-0 flex-1">
+                          <span
+                            className={cn(
+                              "block truncate text-xs font-medium",
+                              isSelected ? "text-cyan-300" : "text-white"
+                            )}
+                            title={session.topic || session.session_id}
+                          >
+                            {session.topic || session.session_id.slice(0, 8)}
+                          </span>
+                        </div>
                       </div>
-
-                      {/* Menu button - fixed space (20px width) */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          console.log("Menu for", session.session_id)
-                        }}
-                        className="shrink-0 w-5 h-5 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
-                        aria-label="Session menu"
-                      >
-                        <MoreVertical className="h-3.5 w-3.5 text-slate-400 hover:text-cyan-300" />
-                      </button>
-                    </div>
-                  </motion.div>
+                    </motion.div>
+                  </SessionMenu>
                 )
               })
             )}
