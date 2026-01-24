@@ -654,11 +654,11 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
   }
 
   return (
-    <div className="flex h-[600px]" style={{ transformOrigin: "center" }}>
-      {/* Left: Chat Area (1000px - increased for better spacing) */}
+    <div className="flex h-[720px]" style={{ transformOrigin: "center" }}>
+      {/* Left: Chat Area (1200px - optimized for better spacing and readability) */}
       <div
         className={cn(
-          "group relative flex h-[600px] w-[1000px] flex-col overflow-hidden rounded-3xl backdrop-blur-2xl transition-all",
+          "group relative flex h-[720px] w-[1200px] flex-col overflow-hidden rounded-3xl backdrop-blur-2xl transition-all",
           // Conditional border: remove right border when workspace expanded
           workspaceExpanded ? "rounded-r-none border-2 border-r-0" : "border-2",
           selected
@@ -1119,7 +1119,7 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
               opacity: { duration: 0.2 },
             }}
             className={cn(
-              "nodrag relative flex h-[600px] w-[700px] flex-col overflow-hidden rounded-3xl rounded-l-none backdrop-blur-2xl",
+              "nodrag relative flex h-[720px] w-[800px] flex-col overflow-hidden rounded-3xl rounded-l-none backdrop-blur-2xl",
               // Seamless border connection: no left border
               "border-2 border-l-0",
               selected
