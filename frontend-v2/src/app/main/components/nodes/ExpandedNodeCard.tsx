@@ -672,8 +672,24 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
     }
   }
 
-  // Smart button handler - voice/send/stop based on state
-  const handleSmartButtonClick = async () => {
+  // Voice button handler - start/stop recording only
+  const handleVoiceButtonClick = async () => {
+    // Play button click sound
+    playButtonClick()
+
+    // Stop recording if recording
+    if (isRecording) {
+      await stop()
+      return
+    }
+
+    // Start voice recording
+    savedInputRef.current = inputMessage
+    await start()
+  }
+
+  // Send button handler - send message, interrupt, or stop recording
+  const handleSendButtonClick = async () => {
     // Play button click sound
     playButtonClick()
 
@@ -686,21 +702,15 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
       return
     }
 
-    // Priority 2: Stop recording if recording
+    // Priority 2: If recording, stop recording first
     if (isRecording) {
       await stop()
-      return
+      // Wait a bit for the final text to be processed
+      await new Promise(resolve => setTimeout(resolve, 100))
     }
 
-    // Priority 3: Send message if has content
-    if (inputMessage.trim()) {
-      handleSendMessage()
-      return
-    }
-
-    // Default: Start voice recording
-    savedInputRef.current = inputMessage
-    await start()
+    // Priority 3: Send message
+    handleSendMessage()
   }
 
   // Format token number with K suffix
@@ -1108,49 +1118,73 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                       style={{ minHeight: "30px", maxHeight: "170px" }}
                     />
 
-                    {/* Bottom area: button aligned to right */}
-                    <div className="flex justify-end px-2 pb-2">
+                    {/* Bottom area: voice button (left) + send button (right) */}
+                    <div className="flex justify-end gap-2 px-2 pb-2">
+                      {/* Voice Input Button */}
                       <button
-                        onClick={handleSmartButtonClick}
+                        onClick={handleVoiceButtonClick}
                         disabled={
-                          (!inputMessage.trim() && !isRecording && !isSupported) ||
+                          (!isSupported && !isRecording) ||
                           (selectedSession.status === SessionStatus.CLOSED && !isRecording) ||
                           (data.status !== "running" && !isRecording)
                         }
                         className={cn(
                           "h-8 w-8 rounded-lg border transition-all duration-200",
                           "flex items-center justify-center cursor-pointer",
-                          // Active state: scale down + cyan neon pulse (cyberpunk feedback)
-                          "active:scale-95 active:shadow-[0_0_30px_rgba(34,211,238,0.8)]",
-                          // Busy state (interrupt)
-                          selectedSession?.runtime_status === RuntimeStatus.BUSY &&
-                            "bg-red-500/20 border-red-400/30 hover:bg-red-500/30 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)]",
-                          // Recording state (stop)
+                          // Active state: scale down + neon pulse (cyberpunk feedback)
+                          "active:scale-95",
+                          // Recording state (stop) - red with pulse
                           isRecording &&
-                            selectedSession?.runtime_status !== RuntimeStatus.BUSY &&
-                            "bg-red-500/20 border-red-400/30 hover:bg-red-500/30 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)]",
-                          // Has content (send)
+                            "bg-red-500/20 border-red-400/30 hover:bg-red-500/30 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)] active:shadow-[0_0_30px_rgba(239,68,68,0.8)]",
+                          // Default (voice) - gray
                           !isRecording &&
-                            selectedSession?.runtime_status !== RuntimeStatus.BUSY &&
-                            inputMessage.trim() &&
-                            "bg-cyan-500/20 border-cyan-400/30 hover:bg-cyan-500/30 hover:shadow-[0_0_15px_rgba(34,211,238,0.3)]",
-                          // Empty (voice)
-                          !isRecording &&
-                            selectedSession?.runtime_status !== RuntimeStatus.BUSY &&
-                            !inputMessage.trim() &&
-                            "bg-slate-800/30 border-slate-600/30 hover:bg-slate-700/30 hover:border-cyan-400/30",
+                            "bg-slate-800/30 border-slate-600/30 hover:bg-slate-700/30 hover:border-cyan-400/30 active:shadow-[0_0_30px_rgba(34,211,238,0.8)]",
                           "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
                         )}
                       >
-                        {/* Icon based on state priority */}
-                        {selectedSession?.runtime_status === RuntimeStatus.BUSY ? (
-                          <StopCircle className="h-4 w-4 text-red-400" />
-                        ) : isRecording ? (
+                        {/* Voice button icon - only recording or mic */}
+                        {isRecording ? (
                           <Circle className="h-4 w-4 text-red-400 fill-current animate-pulse" />
-                        ) : inputMessage.trim() ? (
-                          <Send className="h-4 w-4 text-cyan-400" />
                         ) : (
                           <Mic className="h-4 w-4 text-slate-400" />
+                        )}
+                      </button>
+
+                      {/* Send Message Button */}
+                      <button
+                        onClick={handleSendButtonClick}
+                        disabled={
+                          (selectedSession?.runtime_status !== RuntimeStatus.BUSY && !inputMessage.trim()) ||
+                          selectedSession.status === SessionStatus.CLOSED ||
+                          data.status !== "running"
+                        }
+                        className={cn(
+                          "h-8 w-8 rounded-lg border transition-all duration-200",
+                          "flex items-center justify-center cursor-pointer",
+                          // Active state: scale down + neon pulse (cyberpunk feedback)
+                          "active:scale-95",
+                          // Busy state (interrupt) - red
+                          selectedSession?.runtime_status === RuntimeStatus.BUSY &&
+                            "bg-red-500/20 border-red-400/30 hover:bg-red-500/30 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)] active:shadow-[0_0_30px_rgba(239,68,68,0.8)]",
+                          // Enabled (has content) - cyan
+                          selectedSession?.runtime_status !== RuntimeStatus.BUSY &&
+                            inputMessage.trim() &&
+                            "bg-cyan-500/20 border-cyan-400/30 hover:bg-cyan-500/30 hover:shadow-[0_0_15px_rgba(34,211,238,0.3)] active:shadow-[0_0_30px_rgba(34,211,238,0.8)]",
+                          // Disabled (no content) - gray
+                          selectedSession?.runtime_status !== RuntimeStatus.BUSY &&
+                            !inputMessage.trim() &&
+                            "bg-slate-800/30 border-slate-600/30",
+                          "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
+                        )}
+                      >
+                        {/* Send button icon - interrupt or send */}
+                        {selectedSession?.runtime_status === RuntimeStatus.BUSY ? (
+                          <StopCircle className="h-4 w-4 text-red-400" />
+                        ) : (
+                          <Send className={cn(
+                            "h-4 w-4",
+                            inputMessage.trim() ? "text-cyan-400" : "text-slate-500"
+                          )} />
                         )}
                       </button>
                     </div>
