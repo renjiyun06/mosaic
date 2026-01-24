@@ -438,81 +438,112 @@ class CozeClient:
             await self.browser_manager.connect(self.cdp_url)
             page = await self.browser_manager.get_page()
 
-            # Navigate to skill activation URL
-            logger.debug(f"Activating skill with URL: ?skills={skill_id}")
-            activation_url = f"https://www.coze.cn/?skills={skill_id}"
-            await page.goto(activation_url)
+            # Ensure we're on Coze domain for API calls to work
+            if not page.url.startswith("https://www.coze.cn"):
+                logger.debug("Navigating to Coze homepage...")
+                await page.goto("https://www.coze.cn/")
+                await asyncio.sleep(1)
 
-            # Wait longer for page to fully load and skill to be auto-filled
-            await asyncio.sleep(2)
+            # Step 1: Create task via API
+            logger.debug("Creating task via API...")
+            create_task_result = await page.evaluate("""
+                async () => {
+                    const response = await fetch('https://www.coze.cn/api/coze_space/create_task', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            task_name: "未命名任务",
+                            task_type: 1,
+                            mcp_tool_list: [],
+                            source_from: 0
+                        })
+                    });
 
-            # Locate input box
-            logger.debug("Locating input box...")
-            input_box = page.get_by_role("textbox")
-
-            # Wait for input box to be visible
-            try:
-                await input_box.wait_for(state='visible', timeout=5000)
-            except Exception as e:
-                raise CozeInvocationError(f"Input box not found - skill may not be installed: {e}")
-
-            logger.debug("Input box found")
-
-            # Wait a moment for auto-fill to complete (skill name should be auto-filled)
-            await asyncio.sleep(1)
-
-            # Click input box to focus
-            await input_box.click()
-
-            # Wait a bit after clicking
-            await asyncio.sleep(0.5)
-
-            # Get current content to preserve auto-filled skill name
-            logger.debug("Getting current input box content...")
-            current_content = await input_box.evaluate("el => el.textContent")
-
-            # Prepare full content (skill name + prompt)
-            # Add space to separate skill name from prompt
-            full_content = current_content.strip() + " " + prompt
-
-            # Set content directly using JavaScript for instant filling
-            # This avoids timeout issues with long prompts
-            logger.debug(f"Setting content directly (length: {len(full_content)} chars)...")
-            await input_box.evaluate("""
-                (el, content) => {
-                    el.textContent = content;
-                    // Trigger input event to notify the page
-                    const inputEvent = new Event('input', { bubbles: true });
-                    el.dispatchEvent(inputEvent);
+                    const data = await response.json();
+                    return {
+                        status: response.status,
+                        data: data
+                    };
                 }
-            """, full_content)
+            """)
 
-            # Wait a moment for the content to be processed
-            await asyncio.sleep(0.5)
+            # Check create_task response
+            if create_task_result['status'] != 200:
+                error_msg = create_task_result.get('data', {}).get('msg', 'Unknown error')
+                raise CozeInvocationError(f"Failed to create task: {error_msg}")
 
-            # Submit the task using Ctrl+Enter
-            logger.debug("Submitting task...")
-            await input_box.press("Enter")
+            # Extract task_id from response
+            task_data = create_task_result.get('data', {}).get('data', {}).get('task', {})
+            task_id = task_data.get('task_id')
 
-            # Wait for redirect to task page
-            logger.debug("Waiting for task creation...")
-            try:
-                await page.wait_for_url("https://www.coze.cn/task/*", timeout=10000)
-            except Exception as e:
-                raise CozeInvocationError(f"Failed to create task - timeout waiting for redirect: {e}")
+            if not task_id:
+                raise CozeInvocationError("No task_id in create_task response")
 
-            # Extract task URL and ID
-            task_url = page.url
+            logger.debug(f"Task created: {task_id}")
 
-            # Parse task_id from URL
-            # Format: https://www.coze.cn/task/7598770107879686438 or /task/7598770107879686438?params
-            if '/task/' in task_url:
-                task_id = task_url.split('/task/')[1]
-                # Remove query parameters if present
-                if '?' in task_id:
-                    task_id = task_id.split('?')[0]
-            else:
-                raise CozeInvocationError(f"Invalid task URL format: {task_url}")
+            # Step 2: Invoke skill via chat API
+            logger.debug(f"Invoking skill via chat API (prompt length: {len(prompt)} chars)...")
+
+            # Escape prompt for JavaScript string
+            escaped_prompt = prompt.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
+
+            chat_result = await page.evaluate(f"""
+                async () => {{
+                    const payload = {{
+                        task_id: "{task_id}",
+                        query: "{escaped_prompt}",
+                        files: [],
+                        chat_type: "query",
+                        task_run_mode: 2,
+                        disable_team_mode: false,
+                        all_authorized_mcp: true,
+                        reference_template_list: [],
+                        agent_ids: [],
+                        favorites: [],
+                        extra_info: {{
+                            ab_config: "{{}}"
+                        }},
+                        reference_content: "",
+                        guiding_id: "",
+                        skill_id_list: ["{skill_id}"],
+                        thinking: false,
+                        reference_items: []
+                    }};
+
+                    const response = await fetch('https://www.coze.cn/api/coze_space/chat', {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json',
+                        }},
+                        body: JSON.stringify(payload)
+                    }});
+
+                    const data = await response.json();
+                    return {{
+                        status: response.status,
+                        data: data
+                    }};
+                }}
+            """)
+
+            # Check chat response
+            if chat_result['status'] != 200:
+                error_msg = chat_result.get('data', {}).get('msg', 'Unknown error')
+                raise CozeInvocationError(f"Failed to invoke skill: {error_msg}")
+
+            chat_data = chat_result.get('data', {})
+            if chat_data.get('code') != 0:
+                error_msg = chat_data.get('msg', 'Unknown error')
+                raise CozeInvocationError(f"Skill invocation failed: {error_msg}")
+
+            logger.debug("Skill invoked successfully")
+
+            # Step 3: Navigate to task page
+            task_url = f"https://www.coze.cn/task/{task_id}"
+            logger.debug(f"Navigating to task page: {task_url}")
+            await page.goto(task_url)
 
             logger.info(f"Task created: task_id={task_id}")
 
