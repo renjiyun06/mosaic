@@ -36,6 +36,7 @@ import { useSoundEffects } from "../../hooks/useSoundEffects"
 import { NodeSettingsMenu } from "./NodeSettingsMenu"
 import { SessionMenu } from "./SessionMenu"
 import { MessageBubble } from "./MessageBubble"
+import { CloseSessionDialog } from "./CloseSessionDialog"
 
 // Parsed message type (JSON payload)
 interface ParsedMessage extends MessageOut {
@@ -116,6 +117,10 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
 
   // Code-server URL state (fetched from API)
   const [codeServerUrl, setCodeServerUrl] = useState<string | null>(null)
+
+  // Close session dialog state
+  const [closeSessionDialogOpen, setCloseSessionDialogOpen] = useState(false)
+  const [sessionToClose, setSessionToClose] = useState<SessionOut | null>(null)
 
   // Voice input state - save input before recording
   const savedInputRef = useRef("")
@@ -303,6 +308,59 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
       setLoadingMessages(false)
     }
   }, [data.mosaicId, data.id])
+
+  // Handle close session
+  const handleCloseSession = useCallback(async () => {
+    if (!data.mosaicId || !sessionToClose) {
+      console.warn('[ExpandedNodeCard] Missing mosaicId or sessionToClose')
+      return
+    }
+
+    try {
+      console.log('[ExpandedNodeCard] Closing session:', sessionToClose.session_id)
+      await apiClient.closeSession(data.mosaicId, data.id, sessionToClose.session_id)
+      console.log('[ExpandedNodeCard] Session closed successfully')
+
+      // Refresh sessions list
+      await loadSessions()
+
+      // If the closed session was selected, deselect it
+      if (selectedSessionId === sessionToClose.session_id) {
+        setSelectedSessionId(null)
+        setMessages([])
+        setSessionStats(null)
+      }
+    } catch (error) {
+      console.error('[ExpandedNodeCard] Failed to close session:', error)
+      throw error
+    }
+  }, [data.mosaicId, data.id, sessionToClose, loadSessions, selectedSessionId])
+
+  // Handle archive session
+  const handleArchiveSession = useCallback(async (sessionId: string) => {
+    if (!data.mosaicId) {
+      console.warn('[ExpandedNodeCard] Missing mosaicId')
+      return
+    }
+
+    try {
+      console.log('[ExpandedNodeCard] Archiving session:', sessionId)
+      await apiClient.archiveSession(data.mosaicId, data.id, sessionId)
+      console.log('[ExpandedNodeCard] Session archived successfully')
+
+      // Refresh sessions list
+      await loadSessions()
+
+      // If the archived session was selected, deselect it
+      if (selectedSessionId === sessionId) {
+        setSelectedSessionId(null)
+        setMessages([])
+        setSessionStats(null)
+      }
+    } catch (error) {
+      console.error('[ExpandedNodeCard] Failed to archive session:', error)
+    }
+  }, [data.mosaicId, data.id, loadSessions, selectedSessionId])
 
   // Load sessions when component mounts
   useEffect(() => {
@@ -793,12 +851,11 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                     sessionId={session.session_id}
                     sessionStatus={session.status}
                     onCloseSession={() => {
-                      console.log('[SessionMenu] Close session:', session.session_id)
-                      // TODO: Implement close session functionality
+                      setSessionToClose(session)
+                      setCloseSessionDialogOpen(true)
                     }}
                     onArchiveSession={() => {
-                      console.log('[SessionMenu] Archive session:', session.session_id)
-                      // TODO: Implement archive session functionality
+                      handleArchiveSession(session.session_id)
                     }}
                   >
                     <motion.div
@@ -1223,6 +1280,15 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Close Session Confirmation Dialog */}
+      <CloseSessionDialog
+        open={closeSessionDialogOpen}
+        onOpenChange={setCloseSessionDialogOpen}
+        sessionId={sessionToClose?.session_id || ""}
+        sessionTopic={sessionToClose?.topic}
+        onConfirm={handleCloseSession}
+      />
     </div>
   )
 }
