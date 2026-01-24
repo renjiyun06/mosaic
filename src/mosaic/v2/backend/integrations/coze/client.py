@@ -402,7 +402,8 @@ class CozeClient:
         for reliability. Does NOT wait for task completion.
 
         Args:
-            skill_id: Skill ID (must be already installed)
+            skill_id: Skill ID (19-digit identifier)
+                     Example: "7594680716416499753"
             prompt: Task description/instruction for the skill
 
         Returns:
@@ -466,14 +467,18 @@ class CozeClient:
             # Wait a bit after clicking
             await asyncio.sleep(0.5)
 
-            # Move cursor to end and add user's prompt
-            # Press End key to move to end of existing content
+            # Move cursor to end to preserve the auto-filled @skill_name
             await input_box.press("End")
 
-            # Add a space if not already present, then add the prompt
-            await input_box.type(" " + prompt, delay=50)  # Type with 50ms delay between keys
+            # Replace newlines in prompt to prevent premature submission
+            # Newlines in type() are treated as Enter key presses
+            sanitized_prompt = prompt.replace('\n', ' ').replace('\r', ' ')
 
-            # Wait before submitting to ensure all content is filled
+            # Type the sanitized prompt (with delay to simulate human typing)
+            # Add a space before the prompt to separate from @skill_name
+            await input_box.type(" " + sanitized_prompt, delay=50)
+
+            # Wait before submitting to ensure all content is typed
             await asyncio.sleep(1)
 
             # Submit the task
