@@ -204,7 +204,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onToggleColl
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.15 }}
         className={cn(
-          "rounded-lg max-w-[60%] border",
+          "rounded-lg w-full border",
           // Subtle styling: background + border (no glow - de-emphasized)
           iconConfig.bgColor,
           iconConfig.borderColor
@@ -247,7 +247,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onToggleColl
       <div className="px-3 py-2 select-text cursor-text">
         {message.message_type === MessageType.ASSISTANT_TOOL_USE ? (
           // Tool use: show JSON formatted
-          <pre className="text-xs font-mono text-slate-200 whitespace-pre-wrap break-words leading-relaxed overflow-x-auto">
+          <pre className="text-xs font-mono text-slate-200 whitespace-pre-wrap break-words leading-relaxed overflow-x-hidden">
             {JSON.stringify(message.contentParsed?.tool_input, null, 2)}
           </pre>
         ) : message.message_type === MessageType.ASSISTANT_TOOL_OUTPUT ? (
@@ -261,7 +261,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onToggleColl
               if (typeof output === "string") {
                 return output.trim() || <span className="text-slate-400 italic">Empty string</span>
               }
-              return <pre className="overflow-x-auto">{JSON.stringify(output, null, 2)}</pre>
+              return <pre className="whitespace-pre-wrap break-words overflow-x-hidden">{JSON.stringify(output, null, 2)}</pre>
             })()}
           </div>
         ) : message.message_type === MessageType.ASSISTANT_PRE_COMPACT ? (
