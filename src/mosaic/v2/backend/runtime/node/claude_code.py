@@ -1788,10 +1788,15 @@ class ClaudeCodeSession(MosaicSession):
         - task_complete: Signal that the current task has been completed
         - execute_geogebra_command: Execute GeoGebra commands in geometry canvas
         - programmable_return: Return result of a programmable call request
-        - coze_search_skill: Search for skills on Coze platform (TODO: implementation pending)
-        - coze_install_skill: Install a skill on Coze platform (TODO: implementation pending)
-        - coze_invoke_skill: Invoke a skill with task prompt (TODO: implementation pending)
-        - coze_get_result: Get task result from Coze platform (TODO: implementation pending)
+        - coze_search_skill: Search for skills on Coze platform
+        - coze_install_skill: Install a skill on Coze platform
+        - coze_invoke_skill: Invoke a skill with task prompt
+        - coze_get_result: Get task result from Coze platform
+        - coze_create_skill: Create a new skill with natural language description
+        - coze_send_message: Send a message to Coze skill creation agent
+        - coze_get_agent_response: Wait for and get the latest response from Coze skill creation agent
+        - coze_deploy_skill: Deploy a skill to Coze platform
+        - coze_list_user_skills: List user skills on Coze platform
         """
         @tool(
             "send_message",
@@ -3002,6 +3007,525 @@ class ClaudeCodeSession(MosaicSession):
                     ]
                 }
 
+        # ========== Coze Skill Creation and Deployment Tools ==========
+
+        @tool(
+            "coze_create_skill",
+            "Create a new skill on Coze platform with natural language description",
+            {
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "Natural language description of the skill to create (e.g., '创建一个计算器技能')"
+                    },
+                    "space_id": {
+                        "type": "string",
+                        "description": "Workspace/space ID (optional, uses default if not provided)",
+                        "default": None
+                    }
+                },
+                "required": ["description"]
+            }
+        )
+        async def coze_create_skill(args):
+            """Submit skill creation request to Coze platform."""
+            from ...integrations.coze.exceptions import (
+                CozeError,
+                CozeConnectionError
+            )
+
+            try:
+                description = args['description']
+                space_id = args.get('space_id')
+
+                logger.info(
+                    f"coze_create_skill: description='{description}', space_id={space_id}, "
+                    f"session_id={self.session_id}"
+                )
+
+                # Create skill using the shared CozeClient instance
+                result = await self.node._coze_client.create_skill(
+                    description=description,
+                    space_id=space_id
+                )
+
+                project_id = result.get('project_id')
+                logger.info(
+                    f"coze_create_skill: Successfully submitted skill creation - project_id='{project_id}'"
+                )
+
+                # Format response
+                import json
+                result_json = json.dumps(result, ensure_ascii=False, indent=2)
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Skill creation submitted successfully!\n\n"
+                                    f"Project ID: {project_id}\n"
+                                    f"Project Type: {result.get('project_type')}\n\n"
+                                    f"Use coze_wait_skill_creation to wait for completion.\n\n"
+                                    f"Full result:\n{result_json}"
+                        }
+                    ]
+                }
+
+            except ValueError as e:
+                logger.error(f"coze_create_skill: Invalid parameter - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Invalid parameter - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeConnectionError as e:
+                logger.error(f"coze_create_skill: Connection failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to connect to Coze platform. Please ensure Chrome browser is running with CDP enabled."
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"coze_create_skill: Unexpected error - {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Unexpected error occurred - {str(e)}"
+                        }
+                    ]
+                }
+
+        @tool(
+            "coze_send_message",
+            "Send a message to Coze skill creation agent",
+            {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project ID (19-digit identifier from create_skill result)"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Message to send to the agent"
+                    }
+                },
+                "required": ["project_id", "message"]
+            }
+        )
+        async def coze_send_message(args):
+            """Send a message to Coze skill creation agent."""
+            from ...integrations.coze.exceptions import (
+                CozeError,
+                CozeConnectionError,
+                CozeTaskError
+            )
+
+            try:
+                project_id = args['project_id']
+                message = args['message']
+
+                logger.info(
+                    f"coze_send_message: project_id='{project_id}', "
+                    f"message='{message[:50]}...', session_id={self.session_id}"
+                )
+
+                # Send message using the shared CozeClient instance
+                result = await self.node._coze_client.send_message(
+                    project_id=project_id,
+                    message=message
+                )
+
+                logger.info(f"coze_send_message: Message sent successfully - project_id='{project_id}'")
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Message sent successfully to project {project_id}.\n\n"
+                                    f"Use coze_get_agent_response to wait for and get the agent's reply."
+                        }
+                    ]
+                }
+
+            except ValueError as e:
+                logger.error(f"coze_send_message: Invalid parameter - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Invalid parameter - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeConnectionError as e:
+                logger.error(f"coze_send_message: Connection failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to connect to Coze platform. Please ensure Chrome browser is running with CDP enabled."
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"coze_send_message: Unexpected error - {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Unexpected error occurred - {str(e)}"
+                        }
+                    ]
+                }
+
+        @tool(
+            "coze_get_agent_response",
+            "Wait for and get the latest response from Coze skill creation agent",
+            {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project ID (19-digit identifier from create_skill result)"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Maximum wait time in seconds (default: 300)",
+                        "default": 300
+                    },
+                    "poll_interval": {
+                        "type": "integer",
+                        "description": "Polling interval in seconds (default: 3)",
+                        "default": 3
+                    }
+                },
+                "required": ["project_id"]
+            }
+        )
+        async def coze_get_agent_response(args):
+            """Wait for and get the latest response from Coze agent."""
+            from ...integrations.coze.exceptions import (
+                CozeError,
+                CozeConnectionError,
+                CozeTaskError
+            )
+
+            try:
+                project_id = args['project_id']
+                timeout = args.get('timeout', 300)
+                poll_interval = args.get('poll_interval', 3)
+
+                logger.info(
+                    f"coze_get_agent_response: project_id='{project_id}', "
+                    f"timeout={timeout}s, poll_interval={poll_interval}s, "
+                    f"session_id={self.session_id}"
+                )
+
+                # Get agent response using the shared CozeClient instance
+                result = await self.node._coze_client.get_agent_response(
+                    project_id=project_id,
+                    timeout=timeout,
+                    poll_interval=poll_interval
+                )
+
+                agent_response = result.get('agent_response', '')
+
+                logger.info(
+                    f"coze_get_agent_response: Received response - "
+                    f"project_id='{project_id}', length={len(agent_response)}"
+                )
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Agent response received (length: {len(agent_response)} characters):\n\n"
+                                    f"{agent_response}"
+                        }
+                    ]
+                }
+
+            except ValueError as e:
+                logger.error(f"coze_get_agent_response: Invalid parameter - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Invalid parameter - {str(e)}"
+                        }
+                    ]
+                }
+
+            except TimeoutError as e:
+                logger.error(f"coze_get_agent_response: Timeout - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Agent did not complete response within {timeout} seconds. "
+                                    f"The agent may still be generating. "
+                                    f"You can try again with a longer timeout."
+                        }
+                    ]
+                }
+
+            except CozeTaskError as e:
+                logger.error(f"coze_get_agent_response: Failed to get response - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to get agent response - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeConnectionError as e:
+                logger.error(f"coze_get_agent_response: Connection failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to connect to Coze platform. Please ensure Chrome browser is running with CDP enabled."
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"coze_get_agent_response: Unexpected error - {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Unexpected error occurred - {str(e)}"
+                        }
+                    ]
+                }
+
+        @tool(
+            "coze_deploy_skill",
+            "Deploy a skill to Coze platform",
+            {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project ID (19-digit identifier from skill creation)"
+                    },
+                    "deploy_name": {
+                        "type": "string",
+                        "description": "Deployment name (optional, uses project name if not provided)",
+                        "default": None
+                    }
+                },
+                "required": ["project_id"]
+            }
+        )
+        async def coze_deploy_skill(args):
+            """Submit skill deployment request to Coze platform."""
+            from ...integrations.coze.exceptions import (
+                CozeError,
+                CozeConnectionError
+            )
+
+            try:
+                project_id = args['project_id']
+                deploy_name = args.get('deploy_name')
+
+                logger.info(
+                    f"coze_deploy_skill: project_id='{project_id}', deploy_name='{deploy_name}', "
+                    f"session_id={self.session_id}"
+                )
+
+                # Deploy skill using the shared CozeClient instance
+                result = await self.node._coze_client.deploy_skill(
+                    project_id=project_id,
+                    deploy_name=deploy_name
+                )
+
+                deploy_id = result.get('deploy_id')
+                logger.info(
+                    f"coze_deploy_skill: Successfully submitted deployment - deploy_id='{deploy_id}'"
+                )
+
+                # Format response
+                import json
+                result_json = json.dumps(result, ensure_ascii=False, indent=2)
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Skill deployment submitted successfully!\n\n"
+                                    f"Deploy ID: {deploy_id}\n"
+                                    f"Project ID: {project_id}\n\n"
+                                    f"Use coze_wait_deployment to wait for completion.\n\n"
+                                    f"Full result:\n{result_json}"
+                        }
+                    ]
+                }
+
+            except ValueError as e:
+                logger.error(f"coze_deploy_skill: Invalid parameter - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Invalid parameter - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeConnectionError as e:
+                logger.error(f"coze_deploy_skill: Connection failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to connect to Coze platform. Please ensure Chrome browser is running with CDP enabled."
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"coze_deploy_skill: Unexpected error - {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Unexpected error occurred - {str(e)}"
+                        }
+                    ]
+                }
+
+        @tool(
+            "coze_list_user_skills",
+            "List user's skills on Coze platform (created or installed)",
+            {
+                "type": "object",
+                "properties": {
+                    "skill_type": {
+                        "type": "string",
+                        "description": "Type of skills to list: 'created' (skills created by user), 'installed' (skills installed by user), 'all' (all skills)",
+                        "enum": ["created", "installed", "all"],
+                        "default": "created"
+                    },
+                    "keyword": {
+                        "type": "string",
+                        "description": "Optional keyword to filter skills (default: empty = all skills)",
+                        "default": ""
+                    }
+                },
+                "required": []
+            }
+        )
+        async def coze_list_user_skills(args):
+            """List user's skills on Coze platform."""
+            from ...integrations.coze.exceptions import (
+                CozeError,
+                CozeConnectionError
+            )
+
+            try:
+                skill_type = args.get('skill_type', 'created')
+                keyword = args.get('keyword', '')
+
+                logger.info(
+                    f"coze_list_user_skills: skill_type='{skill_type}', keyword='{keyword}', "
+                    f"session_id={self.session_id}"
+                )
+
+                # List skills using the shared CozeClient instance
+                skills = await self.node._coze_client.list_user_skills(
+                    skill_type=skill_type,
+                    keyword=keyword
+                )
+
+                logger.info(
+                    f"coze_list_user_skills: Found {len(skills)} skills - skill_type='{skill_type}'"
+                )
+
+                # Format response
+                import json
+                skills_json = json.dumps(skills, ensure_ascii=False, indent=2)
+
+                # Build human-readable summary
+                skill_type_label = {
+                    "created": "创建的",
+                    "installed": "安装的",
+                    "all": "全部"
+                }.get(skill_type, skill_type)
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"找到 {len(skills)} 个{skill_type_label}技能:\n\n{skills_json}"
+                        }
+                    ]
+                }
+
+            except ValueError as e:
+                logger.error(f"coze_list_user_skills: Invalid parameter - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Invalid parameter - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeConnectionError as e:
+                logger.error(f"coze_list_user_skills: Connection failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to connect to Coze platform. Please ensure Chrome browser is running with CDP enabled."
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"coze_list_user_skills: Unexpected error - {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Unexpected error occurred - {str(e)}"
+                        }
+                    ]
+                }
+
         # Build tools list based on session mode
         tools = [
             send_message,
@@ -3013,7 +3537,12 @@ class ClaudeCodeSession(MosaicSession):
             coze_search_skill,
             coze_install_skill,
             coze_invoke_skill,
-            coze_get_result
+            coze_get_result,
+            coze_create_skill,
+            coze_send_message,
+            coze_get_agent_response,
+            coze_deploy_skill,
+            coze_list_user_skills,
         ]
 
         # Add LONG_RUNNING mode specific tools

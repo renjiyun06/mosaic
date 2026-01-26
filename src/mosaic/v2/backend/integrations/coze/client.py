@@ -664,6 +664,788 @@ class CozeClient:
             logger.error(f"Failed to get task result: {e}")
             raise CozeTaskError(f"Failed to get task result: {e}") from e
 
+    async def create_skill(
+        self,
+        description: str,
+        space_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a new skill on Coze platform with natural language description.
+
+        This method submits a skill creation request using the Coze platform's
+        AI-powered skill generation feature. The platform will use the provided
+        description to automatically generate the skill code and configuration.
+
+        Args:
+            description: Natural language description of the skill to create
+                        (e.g., "创建一个计算器技能", "Create a weather query skill")
+            space_id: Optional workspace/space ID. If not provided, uses default
+                     workspace from user's session
+
+        Returns:
+            Dictionary containing:
+                - project_id (str): Unique identifier for the created project (19-digit)
+                - project_type (int): Project type (5 = Skill)
+
+        Raises:
+            ValueError: If description is empty or invalid
+            CozeConnectionError: If browser connection fails
+            CozeError: If API request fails
+
+        Example:
+            result = await client.create_skill("创建一个计算器技能")
+            project_id = result['project_id']  # "7599215566771093544"
+        """
+        import json
+
+        # Validate inputs
+        if not description or not description.strip():
+            raise ValueError("description cannot be empty")
+
+        logger.info(f"Creating skill with description: {description[:50]}...")
+
+        # Initialize browser manager if not already done
+        if not self.browser_manager:
+            self.browser_manager = BrowserManager()
+
+        try:
+            # Connect to browser and get page
+            await self.browser_manager.connect(self.cdp_url)
+            page = await self.browser_manager.get_page()
+
+            # Always navigate to home page before UI interaction
+            if page.url != "https://code.coze.cn/home":
+                logger.debug("Navigating to code.coze.cn/home...")
+                await page.goto("https://code.coze.cn/home", wait_until="networkidle")
+                await asyncio.sleep(2)  # Wait for page to fully load
+                logger.debug(f"Navigated to: {page.url}")
+
+            # Wait for page to fully load and tabs to be available
+            logger.debug("Waiting for page to load...")
+            await asyncio.sleep(2)
+
+            # Click "技能" tab
+            logger.debug("Clicking '技能' tab...")
+            skill_tab_clicked = await page.evaluate("""
+                async () => {
+                    const tabs = document.querySelectorAll('[role="tab"]');
+                    console.log('Found tabs:', tabs.length);
+                    for (const tab of tabs) {
+                        if (tab.textContent.trim() === '技能') {
+                            console.log('Found 技能 tab, focusing and clicking...');
+                            tab.focus();
+                            tab.click();
+                            // Wait for React to update state
+                            await new Promise(resolve => setTimeout(resolve, 300));
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            """)
+
+            if skill_tab_clicked:
+                logger.debug("Successfully clicked '技能' tab")
+                await asyncio.sleep(1)  # Wait for tab state to update
+            else:
+                logger.error("Could not find '技能' tab")
+                raise CozeError("Could not find '技能' tab")
+
+            # Wait for text input box to be loaded and ready
+            logger.debug("Waiting for text input box to load...")
+            await asyncio.sleep(2)  # Wait for input box to fully load after tab switch
+
+            # Step 1: Find and clear the text input box
+            logger.debug("Finding text input box...")
+            input_found = await page.evaluate("""
+                () => {
+                    // Find the main multiline textbox
+                    const textboxes = document.querySelectorAll('[role="textbox"]');
+                    console.log('Found textboxes:', textboxes.length);
+
+                    for (const textbox of textboxes) {
+                        const rect = textbox.getBoundingClientRect();
+                        console.log('Textbox visible:', rect.width, rect.height);
+                        if (rect.width > 100 && rect.height > 30) {
+                            console.log('Found main textbox, clearing content');
+                            // Clear existing content
+                            textbox.textContent = '';
+                            textbox.innerText = '';
+
+                            // Dispatch events to notify the page
+                            textbox.dispatchEvent(new Event('input', { bubbles: true }));
+                            textbox.dispatchEvent(new Event('change', { bubbles: true }));
+                            textbox.focus();
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            """)
+
+            if not input_found:
+                logger.error("Could not find text input box")
+                raise CozeError("Could not find text input box")
+
+            logger.debug("Cleared input box")
+            await asyncio.sleep(0.3)
+
+            # Step 2: Fill the text input box with description
+            logger.debug(f"Filling input with: {description}")
+            fill_success = await page.evaluate("""
+                (description) => {
+                    const textboxes = document.querySelectorAll('[role="textbox"]');
+
+                    for (const textbox of textboxes) {
+                        const rect = textbox.getBoundingClientRect();
+                        if (rect.width > 100 && rect.height > 30) {
+                            console.log('Filling textbox with description');
+                            // Fill with description
+                            textbox.textContent = description;
+                            textbox.innerText = description;
+
+                            // Dispatch events to notify the page
+                            textbox.dispatchEvent(new Event('input', { bubbles: true }));
+                            textbox.dispatchEvent(new Event('change', { bubbles: true }));
+                            textbox.focus();
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            """, description)
+
+            if not fill_success:
+                logger.error("Could not fill text input box")
+                raise CozeError("Could not fill text input box")
+
+            logger.debug(f"Successfully filled input with: {description}")
+            await asyncio.sleep(0.5)
+
+            # Set up network request listener to capture the API response
+            logger.debug("Setting up network listener...")
+
+            # We'll use CDP session to listen for network responses
+            cdp_session = await page.context.new_cdp_session(page)
+            await cdp_session.send('Network.enable')
+
+            captured_response = {}
+
+            async def handle_response(params):
+                if 'create_vibe_project' in params.get('response', {}).get('url', ''):
+                    request_id = params['requestId']
+                    # Get response body
+                    try:
+                        response_body = await cdp_session.send('Network.getResponseBody', {'requestId': request_id})
+                        captured_response['data'] = json.loads(response_body['body'])
+                        logger.debug("Captured API response from network!")
+                    except Exception as e:
+                        logger.warning(f"Could not get response body: {e}")
+
+            cdp_session.on('Network.responseReceived', handle_response)
+
+            # Press Enter to submit
+            logger.debug("Pressing Enter to submit...")
+            await page.keyboard.press('Enter')
+
+            # Wait for the API call to complete
+            logger.debug("Waiting for API response...")
+            for i in range(20):  # Wait up to 10 seconds
+                if captured_response:
+                    break
+                await asyncio.sleep(0.5)
+
+            if not captured_response:
+                logger.warning("Did not capture network response")
+                raise CozeError("Did not capture network response")
+
+            # Process captured response
+            response = captured_response['data']
+            logger.debug(f"Captured API Response: {json.dumps(response, ensure_ascii=False)}")
+
+            # Check response
+            if response.get('code') != 0:
+                error_msg = response.get('msg') or response.get('message', 'Unknown error')
+                raise CozeError(f"Failed to create skill: {error_msg}")
+
+            # Extract result
+            data = response.get('data', {})
+            project_id = data.get('project_id')
+            project_type = data.get('project_type')
+
+            if not project_id:
+                raise CozeError("No project_id in API response")
+
+            logger.info(f"Skill creation submitted: project_id={project_id}, project_type={project_type}")
+
+            return {
+                "project_id": project_id,
+                "project_type": project_type
+            }
+
+        except (CozeError, ValueError):
+            # Re-raise known exceptions
+            raise
+        except Exception as e:
+            logger.error(f"Failed to create skill: {e}")
+            raise CozeError(f"Failed to create skill: {e}") from e
+
+    async def send_message(
+        self,
+        project_id: str,
+        message: str
+    ) -> Dict[str, Any]:
+        """
+        Send a message to the Coze skill creation agent.
+
+        Args:
+            project_id: Project ID (19-digit identifier)
+            message: Message to send to the agent
+
+        Returns:
+            Dictionary containing:
+                - success (bool): Whether message was sent successfully
+                - project_id (str): Project identifier
+
+        Raises:
+            ValueError: If project_id or message is invalid
+            CozeTaskError: If unable to send message
+            CozeConnectionError: If browser connection fails
+        """
+        # Validate inputs
+        if not project_id or not project_id.strip():
+            raise ValueError("project_id cannot be empty")
+        if not message or not message.strip():
+            raise ValueError("message cannot be empty")
+
+        logger.info(f"Sending message to project {project_id}: {message[:50]}...")
+
+        # Initialize browser manager if not already done
+        if not self.browser_manager:
+            self.browser_manager = BrowserManager()
+
+        try:
+            # Connect to browser and get page
+            await self.browser_manager.connect(self.cdp_url)
+            page = await self.browser_manager.get_page()
+
+            # Navigate to project page
+            project_url = f"https://code.coze.cn/p/{project_id}"
+            logger.debug(f"Navigating to project page: {project_url}")
+            await page.goto(project_url, wait_until="networkidle")
+
+            # Wait for the CodeMirror input box to appear and be ready
+            logger.debug("Waiting for input box to load...")
+            await page.wait_for_selector('.cm-content[role="textbox"]', timeout=10000)
+            await asyncio.sleep(2)  # Extra time for CodeMirror to fully initialize
+
+            # Click on the input box to focus it
+            logger.debug("Clicking on input box...")
+            await page.click('.cm-content[role="textbox"]')
+            await asyncio.sleep(0.3)
+
+            # Hack: First type empty string to trigger events
+            await page.keyboard.type('')
+            await asyncio.sleep(0.3)
+
+            # Then type the actual message
+            logger.debug("Typing message...")
+            await page.keyboard.type(message)
+            await asyncio.sleep(0.5)
+
+            # Press Enter to send
+            logger.debug("Pressing Enter to send message...")
+            await page.keyboard.press('Enter')
+            await asyncio.sleep(1)
+
+            logger.info(f"Message sent successfully to project {project_id}")
+
+            return {
+                "success": True,
+                "project_id": project_id
+            }
+
+        except (CozeTaskError, ValueError):
+            # Re-raise known exceptions
+            raise
+        except Exception as e:
+            logger.error(f"Failed to send message: {e}")
+            raise CozeTaskError(f"Failed to send message: {e}") from e
+
+    async def get_agent_response(
+        self,
+        project_id: str,
+        timeout: int = 300,
+        poll_interval: int = 3
+    ) -> Dict[str, Any]:
+        """
+        Wait for and get the latest response from Coze skill creation agent.
+
+        This method waits until the agent stops generating (stop button disappears),
+        then returns the agent's latest response.
+
+        Args:
+            project_id: Project ID (19-digit identifier)
+            timeout: Maximum wait time in seconds (default: 300)
+            poll_interval: Polling interval in seconds (default: 3)
+
+        Returns:
+            Dictionary containing:
+                - project_id (str): Project identifier
+                - agent_response (str): Complete agent response text
+
+        Raises:
+            ValueError: If project_id is invalid
+            TimeoutError: If agent doesn't complete within timeout
+            CozeTaskError: If unable to get response
+            CozeConnectionError: If browser connection fails
+        """
+        # Validate inputs
+        if not project_id or not project_id.strip():
+            raise ValueError("project_id cannot be empty")
+
+        logger.info(f"Waiting for agent response: project_id={project_id}, timeout={timeout}s")
+
+        # Initialize browser manager if not already done
+        if not self.browser_manager:
+            self.browser_manager = BrowserManager()
+
+        try:
+            # Connect to browser and get page
+            await self.browser_manager.connect(self.cdp_url)
+            page = await self.browser_manager.get_page()
+
+            # Navigate to project page if needed
+            project_url = f"https://code.coze.cn/p/{project_id}"
+            if page.url != project_url:
+                logger.debug(f"Navigating to project page: {project_url}")
+                await page.goto(project_url, wait_until="networkidle")
+                await asyncio.sleep(2)
+
+            # Poll until agent stops generating
+            start_time = asyncio.get_event_loop().time()
+
+            while True:
+                # Check timeout
+                elapsed = asyncio.get_event_loop().time() - start_time
+                if elapsed > timeout:
+                    raise TimeoutError(
+                        f"Agent did not complete response within {timeout} seconds"
+                    )
+
+                # Check if agent is still generating and get latest response
+                logger.debug(f"Polling agent status (elapsed: {elapsed:.1f}s)")
+                check_result = await page.evaluate("""
+                    () => {
+                        // Check if stop button exists (indicates agent is still generating)
+                        const stopButton = document.querySelector('.bg-primary.cursor-pointer.rounded-max');
+                        const isGenerating = stopButton !== null;
+
+                        // Get the latest agent response
+                        let agentResponse = '';
+
+                        try {
+                            // Find the conversation container
+                            const scrollContainer = document.querySelector('.scrollbar-uKmmSj');
+                            if (!scrollContainer) {
+                                return { isGenerating, agentResponse, error: 'Conversation container not found' };
+                            }
+
+                            // Get all message blocks
+                            const messageBlocks = Array.from(scrollContainer.children).filter(child =>
+                                child.className.includes('w-full') && child.innerText.trim().length > 0
+                            );
+
+                            if (messageBlocks.length === 0) {
+                                return { isGenerating, agentResponse, error: 'No messages found' };
+                            }
+
+                            // Get the last message block
+                            const lastBlock = messageBlocks[messageBlocks.length - 1];
+
+                            // Extract agent reply (has 'group/assistant-message-group' class)
+                            const assistantMessage = lastBlock.querySelector('.group\\\\/assistant-message-group');
+
+                            if (assistantMessage) {
+                                agentResponse = assistantMessage.innerText;
+                            } else {
+                                return { isGenerating, agentResponse, error: 'Agent message not found in last block' };
+                            }
+                        } catch (e) {
+                            return { isGenerating, agentResponse, error: e.toString() };
+                        }
+
+                        return { isGenerating, agentResponse };
+                    }
+                """)
+
+                is_generating = check_result.get('isGenerating', False)
+                agent_response = check_result.get('agentResponse', '')
+                error = check_result.get('error')
+
+                if error:
+                    logger.debug(f"Polling error: {error}")
+
+                logger.debug(f"Agent generating: {is_generating}, response length: {len(agent_response)}")
+
+                # If not generating, we're done
+                if not is_generating:
+                    logger.info(f"Agent response received (length: {len(agent_response)} chars)")
+
+                    return {
+                        "project_id": project_id,
+                        "agent_response": agent_response
+                    }
+
+                # Still generating, wait and retry
+                logger.debug(f"Agent still generating, waiting {poll_interval}s...")
+                await asyncio.sleep(poll_interval)
+
+        except (CozeTaskError, ValueError, TimeoutError):
+            # Re-raise known exceptions
+            raise
+        except Exception as e:
+            logger.error(f"Failed to get agent response: {e}")
+            raise CozeTaskError(f"Failed to get agent response: {e}") from e
+
+    async def deploy_skill(
+        self,
+        project_id: str,
+        deploy_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Deploy a skill to Coze platform.
+
+        This method submits a deployment request for a created skill, making it
+        available for use on the Coze platform.
+
+        Args:
+            project_id: Project ID from create_skill() (19-digit identifier)
+            deploy_name: Optional deployment name. If not provided, uses project name
+
+        Returns:
+            Dictionary containing:
+                - deploy_history_id (str): Unique identifier for the deployment (19-digit)
+                - prev_deploy_history_id (str): Previous deployment ID, or "0" if first deployment
+                - project_id (str): Associated project identifier
+
+        Raises:
+            ValueError: If project_id is invalid
+            CozeConnectionError: If browser connection fails
+            CozeError: If deployment request fails
+
+        Example:
+            result = await client.deploy_skill("7599215566771093544")
+            deploy_history_id = result['deploy_history_id']
+        """
+        # Validate inputs
+        if not project_id or not project_id.strip():
+            raise ValueError("project_id cannot be empty")
+
+        logger.info(f"Deploying skill: project_id={project_id}")
+
+        # Initialize browser manager if not already done
+        if not self.browser_manager:
+            self.browser_manager = BrowserManager()
+
+        try:
+            # Connect to browser and get page
+            await self.browser_manager.connect(self.cdp_url)
+            page = await self.browser_manager.get_page()
+
+            # Ensure we're on code.coze.cn domain for API calls to work
+            if not page.url.startswith("https://code.coze.cn"):
+                logger.debug("Navigating to code.coze.cn...")
+                await page.goto("https://code.coze.cn/home")
+                await asyncio.sleep(1)
+
+            # Step 1: Encrypt project secrets
+            encrypt_api_url = "https://code.coze.cn/api/permission_api/project_secret/encrypt_project_secret"
+            encrypt_request_body = {
+                "project_id": project_id,
+                "encrypt_secrets": {"secrets": []}
+            }
+
+            logger.debug(f"Encrypting project secrets: {encrypt_api_url}")
+
+            # Make encryption API request
+            encrypt_response = await page.evaluate("""
+                async (args) => {
+                    const response = await fetch(args.url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-requested-with': 'XMLHttpRequest',
+                            'Agw-Js-Conv': 'str'
+                        },
+                        body: JSON.stringify(args.body)
+                    });
+                    return await response.json();
+                }
+            """, {"url": encrypt_api_url, "body": encrypt_request_body})
+
+            # Check encryption response
+            if encrypt_response.get('code') != 0:
+                error_msg = encrypt_response.get('msg') or encrypt_response.get('message', 'Unknown error')
+                raise CozeError(f"Failed to encrypt project secrets: {error_msg}")
+
+            # Extract sealed_secrets
+            sealed_secrets = encrypt_response.get('data', {}).get('sealed_secrets', '')
+            logger.debug(f"Obtained sealed secrets: {sealed_secrets[:50]}...")
+
+            # Step 2: Create deployment with encrypted secrets
+            deploy_api_url = "https://code.coze.cn/api/coding/deployment/deploy_history/create"
+            deploy_request_body = {
+                "project_id": project_id,
+                "encrypt_env_variable": sealed_secrets,
+                "table_sync_configs": []
+            }
+
+            logger.debug(f"Creating deployment via API: {deploy_api_url}")
+
+            # Make deployment API request (keep project_id as string)
+            response = await page.evaluate("""
+                async (args) => {
+                    const response = await fetch(args.url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-requested-with': 'XMLHttpRequest',
+                            'Agw-Js-Conv': 'str'
+                        },
+                        body: JSON.stringify(args.body)
+                    });
+                    return await response.json();
+                }
+            """, {"url": deploy_api_url, "body": deploy_request_body})
+
+            logger.debug(f"Deploy skill API response: {response}")
+
+            # Check response
+            if response.get('code') != 0:
+                error_msg = response.get('msg') or response.get('message', 'Unknown error')
+                raise CozeError(f"Failed to deploy skill: {error_msg}")
+
+            # Extract result
+            data = response.get('data', {})
+            deploy_history_id = data.get('deploy_history_id')
+            prev_deploy_history_id = data.get('prev_deploy_history_id')
+
+            if not deploy_history_id:
+                raise CozeError("No deploy_history_id in API response")
+
+            logger.info(f"Skill deployment submitted: deploy_history_id={deploy_history_id}")
+
+            return {
+                "deploy_history_id": deploy_history_id,
+                "prev_deploy_history_id": prev_deploy_history_id,
+                "project_id": project_id
+            }
+
+        except (CozeError, ValueError):
+            # Re-raise known exceptions
+            raise
+        except Exception as e:
+            logger.error(f"Failed to deploy skill: {e}")
+            raise CozeError(f"Failed to deploy skill: {e}") from e
+
+    async def list_user_skills(
+        self,
+        skill_type: str = "created",
+        keyword: str = ""
+    ) -> List[Dict[str, Any]]:
+        """
+        List user's skills on Coze platform by type.
+
+        This method retrieves skills from the user's account by navigating to
+        the skills page and intercepting the API response.
+
+        Args:
+            skill_type: Type of skills to list
+                - "created": Skills created by user (sources=1)
+                - "installed": Skills installed by user (sources=2,3)
+                - "all": All skills (sources=1,2,3)
+            keyword: Optional keyword to filter skills
+
+        Returns:
+            List of skill dictionaries:
+            [
+                {
+                    "skill_id": "7599503685093425192",
+                    "name": "算24点技能",
+                    "description": "...",
+                    "source": 1,  # 1=created, 2=installed
+                    "icon_url": "...",
+                    "status": 1
+                },
+                ...
+            ]
+
+        Raises:
+            ValueError: If skill_type is invalid
+            CozeConnectionError: If browser connection fails
+            CozeError: If API request fails
+
+        Example:
+            # Get created skills
+            skills = await client.list_user_skills("created")
+
+            # Get installed skills
+            skills = await client.list_user_skills("installed")
+        """
+        # Validate inputs
+        valid_types = ["created", "installed", "all"]
+        if skill_type not in valid_types:
+            raise ValueError(f"Invalid skill_type: {skill_type}. Must be one of {valid_types}")
+
+        logger.info(f"Listing user skills: type={skill_type}, keyword='{keyword}'")
+
+        # Initialize browser manager if not already done
+        if not self.browser_manager:
+            self.browser_manager = BrowserManager()
+
+        try:
+            # Connect to browser and get page
+            await self.browser_manager.connect(self.cdp_url)
+            page = await self.browser_manager.get_page()
+
+            # Storage for captured API data
+            captured_data = []
+
+            # Define response handler for API interception
+            async def handle_response(response):
+                """Intercept API responses for user_skill endpoint"""
+                if '/api/marketplace/product/skill/user_skill' in response.url:
+                    try:
+                        data = await response.body()
+                        import json
+                        parsed_data = json.loads(data)
+
+                        if parsed_data.get('code') == 0:
+                            skills_count = len(parsed_data.get('data', {}).get('skills', []))
+                            logger.debug(f"Captured user skills API ({skills_count} skills found)")
+                            captured_data.append(parsed_data)
+                    except Exception as e:
+                        logger.warning(f"Error intercepting API: {e}")
+
+            # Register response handler BEFORE navigation
+            page.on('response', handle_response)
+
+            # Navigate to skills page with "my" tab
+            logger.debug("Navigating to skills page...")
+            await page.goto("https://www.coze.cn/skills?tab=my")
+            await asyncio.sleep(2)  # Wait for page to load
+
+            # Handle different skill types
+            if skill_type == "all":
+                # Get both created and installed skills
+                logger.debug("Getting all skills (created + installed)...")
+
+                # First, get created skills - click "我创建的"
+                logger.debug("Clicking '我创建的' radio button...")
+                clicked = await page.evaluate("""
+                    async () => {
+                        const radios = document.querySelectorAll('[role="radio"]');
+                        for (const radio of radios) {
+                            if (radio.textContent && radio.textContent.includes('我创建的')) {
+                                radio.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                """)
+                if not clicked:
+                    logger.warning("Could not find '我创建的' radio button")
+                await asyncio.sleep(3)  # Wait for API response
+
+                # Now click "我安装的" to get installed skills
+                logger.debug("Clicking '我安装的' radio button...")
+                clicked = await page.evaluate("""
+                    async () => {
+                        const radios = document.querySelectorAll('[role="radio"]');
+                        for (const radio of radios) {
+                            if (radio.textContent && radio.textContent.includes('我安装的')) {
+                                radio.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                """)
+                if not clicked:
+                    logger.warning("Could not find '我安装的' radio button")
+                await asyncio.sleep(3)  # Wait for API response
+
+            elif skill_type == "created":
+                logger.debug("Clicking '我创建的' radio button...")
+                clicked = await page.evaluate("""
+                    async () => {
+                        const radios = document.querySelectorAll('[role="radio"]');
+                        for (const radio of radios) {
+                            if (radio.textContent && radio.textContent.includes('我创建的')) {
+                                radio.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                """)
+                if not clicked:
+                    logger.warning("Could not find '我创建的' radio button")
+                await asyncio.sleep(3)  # Wait for API response
+
+            elif skill_type == "installed":
+                # "我安装的" is selected by default, just wait for API
+                logger.debug("Using default '我安装的' selection...")
+                await asyncio.sleep(2)
+
+            # Remove handler to prevent duplicate captures
+            try:
+                page.remove_listener('response', handle_response)
+            except Exception:
+                pass
+
+            if not captured_data:
+                logger.warning("No API response captured")
+                return []
+
+            # Merge all captured responses (for "all" type, we have multiple responses)
+            all_skills_raw = []
+            for api_data in captured_data:
+                skills_in_response = api_data.get('data', {}).get('skills', [])
+                all_skills_raw.extend(skills_in_response)
+
+            logger.info(f"API returned {len(all_skills_raw)} skills total from {len(captured_data)} responses")
+
+            # Parse and structure the data, removing duplicates by skill_id
+            skills_dict = {}
+            for skill_raw in all_skills_raw:
+                skill_id = skill_raw.get('id', '')
+                if skill_id and skill_id not in skills_dict:
+                    skill = {
+                        "skill_id": skill_id,
+                        "name": skill_raw.get('show_name', ''),
+                        "description": skill_raw.get('show_description', ''),
+                        "source": skill_raw.get('source', 0),
+                        "icon_url": skill_raw.get('icon_url', ''),
+                        "status": skill_raw.get('status', 0),
+                        "space_id": skill_raw.get('space_id', ''),
+                        "owner_type": skill_raw.get('owner_type', 0)
+                    }
+                    skills_dict[skill_id] = skill
+
+            skills = list(skills_dict.values())
+            logger.info(f"Successfully parsed {len(skills)} unique skills")
+            return skills
+
+        except ValueError:
+            # Re-raise validation errors
+            raise
+        except Exception as e:
+            logger.error(f"Failed to list user skills: {e}")
+            raise CozeError(f"Failed to list user skills: {e}") from e
+
     # ============================================================================
     # Helper Methods (Private)
     # ============================================================================
