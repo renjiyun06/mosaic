@@ -16,6 +16,8 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { MosaicOut } from "@/lib/types"
+import { useTheme } from "../../hooks/useTheme"
+import { textScrimTokens } from "../../themes/apple-glass"
 
 interface MosaicSidebarProps {
   mosaics: MosaicOut[]
@@ -36,6 +38,10 @@ export function MosaicSidebar({
   onDelete,
   onToggleStatus,
 }: MosaicSidebarProps) {
+  // Theme detection
+  const { theme } = useTheme()
+  const isAppleGlass = theme === 'apple-glass'
+
   // Track which mosaic has an open context menu
   const [contextMenuOpenFor, setContextMenuOpenFor] = useState<number | null>(null)
   // Track which mosaic should have tooltip disabled (after menu closes)
@@ -71,16 +77,55 @@ export function MosaicSidebar({
 
   return (
     <Tooltip.Provider delayDuration={300}>
-      <div className="fixed left-0 top-0 bottom-0 w-16 bg-gradient-to-b from-slate-950/95 via-slate-950/90 to-cyan-950/85 backdrop-blur-xl border-r border-cyan-500/20 shadow-[2px_0_30px_rgba(34,211,238,0.1)] z-50">
+      <div
+        className="fixed left-0 top-0 bottom-0 w-16 border-r z-50"
+        style={{
+          background: isAppleGlass
+            ? 'var(--glass-background)'
+            : 'linear-gradient(to bottom, rgba(2, 6, 23, 0.95), rgba(2, 6, 23, 0.90), rgba(8, 51, 68, 0.85))',
+          backdropFilter: isAppleGlass ? 'var(--backdrop-blur)' : 'blur(24px)',
+          borderColor: isAppleGlass ? 'var(--glass-border)' : 'rgba(34, 211, 238, 0.2)',
+          boxShadow: isAppleGlass
+            ? 'var(--shadow-glass)'
+            : '2px 0 30px rgba(34, 211, 238, 0.1)',
+        }}
+      >
       <div className="flex flex-col items-center py-4 space-y-3">
         {/* Logo / Mosaic Text */}
         <div className="py-2 relative">
-          <span className="font-mono font-bold text-xs tracking-wider bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent [text-shadow:0_0_20px_rgba(34,211,238,0.8)] drop-shadow-[0_0_15px_rgba(34,211,238,0.6)] drop-shadow-[0_0_25px_rgba(34,211,238,0.4)]">
+          <span
+            className="font-mono font-bold text-xs tracking-wider"
+            style={
+              isAppleGlass
+                ? {
+                    color: 'var(--color-primary)',
+                    background: textScrimTokens.title.background,
+                    backdropFilter: textScrimTokens.title.backdropFilter,
+                    border: textScrimTokens.title.border,
+                    borderRadius: textScrimTokens.title.borderRadius,
+                    padding: '4px 8px',
+                    display: 'inline-block',
+                  }
+                : {
+                    background: 'linear-gradient(to right, #22d3ee, #3b82f6, #a855f7)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    textShadow: '0 0 20px rgba(34, 211, 238, 0.8)',
+                    filter:
+                      'drop-shadow(0 0 15px rgba(34, 211, 238, 0.6)) drop-shadow(0 0 25px rgba(34, 211, 238, 0.4))',
+                  }
+            }
+          >
             MOSAIC
           </span>
         </div>
 
-        <div className="w-12 h-px bg-slate-800" />
+        <div
+          className="w-12 h-px"
+          style={{
+            background: isAppleGlass ? 'var(--glass-border)' : '#1e293b',
+          }}
+        />
 
         {/* Mosaic Instance List */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 py-2 px-2 cyberpunk-scrollbar-thin">
@@ -95,30 +140,75 @@ export function MosaicSidebar({
                         onClick={() => onSwitch(mosaic.id)}
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
-                        className={cn(
-                          "relative w-12 h-12 rounded-xl cursor-pointer transition-all flex items-center justify-center",
+                        className="relative w-12 h-12 rounded-xl cursor-pointer transition-all flex items-center justify-center"
+                        style={
                           currentMosaicId === mosaic.id
-                            ? "bg-cyan-500/20 border-2 border-cyan-500 shadow-[0_0_20px_rgba(34,211,238,0.3)]"
-                            : "bg-slate-800/50 border-2 border-transparent hover:border-cyan-500/30 hover:bg-slate-800/80"
-                        )}
+                            ? isAppleGlass
+                              ? {
+                                  background: 'var(--glass-background-light)',
+                                  backdropFilter: 'var(--backdrop-blur)',
+                                  border: '1px solid var(--color-accent)',
+                                  boxShadow: 'var(--shadow-button)',
+                                }
+                              : {
+                                  background: 'rgba(34, 211, 238, 0.2)',
+                                  border: '2px solid #22d3ee',
+                                  boxShadow: '0 0 20px rgba(34, 211, 238, 0.3)',
+                                }
+                            : isAppleGlass
+                              ? {
+                                  background: 'rgba(255, 255, 255, 0.02)',
+                                  backdropFilter: 'blur(4px)',
+                                  border: '1px solid transparent',
+                                }
+                              : {
+                                  background: 'rgba(30, 41, 59, 0.5)',
+                                  border: '2px solid transparent',
+                                }
+                        }
                       >
                         {/* Mosaic First Letter */}
                         <span
-                          className={cn(
-                            "font-bold text-lg font-mono",
-                            currentMosaicId === mosaic.id ? "text-cyan-400" : "text-slate-400 group-hover:text-cyan-300"
-                          )}
+                          className="font-bold text-lg font-mono transition-colors"
+                          style={{
+                            color:
+                              currentMosaicId === mosaic.id
+                                ? isAppleGlass
+                                  ? 'var(--color-accent)'
+                                  : '#22d3ee'
+                                : isAppleGlass
+                                  ? 'var(--color-text-secondary)'
+                                  : '#94a3b8',
+                          }}
                         >
                           {mosaic.name[0].toUpperCase()}
                         </span>
 
                         {/* Status Indicator */}
-                        <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-slate-950 flex items-center justify-center bg-slate-900">
+                        <div
+                          className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
+                          style={{
+                            border: isAppleGlass
+                              ? '1.5px solid var(--glass-border)'
+                              : '2px solid #020617',
+                            background: isAppleGlass
+                              ? 'rgba(255, 255, 255, 0.8)'
+                              : '#0f172a',
+                          }}
+                        >
                           <Circle
                             className={cn(
                               "h-2 w-2 fill-current",
-                              mosaic.status === "running" ? "text-green-400 animate-pulse" : "text-slate-600"
+                              mosaic.status === "running" ? "animate-pulse" : ""
                             )}
+                            style={{
+                              color:
+                                mosaic.status === "running"
+                                  ? 'var(--color-success)'
+                                  : isAppleGlass
+                                    ? 'var(--color-text-muted)'
+                                    : '#475569',
+                            }}
                           />
                         </div>
                       </motion.div>
@@ -128,14 +218,40 @@ export function MosaicSidebar({
                   {/* Context Menu Portal */}
                   <ContextMenu.Portal>
                     <ContextMenu.Content
-                      className="min-w-[12rem] rounded-xl border border-cyan-400/20 bg-slate-900/95 backdrop-blur-xl shadow-[0_0_30px_rgba(34,211,238,0.2)] p-1.5 z-[100]"
+                      className="min-w-[12rem] rounded-xl p-1.5 z-[100]"
+                      style={{
+                        background: isAppleGlass
+                          ? 'var(--glass-background)'
+                          : 'rgba(15, 23, 42, 0.95)',
+                        backdropFilter: isAppleGlass
+                          ? 'var(--backdrop-blur)'
+                          : 'blur(24px)',
+                        border: isAppleGlass
+                          ? '0.5px solid var(--glass-border)'
+                          : '1px solid rgba(34, 211, 238, 0.2)',
+                        boxShadow: isAppleGlass
+                          ? 'var(--shadow-glass)'
+                          : '0 0 30px rgba(34, 211, 238, 0.2)',
+                      }}
                       collisionPadding={10}
                     >
-                      {/* Neon top accent */}
-                      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/50 to-transparent" />
+                      {/* Top accent */}
+                      <div
+                        className="absolute inset-x-0 top-0 h-px"
+                        style={{
+                          background: isAppleGlass
+                            ? 'linear-gradient(to right, transparent, rgba(255, 255, 255, 0.4), transparent)'
+                            : 'linear-gradient(to right, transparent, rgba(34, 211, 238, 0.5), transparent)',
+                        }}
+                      />
                       {mosaic.status === "running" ? (
                         <ContextMenu.Item
-                          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-red-500/20 hover:text-red-300 outline-none cursor-pointer transition-colors"
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm outline-none cursor-pointer transition-colors"
+                          style={{
+                            color: isAppleGlass
+                              ? 'var(--color-text-primary)'
+                              : '#cbd5e1',
+                          }}
                           onSelect={() => onToggleStatus(mosaic)}
                         >
                           <Square className="h-4 w-4" />
@@ -143,7 +259,12 @@ export function MosaicSidebar({
                         </ContextMenu.Item>
                       ) : (
                         <ContextMenu.Item
-                          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-green-500/20 hover:text-green-300 outline-none cursor-pointer transition-colors"
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm outline-none cursor-pointer transition-colors"
+                          style={{
+                            color: isAppleGlass
+                              ? 'var(--color-text-primary)'
+                              : '#cbd5e1',
+                          }}
                           onSelect={() => onToggleStatus(mosaic)}
                         >
                           <Play className="h-4 w-4" />
@@ -152,7 +273,12 @@ export function MosaicSidebar({
                       )}
 
                       <ContextMenu.Item
-                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-cyan-500/20 hover:text-cyan-300 outline-none cursor-pointer transition-colors"
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm outline-none cursor-pointer transition-colors"
+                        style={{
+                          color: isAppleGlass
+                            ? 'var(--color-text-primary)'
+                            : '#cbd5e1',
+                        }}
                         onSelect={() => onEdit(mosaic)}
                       >
                         <Edit className="h-4 w-4" />
@@ -160,7 +286,12 @@ export function MosaicSidebar({
                       </ContextMenu.Item>
 
                       <ContextMenu.Item
-                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-red-500/20 hover:text-red-300 outline-none cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm outline-none cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{
+                          color: isAppleGlass
+                            ? 'var(--color-text-primary)'
+                            : '#cbd5e1',
+                        }}
                         onSelect={() => onDelete(mosaic)}
                         disabled={mosaic.node_count > 0}
                       >
@@ -176,9 +307,41 @@ export function MosaicSidebar({
                   <Tooltip.Content
                     side="right"
                     sideOffset={16}
-                    className="rounded-xl border border-cyan-400/30 bg-slate-900/95 backdrop-blur-xl shadow-[0_0_30px_rgba(34,211,238,0.2)] px-3 py-2 z-[60]"
+                    className="rounded-xl px-3 py-2 z-[60]"
+                    style={{
+                      background: isAppleGlass
+                        ? 'var(--glass-background)'
+                        : 'rgba(15, 23, 42, 0.95)',
+                      backdropFilter: isAppleGlass
+                        ? 'var(--backdrop-blur)'
+                        : 'blur(24px)',
+                      border: isAppleGlass
+                        ? '0.5px solid var(--glass-border)'
+                        : '1px solid rgba(34, 211, 238, 0.3)',
+                      boxShadow: isAppleGlass
+                        ? 'var(--shadow-glass)'
+                        : '0 0 30px rgba(34, 211, 238, 0.2)',
+                    }}
                   >
-                    <div className="font-semibold text-sm text-cyan-300">{mosaic.name}</div>
+                    <div
+                      className="font-semibold text-sm"
+                      style={
+                        isAppleGlass
+                          ? {
+                              color: 'var(--color-primary)',
+                              background: textScrimTokens.subtitle.background,
+                              backdropFilter: textScrimTokens.subtitle.backdropFilter,
+                              border: textScrimTokens.subtitle.border,
+                              borderRadius: textScrimTokens.subtitle.borderRadius,
+                              padding: textScrimTokens.subtitle.padding,
+                            }
+                          : {
+                              color: '#22d3ee',
+                            }
+                      }
+                    >
+                      {mosaic.name}
+                    </div>
                   </Tooltip.Content>
                 </Tooltip.Portal>
               </Tooltip.Root>
@@ -186,16 +349,33 @@ export function MosaicSidebar({
           ))}
         </div>
 
-        <div className="w-12 h-px bg-slate-800" />
+        <div
+          className="w-12 h-px"
+          style={{
+            background: isAppleGlass ? 'var(--glass-border)' : '#1e293b',
+          }}
+        />
 
         {/* Create New Mosaic Button */}
         <motion.div
           onClick={onCreateNew}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="w-12 h-12 rounded-xl border-2 border-dashed border-slate-700 hover:border-cyan-500 cursor-pointer flex items-center justify-center transition-all group"
+          className="w-12 h-12 rounded-xl border-2 border-dashed cursor-pointer flex items-center justify-center transition-all group"
+          style={{
+            borderColor: isAppleGlass
+              ? 'var(--glass-border)'
+              : '#334155',
+          }}
         >
-          <Plus className="h-5 w-5 text-slate-600 group-hover:text-cyan-400 transition-colors" />
+          <Plus
+            className="h-5 w-5 transition-colors"
+            style={{
+              color: isAppleGlass
+                ? 'var(--color-text-muted)'
+                : '#475569',
+            }}
+          />
         </motion.div>
       </div>
     </div>

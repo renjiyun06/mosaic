@@ -33,6 +33,8 @@ import { useWebSocket } from "@/contexts/websocket-context"
 import type { WSMessage } from "@/contexts/websocket-context"
 import { useVoiceInput } from "@/hooks/use-voice-input"
 import { useSoundEffects } from "../../hooks/useSoundEffects"
+import { useTheme } from "../../hooks/useTheme"
+import { textScrimTokens } from "../../themes/apple-glass"
 import { NodeSettingsMenu } from "./NodeSettingsMenu"
 import { SessionMenu } from "./SessionMenu"
 import { MessageBubble } from "./MessageBubble"
@@ -82,6 +84,8 @@ const CircularProgress = ({ percentage }: { percentage: number }) => {
 }
 
 export function ExpandedNodeCard({ data, selected }: NodeProps) {
+  const { theme } = useTheme()
+  const isAppleGlass = theme === 'apple-glass'
   const { isConnected, sendMessage: wsSendMessage, interrupt, subscribe } = useWebSocket()
   const { playMessageSent, playButtonClick, playResultReceived } = useSoundEffects()
 
@@ -726,14 +730,29 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
       {/* Left: Chat Area (1200px - optimized for better spacing and readability) */}
       <div
         className={cn(
-          "group relative flex h-[720px] w-[1200px] flex-col overflow-hidden rounded-3xl backdrop-blur-2xl transition-all",
+          "group relative flex h-[720px] w-[1200px] flex-col overflow-hidden rounded-3xl transition-all",
           // Conditional border: remove right border when workspace expanded
-          workspaceExpanded ? "rounded-r-none border-2 border-r-0" : "border-2",
-          selected
-            ? "border-cyan-400/80 shadow-[0_0_40px_rgba(34,211,238,0.5)]"
-            : "border-cyan-400/50 shadow-[0_0_30px_rgba(34,211,238,0.3)]",
-          "bg-gradient-to-br from-slate-900/95 to-slate-800/95"
+          workspaceExpanded ? "rounded-r-none border-2 border-r-0" : "border-2"
         )}
+        style={{
+          background: isAppleGlass
+            ? 'var(--glass-background)'
+            : 'linear-gradient(to bottom right, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.95))',
+          backdropFilter: `var(--backdrop-blur)`,
+          WebkitBackdropFilter: `var(--backdrop-blur)`,
+          borderColor: isAppleGlass
+            ? 'var(--glass-border)'
+            : selected
+            ? 'rgba(34, 211, 238, 0.8)'
+            : 'rgba(34, 211, 238, 0.5)',
+          boxShadow: isAppleGlass
+            ? selected
+              ? 'var(--shadow-glassHover)'
+              : 'var(--shadow-glass)'
+            : selected
+            ? '0 0 40px rgba(34, 211, 238, 0.5)'
+            : '0 0 30px rgba(34, 211, 238, 0.3)',
+        }}
         onWheel={(e) => {
           // For Ctrl+scroll, let it bubble up to ReactFlow for zoom
           if (e.ctrlKey || e.metaKey) {
@@ -745,29 +764,81 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
           // Note: We don't preventDefault here, let the inner containers handle it
         }}
       >
-      {/* Animated border glow */}
-      <div className="pointer-events-none absolute inset-0 rounded-3xl bg-gradient-to-r from-cyan-400/20 via-blue-500/20 to-purple-500/20 opacity-50 blur-xl" />
+      {/* Animated border glow - Cyberpunk theme only */}
+      {!isAppleGlass && (
+        <div className="pointer-events-none absolute inset-0 rounded-3xl bg-gradient-to-r from-cyan-400/20 via-blue-500/20 to-purple-500/20 opacity-50 blur-xl" />
+      )}
 
       {/* Header - Node Info */}
-      <div className="relative z-10 flex items-center justify-between border-b border-cyan-400/20 bg-slate-900/50 px-4 py-3">
+      <div
+        className="relative z-10 flex items-center justify-between border-b px-4 py-3"
+        style={{
+          borderColor: isAppleGlass ? 'var(--glass-border)' : 'rgba(34, 211, 238, 0.2)',
+          background: isAppleGlass
+            ? 'rgba(255, 255, 255, 0.02)'
+            : 'rgba(15, 23, 42, 0.5)',
+        }}
+      >
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/20">
-            <Bot className="h-5 w-5 text-cyan-400" />
+          <div
+            className="flex h-8 w-8 items-center justify-center rounded-lg"
+            style={{
+              background: isAppleGlass
+                ? 'rgba(59, 130, 246, 0.15)'
+                : 'rgba(34, 211, 238, 0.2)',
+            }}
+          >
+            <Bot
+              className="h-5 w-5"
+              style={{
+                color: isAppleGlass ? 'var(--color-primary)' : '#22d3ee',
+              }}
+            />
           </div>
           <div>
-            <h2 className="font-mono text-base font-bold text-cyan-300">{data.id}</h2>
-            <p className="text-xs text-slate-400">Claude Code Node</p>
+            <h2
+              className="font-mono text-base font-bold"
+              style={
+                isAppleGlass
+                  ? {
+                      background: textScrimTokens.title.background,
+                      backdropFilter: textScrimTokens.title.backdropFilter,
+                      border: textScrimTokens.title.border,
+                      borderRadius: textScrimTokens.title.borderRadius,
+                      padding: textScrimTokens.title.padding,
+                      color: 'var(--color-text-primary)',
+                    }
+                  : { color: '#22d3ee' }
+              }
+            >
+              {data.id}
+            </h2>
+            <p
+              className="text-xs"
+              style={{
+                color: isAppleGlass ? 'var(--color-text-secondary)' : '#94a3b8',
+              }}
+            >
+              Claude Code Node
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           {/* Node Status Badge */}
           <div
-            className={cn(
-              "rounded-md px-2.5 py-1 text-xs font-medium",
-              data.status === "running"
-                ? "bg-emerald-500/20 text-emerald-300"
-                : "bg-slate-600/50 text-slate-400"
-            )}
+            className="rounded-md px-2.5 py-1 text-xs font-medium"
+            style={{
+              background: data.status === "running"
+                ? 'rgba(16, 185, 129, 0.2)'
+                : isAppleGlass
+                ? 'rgba(100, 116, 139, 0.2)'
+                : 'rgba(71, 85, 105, 0.5)',
+              color: data.status === "running"
+                ? '#6ee7b7'
+                : isAppleGlass
+                ? 'var(--color-text-muted)'
+                : '#94a3b8',
+            }}
           >
             {data.status === "running" ? "RUNNING" : "STOPPED"}
           </div>
@@ -778,18 +849,30 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
               e.stopPropagation()
               setWorkspaceExpanded(!workspaceExpanded)
             }}
-            className={cn(
-              "group flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-200",
-              // Hover state: UX Best Practice - visual feedback
-              "hover:shadow-[0_0_15px_rgba(34,211,238,0.3)]",
-              // Focus state: UX Best Practice - keyboard accessibility
-              "focus:outline-none focus:ring-2 focus:ring-cyan-400/50",
-              // Cursor: UX Best Practice
-              "cursor-pointer",
-              workspaceExpanded
-                ? "border-cyan-400/50 bg-cyan-500/20 text-cyan-300"
-                : "border-white/10 bg-white/5 text-slate-400 hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-300"
-            )}
+            className="group flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition-all duration-200 focus:outline-none focus:ring-2 cursor-pointer"
+            style={{
+              borderColor: workspaceExpanded
+                ? isAppleGlass
+                  ? 'rgba(59, 130, 246, 0.5)'
+                  : 'rgba(34, 211, 238, 0.5)'
+                : isAppleGlass
+                ? 'rgba(255, 255, 255, 0.2)'
+                : 'rgba(255, 255, 255, 0.1)',
+              background: workspaceExpanded
+                ? isAppleGlass
+                  ? 'rgba(59, 130, 246, 0.15)'
+                  : 'rgba(34, 211, 238, 0.2)'
+                : isAppleGlass
+                ? 'rgba(255, 255, 255, 0.05)'
+                : 'rgba(255, 255, 255, 0.05)',
+              color: workspaceExpanded
+                ? isAppleGlass
+                  ? 'var(--color-accent)'
+                  : '#22d3ee'
+                : isAppleGlass
+                ? 'var(--color-text-secondary)'
+                : '#94a3b8',
+            }}
             aria-label={workspaceExpanded ? "Collapse workspace" : "Expand workspace"}
           >
             <Code2 className="h-4 w-4" />
@@ -804,9 +887,22 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
           >
             <button
               onClick={(e) => e.stopPropagation()}
-              className="group rounded-xl border border-white/10 bg-white/5 p-2 transition-all hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:shadow-[0_0_15px_rgba(34,211,238,0.3)]"
+              className="group rounded-xl border p-2 transition-all"
+              style={{
+                borderColor: isAppleGlass
+                  ? 'rgba(255, 255, 255, 0.2)'
+                  : 'rgba(255, 255, 255, 0.1)',
+                background: isAppleGlass
+                  ? 'rgba(255, 255, 255, 0.05)'
+                  : 'rgba(255, 255, 255, 0.05)',
+              }}
             >
-              <Settings className="h-4 w-4 text-slate-400 transition-colors group-hover:text-cyan-300" />
+              <Settings
+                className="h-4 w-4 transition-colors"
+                style={{
+                  color: isAppleGlass ? 'var(--color-text-muted)' : '#94a3b8',
+                }}
+              />
             </button>
           </NodeSettingsMenu>
 
@@ -816,9 +912,22 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
               e.stopPropagation()
               data.onCollapse()
             }}
-            className="group rounded-xl border border-white/10 bg-white/5 p-2 transition-all hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:shadow-[0_0_15px_rgba(34,211,238,0.3)]"
+            className="group rounded-xl border p-2 transition-all"
+            style={{
+              borderColor: isAppleGlass
+                ? 'rgba(255, 255, 255, 0.2)'
+                : 'rgba(255, 255, 255, 0.1)',
+              background: isAppleGlass
+                ? 'rgba(255, 255, 255, 0.05)'
+                : 'rgba(255, 255, 255, 0.05)',
+            }}
           >
-            <Minimize2 className="h-4 w-4 text-slate-400 transition-colors group-hover:text-cyan-300" />
+            <Minimize2
+              className="h-4 w-4 transition-colors"
+              style={{
+                color: isAppleGlass ? 'var(--color-text-muted)' : '#94a3b8',
+              }}
+            />
           </button>
         </div>
       </div>
@@ -826,7 +935,16 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
       {/* Main content area */}
       <div className="relative z-10 flex flex-1 overflow-hidden">
         {/* Left: Session list */}
-        <div className="w-60 border-r border-cyan-400/20 bg-slate-900/30 backdrop-blur-sm flex flex-col">
+        <div
+          className="w-60 border-r flex flex-col"
+          style={{
+            borderColor: isAppleGlass ? 'var(--glass-border)' : 'rgba(34, 211, 238, 0.2)',
+            background: isAppleGlass
+              ? 'rgba(255, 255, 255, 0.02)'
+              : 'rgba(15, 23, 42, 0.3)',
+            backdropFilter: isAppleGlass ? 'blur(8px)' : 'blur(4px)',
+          }}
+        >
           {/* Session list scroll area */}
           <div
             ref={sessionListRef}
@@ -872,12 +990,28 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                       initial={false}
                       onClick={() => setSelectedSessionId(session.session_id)}
                       whileHover={{ x: 3 }}
-                      className={cn(
-                        "group cursor-pointer rounded-xl border p-2.5 transition-colors duration-200",
-                        isSelected
-                          ? "border-cyan-400/50 bg-cyan-500/20 shadow-[0_0_15px_rgba(34,211,238,0.2)]"
-                          : "border-white/10 bg-white/5 hover:border-cyan-400/30 hover:bg-white/10"
-                      )}
+                      className="group cursor-pointer rounded-xl border p-2.5 transition-colors duration-200"
+                      style={{
+                        borderColor: isAppleGlass
+                          ? isSelected
+                            ? 'var(--glass-border)'
+                            : 'rgba(255, 255, 255, 0.2)'
+                          : isSelected
+                          ? 'rgba(34, 211, 238, 0.5)'
+                          : 'rgba(255, 255, 255, 0.1)',
+                        background: isAppleGlass
+                          ? isSelected
+                            ? 'rgba(59, 130, 246, 0.08)'
+                            : 'rgba(255, 255, 255, 0.05)'
+                          : isSelected
+                          ? 'rgba(34, 211, 238, 0.2)'
+                          : 'rgba(255, 255, 255, 0.05)',
+                        boxShadow: isAppleGlass && isSelected
+                          ? '0 0 15px rgba(59, 130, 246, 0.1)'
+                          : !isAppleGlass && isSelected
+                          ? '0 0 15px rgba(34, 211, 238, 0.2)'
+                          : undefined,
+                      }}
                     >
                       {/* Fixed layout: Status dot + Topic (truncated) */}
                       <div className="flex items-center gap-2">
@@ -887,10 +1021,16 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                         {/* Topic text - truncate with min-w-0 fix */}
                         <div className="min-w-0 flex-1">
                           <span
-                            className={cn(
-                              "block truncate text-xs font-medium",
-                              isSelected ? "text-cyan-300" : "text-white"
-                            )}
+                            className="block truncate text-xs font-medium"
+                            style={{
+                              color: isAppleGlass
+                                ? isSelected
+                                  ? 'var(--color-primary)'
+                                  : 'var(--color-text-primary)'
+                                : isSelected
+                                ? '#22d3ee'
+                                : '#ffffff',
+                            }}
                             title={session.topic || session.session_id}
                           >
                             {session.topic || session.session_id.slice(0, 8)}
@@ -905,10 +1045,24 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
           </div>
 
           {/* Create Session Button - Fixed at bottom */}
-          <div className="border-t border-cyan-400/20 p-3">
+          <div
+            className="border-t p-3"
+            style={{
+              borderColor: isAppleGlass ? 'var(--glass-border)' : 'rgba(34, 211, 238, 0.2)',
+            }}
+          >
             <button
               onClick={() => data.onCreateSession?.(data.id)}
-              className="w-full rounded-xl border border-cyan-400/30 bg-cyan-500/20 py-2 text-xs font-medium text-cyan-300 transition-all hover:border-cyan-400/50 hover:bg-cyan-500/30 hover:shadow-[0_0_12px_rgba(34,211,238,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full rounded-xl border py-2 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{
+                borderColor: isAppleGlass
+                  ? 'rgba(59, 130, 246, 0.3)'
+                  : 'rgba(34, 211, 238, 0.3)',
+                background: isAppleGlass
+                  ? 'rgba(59, 130, 246, 0.15)'
+                  : 'rgba(34, 211, 238, 0.2)',
+                color: isAppleGlass ? 'var(--color-accent)' : '#22d3ee',
+              }}
               disabled={data.status !== "running"}
             >
               <Plus className="mx-auto h-3.5 w-3.5" />
@@ -929,7 +1083,16 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
           ) : (
             <>
               {/* Session Status Bar - Top of message area */}
-              <div className="nodrag flex items-center gap-3 border-b border-cyan-400/20 bg-slate-900/50 px-4 py-2.5 backdrop-blur-sm">
+              <div
+                className="nodrag flex items-center gap-3 border-b px-4 py-2.5"
+                style={{
+                  borderColor: isAppleGlass ? 'var(--glass-border)' : 'rgba(34, 211, 238, 0.2)',
+                  background: isAppleGlass
+                    ? 'rgba(255, 255, 255, 0.02)'
+                    : 'rgba(15, 23, 42, 0.5)',
+                  backdropFilter: isAppleGlass ? 'blur(8px)' : 'blur(4px)',
+                }}
+              >
                 {/* Left: Status indicator + Session topic */}
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                   {/* Status dot with icon (Accessibility: color + icon) */}
@@ -955,7 +1118,14 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                   </div>
 
                   {/* Divider */}
-                  <div className="h-4 w-px shrink-0 bg-cyan-400/20" />
+                  <div
+                    className="h-4 w-px shrink-0"
+                    style={{
+                      background: isAppleGlass
+                        ? 'var(--glass-border)'
+                        : 'rgba(34, 211, 238, 0.2)',
+                    }}
+                  />
 
                   {/* Session topic - fixed width with marquee animation on hover */}
                   <div
@@ -969,55 +1139,136 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                     <div className="marquee-container flex items-center">
                       <span
                         ref={topicTextRef}
-                        className="whitespace-nowrap text-sm font-medium leading-none text-cyan-300 marquee-text transition-all group-hover/topic:drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]"
+                        className="whitespace-nowrap text-sm font-medium leading-none marquee-text transition-all"
+                        style={
+                          isAppleGlass
+                            ? {
+                                ...textScrimTokens.subtitle,
+                                color: 'var(--color-text-primary)',
+                              }
+                            : {
+                                color: '#22d3ee',
+                                filter: 'drop-shadow(0 0 8px rgba(34, 211, 238, 0.6))',
+                              }
+                        }
                       >
                         {selectedSession.topic || selectedSession.session_id.slice(0, 8)}
                       </span>
                     </div>
                     {/* Gradient fade - hidden on hover */}
-                    <div className="pointer-events-none absolute right-0 top-0 h-full w-12 bg-gradient-to-l from-slate-900/50 to-transparent group-hover/topic:opacity-0 transition-opacity duration-300" />
+                    {!isAppleGlass && (
+                      <div className="pointer-events-none absolute right-0 top-0 h-full w-12 bg-gradient-to-l from-slate-900/50 to-transparent group-hover/topic:opacity-0 transition-opacity duration-300" />
+                    )}
                   </div>
                 </div>
 
                 {/* Right: Compact stats */}
-                <div className="flex shrink-0 items-center gap-2.5 text-[10px] text-slate-400">
+                <div
+                  className="flex shrink-0 items-center gap-2.5 text-[10px]"
+                  style={{
+                    color: isAppleGlass ? 'var(--color-text-secondary)' : '#94a3b8',
+                  }}
+                >
                   {/* Model badge */}
-                  <span className="rounded-md bg-purple-500/20 px-2 py-1 font-mono font-medium text-purple-300">
+                  <span
+                    className="rounded-md px-2 py-1 font-mono font-medium"
+                    style={{
+                      background: isAppleGlass
+                        ? 'rgba(139, 92, 246, 0.15)'
+                        : 'rgba(139, 92, 246, 0.2)',
+                      color: isAppleGlass ? '#a78bfa' : '#c4b5fd',
+                    }}
+                  >
                     {selectedSession.model || 'sonnet'}
                   </span>
 
                   {/* Mode badge */}
-                  <span className="rounded-md bg-blue-500/20 px-2 py-1 font-mono font-medium text-blue-300">
+                  <span
+                    className="rounded-md px-2 py-1 font-mono font-medium"
+                    style={{
+                      background: isAppleGlass
+                        ? 'rgba(59, 130, 246, 0.15)'
+                        : 'rgba(59, 130, 246, 0.2)',
+                      color: isAppleGlass ? '#60a5fa' : '#93c5fd',
+                    }}
+                  >
                     {selectedSession.mode}
                   </span>
 
                   {/* Divider */}
-                  {sessionStats && <div className="h-4 w-px bg-cyan-400/20" />}
+                  {sessionStats && (
+                    <div
+                      className="h-4 w-px"
+                      style={{
+                        background: isAppleGlass
+                          ? 'var(--glass-border)'
+                          : 'rgba(34, 211, 238, 0.2)',
+                      }}
+                    />
+                  )}
 
                   {/* Cost */}
                   {sessionStats?.total_cost_usd !== undefined && (
                     <div className="flex items-center gap-1">
-                      <Coins className="h-3.5 w-3.5 text-slate-400" />
-                      <span className="font-mono text-slate-300">${sessionStats.total_cost_usd.toFixed(2)}</span>
+                      <Coins
+                        className="h-3.5 w-3.5"
+                        style={{
+                          color: isAppleGlass ? 'var(--color-text-muted)' : '#94a3b8',
+                        }}
+                      />
+                      <span
+                        className="font-mono"
+                        style={{
+                          color: isAppleGlass ? 'var(--color-text-primary)' : '#cbd5e1',
+                        }}
+                      >
+                        ${sessionStats.total_cost_usd.toFixed(2)}
+                      </span>
                     </div>
                   )}
 
                   {/* Tokens: Input / Output */}
                   {(sessionStats?.total_input_tokens !== undefined || sessionStats?.total_output_tokens !== undefined) && (
                     <div className="flex items-center gap-1">
-                      <BarChart3 className="h-3.5 w-3.5 text-slate-400" />
+                      <BarChart3
+                        className="h-3.5 w-3.5"
+                        style={{
+                          color: isAppleGlass ? 'var(--color-text-muted)' : '#94a3b8',
+                        }}
+                      />
                       {sessionStats.total_input_tokens !== undefined && (
                         <>
-                          <span className="font-mono text-slate-300">{formatTokens(sessionStats.total_input_tokens)}</span>
+                          <span
+                            className="font-mono"
+                            style={{
+                              color: isAppleGlass ? 'var(--color-text-primary)' : '#cbd5e1',
+                            }}
+                          >
+                            {formatTokens(sessionStats.total_input_tokens)}
+                          </span>
                           <ArrowUp className="h-3 w-3 text-green-400" />
                         </>
                       )}
                       {sessionStats.total_input_tokens !== undefined && sessionStats.total_output_tokens !== undefined && (
-                        <span className="mx-0.5 text-slate-500">/</span>
+                        <span
+                          className="mx-0.5"
+                          style={{
+                            color: isAppleGlass ? 'var(--color-text-muted)' : '#64748b',
+                          }}
+                        >
+                          /
+                        </span>
                       )}
                       {sessionStats.total_output_tokens !== undefined && (
                         <>
-                          <span className="font-mono text-slate-300">{formatTokens(sessionStats.total_output_tokens)}</span>
+                          <span
+                            className="font-mono"
+                            style={{
+                              color: isAppleGlass ? 'var(--color-text-primary)' : '#cbd5e1',
+                            }}
+                          >
+                            {formatTokens(sessionStats.total_output_tokens)}
+                          </span>
                           <ArrowDown className="h-3 w-3 text-blue-400" />
                         </>
                       )}
@@ -1028,7 +1279,14 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                   {sessionStats?.context_percentage !== undefined && sessionStats.context_percentage > 0 && (
                     <div className="flex items-center gap-1">
                       <CircularProgress percentage={sessionStats.context_percentage} />
-                      <span className="font-mono text-slate-300">{sessionStats.context_percentage.toFixed(1)}%</span>
+                      <span
+                        className="font-mono"
+                        style={{
+                          color: isAppleGlass ? 'var(--color-text-primary)' : '#cbd5e1',
+                        }}
+                      >
+                        {sessionStats.context_percentage.toFixed(1)}%
+                      </span>
                     </div>
                   )}
                 </div>
@@ -1074,17 +1332,32 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
               </div>
 
               {/* Input area - Smart merged button design */}
-              <div className="nodrag border-t border-cyan-400/20 bg-slate-900/50 p-3">
+              <div
+                className="nodrag border-t p-3"
+                style={{
+                  borderColor: isAppleGlass ? 'var(--glass-border)' : 'rgba(34, 211, 238, 0.2)',
+                  background: isAppleGlass
+                    ? 'rgba(255, 255, 255, 0.02)'
+                    : 'rgba(15, 23, 42, 0.5)',
+                }}
+              >
                 {/* Container with visual border */}
                 <div
-                  className={cn(
-                    "rounded-xl border backdrop-blur-sm transition-all duration-200",
-                    isRecording || selectedSession?.runtime_status === RuntimeStatus.BUSY
-                      ? "border-red-400/30 bg-slate-900/50"
-                      : "border-cyan-400/30 bg-slate-900/50",
-                    "hover:border-cyan-400/50",
-                    "focus-within:border-cyan-400/60 focus-within:shadow-[0_0_20px_rgba(34,211,238,0.15)]"
-                  )}
+                  className="rounded-xl border transition-all duration-200"
+                  style={{
+                    borderColor: isRecording || selectedSession?.runtime_status === RuntimeStatus.BUSY
+                      ? 'rgba(239, 68, 68, 0.3)'
+                      : isAppleGlass
+                      ? 'var(--glass-border)'
+                      : 'rgba(34, 211, 238, 0.3)',
+                    background: isAppleGlass
+                      ? 'rgba(255, 255, 255, 0.05)'
+                      : 'rgba(15, 23, 42, 0.5)',
+                    backdropFilter: isAppleGlass ? 'blur(8px)' : 'blur(4px)',
+                    boxShadow: isAppleGlass
+                      ? '0 0 20px rgba(59, 130, 246, 0.08)'
+                      : '0 0 20px rgba(34, 211, 238, 0.15)',
+                  }}
                 >
                   {/* Vertical flex layout: textarea on top, button at bottom-right */}
                   <div className="flex flex-col">
@@ -1108,14 +1381,12 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                         selectedSession.status === SessionStatus.CLOSED ||
                         data.status !== "running"
                       }
-                      className={cn(
-                        "w-full resize-none overflow-y-auto border-0 bg-transparent px-3 pt-2.5 pb-1",
-                        "text-sm leading-5 text-white placeholder:text-slate-500",
-                        "focus:outline-none focus-visible:ring-0",
-                        "disabled:opacity-70 disabled:cursor-not-allowed",
-                        "cyberpunk-scrollbar-thin"
-                      )}
-                      style={{ minHeight: "30px", maxHeight: "170px" }}
+                      className="w-full resize-none overflow-y-auto border-0 bg-transparent px-3 pt-2.5 pb-1 text-sm leading-5 focus:outline-none focus-visible:ring-0 disabled:opacity-70 disabled:cursor-not-allowed cyberpunk-scrollbar-thin"
+                      style={{
+                        minHeight: "30px",
+                        maxHeight: "170px",
+                        color: isAppleGlass ? 'var(--color-text-primary)' : '#ffffff',
+                      }}
                     />
 
                     {/* Bottom area: voice button (left) + send button (right) */}
@@ -1128,25 +1399,30 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                           (selectedSession.status === SessionStatus.CLOSED && !isRecording) ||
                           (data.status !== "running" && !isRecording)
                         }
-                        className={cn(
-                          "h-8 w-8 rounded-lg border transition-all duration-200",
-                          "flex items-center justify-center cursor-pointer",
-                          // Active state: scale down + neon pulse (cyberpunk feedback)
-                          "active:scale-95",
-                          // Recording state (stop) - red with pulse
-                          isRecording &&
-                            "bg-red-500/20 border-red-400/30 hover:bg-red-500/30 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)] active:shadow-[0_0_30px_rgba(239,68,68,0.8)]",
-                          // Default (voice) - gray
-                          !isRecording &&
-                            "bg-slate-800/30 border-slate-600/30 hover:bg-slate-700/30 hover:border-cyan-400/30 active:shadow-[0_0_30px_rgba(34,211,238,0.8)]",
-                          "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
-                        )}
+                        className="h-8 w-8 rounded-lg border transition-all duration-200 flex items-center justify-center cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
+                        style={{
+                          borderColor: isRecording
+                            ? 'rgba(239, 68, 68, 0.3)'
+                            : isAppleGlass
+                            ? 'rgba(100, 116, 139, 0.3)'
+                            : 'rgba(71, 85, 105, 0.3)',
+                          background: isRecording
+                            ? 'rgba(239, 68, 68, 0.2)'
+                            : isAppleGlass
+                            ? 'rgba(255, 255, 255, 0.1)'
+                            : 'rgba(30, 41, 59, 0.3)',
+                        }}
                       >
                         {/* Voice button icon - only recording or mic */}
                         {isRecording ? (
                           <Circle className="h-4 w-4 text-red-400 fill-current animate-pulse" />
                         ) : (
-                          <Mic className="h-4 w-4 text-slate-400" />
+                          <Mic
+                            className="h-4 w-4"
+                            style={{
+                              color: isAppleGlass ? 'var(--color-text-muted)' : '#94a3b8',
+                            }}
+                          />
                         )}
                       </button>
 
@@ -1158,33 +1434,44 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                           selectedSession.status === SessionStatus.CLOSED ||
                           data.status !== "running"
                         }
-                        className={cn(
-                          "h-8 w-8 rounded-lg border transition-all duration-200",
-                          "flex items-center justify-center cursor-pointer",
-                          // Active state: scale down + neon pulse (cyberpunk feedback)
-                          "active:scale-95",
-                          // Busy state (interrupt) - red
-                          selectedSession?.runtime_status === RuntimeStatus.BUSY &&
-                            "bg-red-500/20 border-red-400/30 hover:bg-red-500/30 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)] active:shadow-[0_0_30px_rgba(239,68,68,0.8)]",
-                          // Enabled (has content) - cyan
-                          selectedSession?.runtime_status !== RuntimeStatus.BUSY &&
-                            inputMessage.trim() &&
-                            "bg-cyan-500/20 border-cyan-400/30 hover:bg-cyan-500/30 hover:shadow-[0_0_15px_rgba(34,211,238,0.3)] active:shadow-[0_0_30px_rgba(34,211,238,0.8)]",
-                          // Disabled (no content) - gray
-                          selectedSession?.runtime_status !== RuntimeStatus.BUSY &&
-                            !inputMessage.trim() &&
-                            "bg-slate-800/30 border-slate-600/30",
-                          "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
-                        )}
+                        className="h-8 w-8 rounded-lg border transition-all duration-200 flex items-center justify-center cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
+                        style={{
+                          borderColor: selectedSession?.runtime_status === RuntimeStatus.BUSY
+                            ? 'rgba(239, 68, 68, 0.3)'
+                            : inputMessage.trim()
+                            ? isAppleGlass
+                              ? 'rgba(59, 130, 246, 0.3)'
+                              : 'rgba(34, 211, 238, 0.3)'
+                            : isAppleGlass
+                            ? 'rgba(100, 116, 139, 0.3)'
+                            : 'rgba(71, 85, 105, 0.3)',
+                          background: selectedSession?.runtime_status === RuntimeStatus.BUSY
+                            ? 'rgba(239, 68, 68, 0.2)'
+                            : inputMessage.trim()
+                            ? isAppleGlass
+                              ? 'rgba(59, 130, 246, 0.15)'
+                              : 'rgba(34, 211, 238, 0.2)'
+                            : isAppleGlass
+                            ? 'rgba(255, 255, 255, 0.1)'
+                            : 'rgba(30, 41, 59, 0.3)',
+                        }}
                       >
                         {/* Send button icon - interrupt or send */}
                         {selectedSession?.runtime_status === RuntimeStatus.BUSY ? (
                           <StopCircle className="h-4 w-4 text-red-400" />
                         ) : (
-                          <Send className={cn(
-                            "h-4 w-4",
-                            inputMessage.trim() ? "text-cyan-400" : "text-slate-500"
-                          )} />
+                          <Send
+                            className="h-4 w-4"
+                            style={{
+                              color: inputMessage.trim()
+                                ? isAppleGlass
+                                  ? 'var(--color-accent)'
+                                  : '#22d3ee'
+                                : isAppleGlass
+                                ? 'var(--color-text-muted)'
+                                : '#64748b',
+                            }}
+                          />
                         )}
                       </button>
                     </div>
@@ -1210,30 +1497,68 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
               ease: [0.4, 0, 0.2, 1], // Tailwind's ease-out
               opacity: { duration: 0.2 },
             }}
-            className={cn(
-              "nodrag relative flex h-[720px] w-[800px] flex-col overflow-hidden rounded-3xl rounded-l-none backdrop-blur-2xl",
-              // Seamless border connection: no left border
-              "border-2 border-l-0",
-              selected
-                ? "border-cyan-400/80 shadow-[0_0_40px_rgba(34,211,238,0.5)]"
-                : "border-cyan-400/50 shadow-[0_0_30px_rgba(34,211,238,0.3)]",
-              "bg-gradient-to-br from-slate-900/95 to-slate-800/95"
-            )}
+            className="nodrag relative flex h-[720px] w-[800px] flex-col overflow-hidden rounded-3xl rounded-l-none border-2 border-l-0"
+            style={{
+              background: isAppleGlass
+                ? 'var(--glass-background)'
+                : 'linear-gradient(to bottom right, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.95))',
+              backdropFilter: `var(--backdrop-blur)`,
+              WebkitBackdropFilter: `var(--backdrop-blur)`,
+              borderColor: isAppleGlass
+                ? 'var(--glass-border)'
+                : selected
+                ? 'rgba(34, 211, 238, 0.8)'
+                : 'rgba(34, 211, 238, 0.5)',
+              boxShadow: isAppleGlass
+                ? selected
+                  ? 'var(--shadow-glassHover)'
+                  : 'var(--shadow-glass)'
+                : selected
+                ? '0 0 40px rgba(34, 211, 238, 0.5)'
+                : '0 0 30px rgba(34, 211, 238, 0.3)',
+            }}
           >
-            {/* Animated border glow - matching chat area */}
-            <div className="pointer-events-none absolute inset-0 rounded-3xl rounded-l-none bg-gradient-to-r from-cyan-400/20 via-blue-500/20 to-purple-500/20 opacity-50 blur-xl" />
+            {/* Animated border glow - matching chat area (Cyberpunk only) */}
+            {!isAppleGlass && (
+              <div className="pointer-events-none absolute inset-0 rounded-3xl rounded-l-none bg-gradient-to-r from-cyan-400/20 via-blue-500/20 to-purple-500/20 opacity-50 blur-xl" />
+            )}
 
             {/* Workspace Header (48px, matching status bar height) */}
-            <div className="relative z-10 flex items-center justify-between border-b border-cyan-400/20 bg-slate-900/50 px-4 py-2.5">
+            <div
+              className="relative z-10 flex items-center justify-between border-b px-4 py-2.5"
+              style={{
+                borderColor: isAppleGlass ? 'var(--glass-border)' : 'rgba(34, 211, 238, 0.2)',
+                background: isAppleGlass
+                  ? 'rgba(255, 255, 255, 0.02)'
+                  : 'rgba(15, 23, 42, 0.5)',
+              }}
+            >
               {/* Left: Title with icon */}
               <div className="flex items-center gap-2">
-                <Code2 className="h-4 w-4 text-cyan-400" />
-                <span className="text-sm font-medium text-cyan-400">Workspace</span>
+                <Code2
+                  className="h-4 w-4"
+                  style={{
+                    color: isAppleGlass ? 'var(--color-primary)' : '#22d3ee',
+                  }}
+                />
+                <span
+                  className="text-sm font-medium"
+                  style={
+                    isAppleGlass
+                      ? {
+                          ...textScrimTokens.subtitle,
+                          color: 'var(--color-text-primary)',
+                        }
+                      : { color: '#22d3ee' }
+                  }
+                >
+                  Workspace
+                </span>
               </div>
 
               {/* Right: Action buttons (Copy + Close) */}
               <div className="flex items-center gap-2">
-                {/* Copy URL button - Icon only, Cyberpunk success feedback */}
+                {/* Copy URL button - Icon only, Theme-aware feedback */}
                 <button
                   onClick={async () => {
                     if (!codeServerUrl) return
@@ -1249,24 +1574,35 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                     }
                   }}
                   disabled={!codeServerUrl}
-                  className={cn(
-                    "rounded-lg border p-1.5 transition-all duration-200",
-                    // UX Best Practice: cursor
-                    "cursor-pointer disabled:cursor-not-allowed disabled:opacity-50",
-                    // Success state - Cyberpunk cyan neon glow
-                    copiedUrl
-                      ? "border-cyan-400/50 bg-cyan-500/20 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.6)]"
-                      : "border-white/10 bg-white/5 text-slate-400",
-                    // Hover state (only when not copied)
-                    !copiedUrl && "hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-400 hover:shadow-[0_0_10px_rgba(34,211,238,0.3)]",
-                    // UX Best Practice: focus state
-                    "focus:outline-none focus:ring-2 focus:ring-cyan-400/50"
-                  )}
+                  className="rounded-lg border p-1.5 transition-all duration-200 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus:ring-2"
+                  style={{
+                    borderColor: copiedUrl
+                      ? isAppleGlass
+                        ? 'rgba(59, 130, 246, 0.5)'
+                        : 'rgba(34, 211, 238, 0.5)'
+                      : isAppleGlass
+                      ? 'rgba(255, 255, 255, 0.2)'
+                      : 'rgba(255, 255, 255, 0.1)',
+                    background: copiedUrl
+                      ? isAppleGlass
+                        ? 'rgba(59, 130, 246, 0.15)'
+                        : 'rgba(34, 211, 238, 0.2)'
+                      : isAppleGlass
+                      ? 'rgba(255, 255, 255, 0.05)'
+                      : 'rgba(255, 255, 255, 0.05)',
+                    color: copiedUrl
+                      ? isAppleGlass
+                        ? 'var(--color-accent)'
+                        : '#22d3ee'
+                      : isAppleGlass
+                      ? 'var(--color-text-muted)'
+                      : '#94a3b8',
+                  }}
                   aria-label={copiedUrl ? "URL copied" : "Copy code-server URL"}
                 >
                   {/* Icon swap: Copy → Check (UX Best Practice) */}
                   {copiedUrl ? (
-                    <Check className="h-4 w-4 text-cyan-300" />
+                    <Check className="h-4 w-4" />
                   ) : (
                     <Copy className="h-4 w-4" />
                   )}
@@ -1275,15 +1611,16 @@ export function ExpandedNodeCard({ data, selected }: NodeProps) {
                 {/* Close button */}
                 <button
                   onClick={() => setWorkspaceExpanded(false)}
-                  className={cn(
-                    "rounded-lg border border-white/10 bg-white/5 p-1.5 text-slate-400 transition-all duration-200",
-                    // UX Best Practice: hover feedback
-                    "hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-400 hover:shadow-[0_0_10px_rgba(34,211,238,0.3)]",
-                    // UX Best Practice: focus state
-                    "focus:outline-none focus:ring-2 focus:ring-cyan-400/50",
-                    // UX Best Practice: cursor
-                    "cursor-pointer"
-                  )}
+                  className="rounded-lg border p-1.5 transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2"
+                  style={{
+                    borderColor: isAppleGlass
+                      ? 'rgba(255, 255, 255, 0.2)'
+                      : 'rgba(255, 255, 255, 0.1)',
+                    background: isAppleGlass
+                      ? 'rgba(255, 255, 255, 0.05)'
+                      : 'rgba(255, 255, 255, 0.05)',
+                    color: isAppleGlass ? 'var(--color-text-muted)' : '#94a3b8',
+                  }}
                   aria-label="Close workspace"
                 >
                   <X className="h-4 w-4" />

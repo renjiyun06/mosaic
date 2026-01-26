@@ -40,6 +40,7 @@ import {
   TopologyLegend,
   CanvasContextMenu,
   TopRightActions,
+  CanvasBackground,
 } from "./"
 import {
   ConnectionsSidebar,
@@ -466,7 +467,10 @@ export function InfiniteCanvas() {
   }
 
   return (
-    <div className="relative h-screen w-full bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+    <div className="relative h-screen w-full overflow-hidden">
+      {/* Theme-aware canvas background */}
+      <CanvasBackground />
+
       {/* Mosaic Sidebar */}
       <MosaicSidebar
         mosaics={mosaicManagement.mosaics}
@@ -498,7 +502,7 @@ export function InfiniteCanvas() {
             edgeTypes={edgeTypes}
             elevateNodesOnSelect={false}
             fitView
-            className="bg-slate-950"
+            className="[&_.react-flow\_\_renderer]:!bg-transparent"
             minZoom={0.2}
             maxZoom={1.5}
             zoomOnScroll={false}
@@ -512,7 +516,10 @@ export function InfiniteCanvas() {
               variant={BackgroundVariant.Dots}
               gap={20}
               size={1}
-              color="#1e293b"
+              style={{
+                // @ts-ignore - CSS variable is dynamically injected
+                color: 'var(--color-background-dots)',
+              }}
               className="opacity-50"
             />
 

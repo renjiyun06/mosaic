@@ -1,12 +1,13 @@
 /**
  * Top Right Actions - Quick action buttons in top-right corner
- * Provides shortcuts for creating nodes and opening command palette
+ * Provides shortcuts for creating nodes, opening command palette, and theme switching
  */
 
 import { motion } from "framer-motion"
 import { Panel } from "@xyflow/react"
 import { Plus, Command as CommandIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { ThemeToggle } from "../shared/ThemeToggle"
 
 interface TopRightActionsProps {
   onCreateNode: () => void
@@ -34,8 +35,12 @@ export function TopRightActions({ onCreateNode, onOpenCommand }: TopRightActions
       <motion.div
         initial={{ x: 20, opacity: 0 }}
         animate={{ x: 0, opacity: 1 }}
-        className="flex gap-2"
+        className="flex items-center gap-2"
       >
+        {/* Theme Toggle - Global theme switcher */}
+        <ThemeToggle />
+
+        {/* Action Buttons */}
         {buttons.map((button, i) => (
           <motion.button
             key={i}
