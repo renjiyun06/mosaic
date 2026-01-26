@@ -82,6 +82,7 @@ class APIClient:
         path: str,
         json: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, str]] = None,
+        timeout: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Send POST request.
@@ -90,6 +91,7 @@ class APIClient:
             path: API endpoint path
             json: Request body as dict
             headers: Additional headers
+            timeout: Optional custom timeout in seconds (overrides default)
 
         Returns:
             Response JSON as dict
@@ -101,7 +103,9 @@ class APIClient:
         headers = await self._inject_auth_header(headers)
 
         try:
-            response = await self.client.post(url, json=json, headers=headers)
+            # Use custom timeout if provided, otherwise use default
+            request_timeout = timeout if timeout is not None else self.timeout
+            response = await self.client.post(url, json=json, headers=headers, timeout=request_timeout)
             return self._handle_response(response)
         except httpx.RequestError as e:
             raise ConnectionError(f"Request failed: {str(e)}")

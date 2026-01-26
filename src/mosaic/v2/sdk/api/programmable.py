@@ -82,10 +82,13 @@ class ProgrammableCallAPI:
             payload["return_schema"] = return_schema
 
         # Send execute request
+        # Add buffer to HTTP timeout to ensure it's longer than backend timeout
+        http_timeout = timeout + 10 if timeout else None
         try:
             response = await self.api_client.post(
                 "/api/programmable/call",
-                json=payload
+                json=payload,
+                timeout=http_timeout
             )
 
             # Extract result from SuccessResponse wrapper
