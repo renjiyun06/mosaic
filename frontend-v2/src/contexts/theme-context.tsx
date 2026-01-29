@@ -95,11 +95,9 @@ const THEMES = [
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>('default')
-  const [mounted, setMounted] = useState(false)
 
   // Initialize theme from localStorage
   useEffect(() => {
-    setMounted(true)
     if (typeof window === 'undefined') return
 
     const savedTheme = localStorage.getItem('mosaic-theme') as Theme
@@ -119,11 +117,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('mosaic-theme', newTheme)
       document.documentElement.setAttribute('data-theme', newTheme)
     }
-  }
-
-  // Avoid hydration mismatch
-  if (!mounted) {
-    return <>{children}</>
   }
 
   const value: ThemeContextType = {
