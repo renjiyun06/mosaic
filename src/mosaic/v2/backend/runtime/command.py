@@ -148,10 +148,12 @@ class SendMessageCommand(Command):
         node: Node model object (required)
         session: Session model object (required)
         message: User message content (required)
+        context: Optional context data (e.g., GeoGebra states)
     """
     node: 'Node' = None
     session: 'Session' = None
     message: str = None
+    context: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -185,3 +187,61 @@ class CloseSessionCommand(Command):
     """
     node: 'Node' = None
     session_id: str = None
+
+
+@dataclass
+class ToolResponseCommand(Command):
+    """
+    Command to handle tool response from frontend.
+
+    This command delivers a frontend response to a waiting tool execution.
+    The response_id is used to match with a pending Future in the session.
+
+    This is typically a fire-and-forget operation (future=None).
+
+    Attributes:
+        node: Node model object (required)
+        session: Session model object (required)
+        response_id: Unique identifier matching the pending response (required)
+        result: Response data from frontend (can be any structure)
+    """
+    node: 'Node' = None
+    session: 'Session' = None
+    response_id: str = None
+    result: Any = None
+
+
+@dataclass
+class ProgrammableCallCommand(Command):
+    """
+    Command to execute a programmable call on a node.
+
+    This command enables SDK-style programmatic invocation of nodes:
+    - Sends a programmable_call event to the target session
+    - Waits for programmable_return event from the node
+    - Returns structured result or error
+
+    Flow:
+    1. RuntimeManager creates this command with all call parameters
+    2. MosaicInstance routes command to target node
+    3. Node uses the session object directly
+    4. Session sends programmable_call event to agent
+    5. Session waits for programmable_return event
+    6. Result is returned to RuntimeManager via future
+
+    Attributes:
+        node: Node model object (required)
+        session: Session model object (required, must be already created)
+        call_id: Unique call identifier for matching return event (required, UUID)
+        method: Semantic method identifier (required, e.g., "analyze_data")
+        instruction: Optional detailed task description
+        kwargs: Keyword arguments for the call (required, can be empty dict)
+        return_schema: Optional JSON Schema for return value structure
+    """
+    node: 'Node' = None
+    session: 'Session' = None
+    call_id: str = None
+    method: str = None
+    instruction: Optional[str] = None
+    kwargs: Dict[str, Any] = None
+    return_schema: Optional[Dict[str, Any]] = None

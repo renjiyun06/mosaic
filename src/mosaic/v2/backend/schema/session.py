@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
-from ..enum import SessionMode, SessionStatus, LLMModel
+from ..enum import SessionMode, SessionStatus, LLMModel, RuntimeStatus
 
 
 # ==================== Request Schemas ====================
@@ -35,11 +35,11 @@ class CreateSessionRequest(BaseModel):
     @field_validator('mode')
     @classmethod
     def validate_mode(cls, value: SessionMode) -> SessionMode:
-        """Validate that mode is either PROGRAM or CHAT (BACKGROUND not allowed)"""
-        if value not in (SessionMode.PROGRAM, SessionMode.CHAT):
+        """Validate that mode is either PROGRAM or CHAT or LONG_RUNNING (BACKGROUND not allowed)"""
+        if value not in (SessionMode.PROGRAM, SessionMode.CHAT, SessionMode.LONG_RUNNING):
             raise ValueError(
                 f"Invalid session mode '{value}'. "
-                "Only 'program' and 'chat' modes can be created manually. "
+                "Only 'program' and 'chat' and 'LONG_RUNNING' modes can be created manually. "
                 "Background sessions are created automatically by event triggers."
             )
         return value
@@ -66,18 +66,34 @@ class SessionOut(BaseModel):
 
     # Status
     status: SessionStatus = Field(..., description="Session status")
+    runtime_status: RuntimeStatus = Field(..., description="Runtime processing status (idle/busy)")
+
+    # Session metadata
+    topic: Optional[str] = Field(None, description="Session topic (maximum 80 characters)")
 
     # Statistics
     message_count: int = Field(..., description="Total number of messages")
     total_input_tokens: int = Field(..., description="Cumulative input tokens")
     total_output_tokens: int = Field(..., description="Cumulative output tokens")
     total_cost_usd: float = Field(..., description="Cumulative cost in USD")
+    context_usage: int = Field(..., description="Current context window usage (input + cache tokens)")
+    context_percentage: float = Field(..., description="Context window usage percentage (0-100)")
 
     # Timestamps
     created_at: datetime = Field(..., description="When session was created")
     updated_at: datetime = Field(..., description="Last modification time")
     last_activity_at: Optional[datetime] = Field(None, description="Last message activity time")
     closed_at: Optional[datetime] = Field(None, description="When session was closed")
+
+    # Parent-child relationship (for tree view)
+    parent_session_id: Optional[str] = Field(
+        None,
+        description="Parent session ID (from session_routing where this session is remote)"
+    )
+    child_count: int = Field(
+        0,
+        description="Number of direct child sessions (count from session_routing where this session is local)"
+    )
 
     class Config:
         from_attributes = True
@@ -113,6 +129,16 @@ class SessionTopologyResponse(BaseModel):
     root_session: SessionTopologyNode = Field(..., description="Root session node (with complete tree structure)")
     total_nodes: int = Field(..., description="Total number of nodes (including root)")
     max_depth: int = Field(..., description="Maximum depth of the tree")
+
+    class Config:
+        from_attributes = True
+
+
+class BatchArchiveResponse(BaseModel):
+    """Batch archive sessions response"""
+
+    archived_count: int = Field(..., description="Number of sessions successfully archived")
+    failed_sessions: list[str] = Field(default_factory=list, description="List of session IDs that failed to archive")
 
     class Config:
         from_attributes = True

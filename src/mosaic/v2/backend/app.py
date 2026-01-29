@@ -24,10 +24,13 @@ from .api import (
     session_router,
     session_routing_router,
     message_router,
+    image_router,
+    programmable_router
 )
 from .api.websocket import router as websocket_router
 from .runtime.manager import RuntimeManager
 from .websocket import UserMessageBroker
+from .code_server.manager import CodeServerManager
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +57,10 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
     async def lifespan(app: FastAPI):
         """Manage application lifespan (startup and shutdown)"""
         # Startup
+        # 0. Run database preflight checks
+        from .db_init import run_preflight_checks
+        await run_preflight_checks(app.state.async_session_factory)
+
         # 1. Set main event loop for UserMessageBroker
         import asyncio
         app.state.user_message_broker.set_main_loop(asyncio.get_running_loop())
@@ -61,13 +68,19 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
         # 2. Start runtime manager
         await app.state.runtime_manager.start()
 
+        # 3. Start code-server manager
+        await app.state.code_server_manager.start()
+
         yield  # Application is running
 
         # Shutdown
         # 1. Disconnect all WebSocket connections
         await app.state.user_message_broker.disconnect_all_users()
 
-        # 2. Clean up runtime manager
+        # 2. Stop code-server manager (stop all instances)
+        await app.state.code_server_manager.stop()
+
+        # 3. Clean up runtime manager
         await app.state.runtime_manager.stop()
 
     # Create FastAPI application with lifespan
@@ -104,18 +117,49 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
     app.state.config = config
     app.state.instance_path = instance_path
 
+    # ==================== WebSocket Configuration ====================
+
+    # Create UserMessageBroker singleton (must be created before RuntimeManager)
+    app.state.user_message_broker = UserMessageBroker.create_instance()
+
     # ==================== Runtime Manager Configuration ====================
 
     # Create RuntimeManager singleton with dependencies
     app.state.runtime_manager = RuntimeManager.create_instance(
         async_session_factory=async_session_factory,
-        config=config
+        config=config,
+        user_message_broker=app.state.user_message_broker
     )
 
-    # ==================== WebSocket Configuration ====================
+    # ==================== Code Server Manager Configuration ====================
 
-    # Create UserMessageBroker singleton
-    app.state.user_message_broker = UserMessageBroker.create_instance()
+    # Get code-server settings from config (required, no defaults)
+    code_server_config = config.get('code_server')
+    if not code_server_config:
+        raise ValueError("Missing required configuration: [code_server]")
+
+    bind_host = code_server_config.get('bind_host')
+    external_host = code_server_config.get('external_host')
+    port = code_server_config.get('port')
+    binary = code_server_config.get('binary')
+
+    if not all([
+        bind_host is not None,
+        external_host is not None,
+        port is not None,
+        binary is not None
+    ]):
+        raise ValueError(
+            "Missing required code_server configuration fields: "
+            "bind_host, external_host, port, binary"
+        )
+
+    # Create CodeServerManager for managing single code-server instance
+    app.state.code_server_manager = CodeServerManager(
+        host=bind_host,
+        port=port,
+        code_server_binary=binary
+    )
 
     # ==================== CORS Configuration ====================
 
@@ -270,6 +314,8 @@ def create_app(instance_path: Path, config: dict) -> FastAPI:
     app.include_router(session_router, prefix="/api")
     app.include_router(session_routing_router, prefix="/api")
     app.include_router(message_router, prefix="/api")
+    app.include_router(image_router, prefix="/api")
     app.include_router(websocket_router, prefix="/api")
+    app.include_router(programmable_router, prefix="/api")
 
     return app

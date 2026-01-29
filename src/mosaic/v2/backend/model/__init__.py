@@ -9,6 +9,7 @@ from .session import Session
 from .session_routing import SessionRouting
 from .event import Event
 from .message import Message
+from .image import Image
 
 __all__ = [
     "BaseModel",
@@ -22,4 +23,5 @@ __all__ = [
     "SessionRouting",
     "Event",
     "Message",
+    "Image",
 ]

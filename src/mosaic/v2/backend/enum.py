@@ -10,6 +10,7 @@ class NodeType(str, Enum):
     CLAUDE_CODE = "claude_code"
     SCHEDULER = "scheduler"
     EMAIL = "email"
+    AGGREGATOR = "aggregator"
 
 
 class MosaicStatus(str, Enum):
@@ -72,6 +73,7 @@ class EventType(str, Enum):
     # Internal session events (not published to Event Mesh)
     USER_MESSAGE_EVENT = "user_message_event"
     TASK_COMPLETE_EVENT = "task_complete_event"  # Agent signals task completion
+    PROGRAMMABLE_CALL_EVENT = "programmable_call_event"  # SDK programmable call request
 
 
 class SessionStatus(str, Enum):
@@ -95,6 +97,20 @@ class SessionStatus(str, Enum):
     ARCHIVED = "archived"
 
 
+class RuntimeStatus(str, Enum):
+    """Runtime status enumeration
+
+    Defines the runtime processing state of a session.
+
+    IDLE: Session is not currently processing any request
+    BUSY: Session is currently processing a request
+
+    Runtime lifecycle: IDLE ⇄ BUSY
+    """
+    IDLE = "idle"
+    BUSY = "busy"
+
+
 class SessionMode(str, Enum):
     """Session mode enumeration
 
@@ -112,10 +128,18 @@ class SessionMode(str, Enum):
     CHAT: Interactive chat session created by users for normal usage of agent nodes.
           Only available for agent nodes. Used for regular interaction with the agent.
           DOES emit events to the event mesh during normal operation.
+
+    LONG_RUNNING: Long-running session mode with continuous availability (24/7 worker pattern).
+                  When the session sends a message to itself, the Claude client is restarted
+                  to clear conversation context while maintaining the same session_id.
+                  This allows the session to continue indefinitely with fresh context.
+                  External nodes can always reach this session using the same session_id.
+                  DOES emit events to the event mesh during normal operation.
     """
     BACKGROUND = "background"
     PROGRAM = "program"
     CHAT = "chat"
+    LONG_RUNNING = "long_running"
 
 
 class LLMModel(str, Enum):
@@ -149,7 +173,16 @@ class MessageType(str, Enum):
     ASSISTANT_TEXT = "assistant_text"
     ASSISTANT_THINKING = "assistant_thinking"
     ASSISTANT_TOOL_USE = "assistant_tool_use"
+    ASSISTANT_TOOL_OUTPUT = "assistant_tool_output"
+    ASSISTANT_PRE_COMPACT = "assistant_pre_compact"
     ASSISTANT_RESULT = "assistant_result"
     SYSTEM_MESSAGE = "system_message"
     SESSION_STARTED = "session_started"
     SESSION_ENDED = "session_ended"
+    TOPIC_UPDATED = "topic_updated"
+    RUNTIME_STATUS_CHANGED = "runtime_status_changed"
+    GEOGEBRA_COMMAND = "geogebra_command"
+
+
+class Nil(str, Enum):
+    NIL = "nil"

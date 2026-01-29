@@ -11,6 +11,8 @@ from .event import router as event_router
 from .session import router as session_router
 from .session_routing import router as session_routing_router
 from .message import router as message_router
+from .image import router as image_router
+from .programmable import router as programmable_router
 
 __all__ = [
     "auth_router",
@@ -22,4 +24,6 @@ __all__ = [
     "session_router",
     "session_routing_router",
     "message_router",
+    "image_router",
+    "programmable_router"
 ]

@@ -959,13 +959,14 @@ class MosaicNode(ABC):
         """
         pass
 
-    async def send_message(self, session_id: str, message: str) -> None:
+    async def send_message(self, session_id: str, message: str, context: Optional[Dict[str, Any]] = None) -> None:
         """
         Send a message to a session (only for agent nodes).
 
         Args:
             session_id: Session identifier
             message: User message content
+            context: Optional context data (e.g., GeoGebra states)
 
         Raises:
             SessionNotFoundError: If session not found
@@ -1004,6 +1005,99 @@ class MosaicNode(ABC):
             )
 
         await mosaic_session.interrupt()
+
+    async def handle_tool_response(self, session_id: str, response_id: str, result: Any) -> None:
+        """
+        Handle tool response from frontend (only for agent nodes).
+
+        This method is called when the frontend sends back a response to a tool execution
+        (e.g., GeoGebra command result). It is used to complete pending asynchronous
+        tool operations that are waiting for user/frontend input.
+
+        Args:
+            session_id: Session identifier
+            response_id: Unique identifier matching the pending response
+            result: Response data from frontend
+
+        Raises:
+            NotImplementedError: If this node type doesn't support tool responses
+
+        Note:
+            Most node types (scheduler, email, etc.) don't need this functionality.
+            Only agent nodes (like claude_code) that execute tools asynchronously
+            and need to wait for frontend responses should override this method.
+            Default implementation raises NotImplementedError.
+        """
+        raise NotImplementedError(
+            f"Node type {self.node.node_type} does not support handle_tool_response"
+        )
+
+    async def execute_programmable_call(
+        self,
+        session_id: str,
+        call_id: str,
+        method: str,
+        instruction: Optional[str],
+        kwargs: Dict[str, Any],
+        return_schema: Optional[Dict[str, Any]],
+        command: 'ProgrammableCallCommand'
+    ):
+        """
+        Execute a programmable call in a session (only for agent nodes).
+
+        This method enables SDK-style programmatic invocation of nodes, allowing external
+        systems to call nodes with structured method calls and receive structured responses.
+
+        Flow:
+        1. Validate that the session exists in this node
+        2. Delegate to the session's execute_programmable_call() method
+        3. Session stores the command and sends programmable_call event to the agent
+        4. MCP tool (programmable_return) will later call command.set_result() to resolve
+        5. Return immediately (don't wait for result)
+
+        Args:
+            session_id: Session identifier (must be ACTIVE, already validated by API layer)
+            call_id: Unique call identifier (UUID) for tracking this specific call
+            method: Semantic method identifier (e.g., "analyze_data", "extract_entities")
+            instruction: Optional detailed task description for complex multi-step tasks
+            kwargs: Keyword arguments for the call (must be JSON-serializable dict)
+            return_schema: Optional JSON Schema Draft 7 for return value validation
+            command: ProgrammableCallCommand instance (for MCP tool to set result)
+
+        Returns:
+            None: This method returns immediately. The MCP tool will set command.future result.
+
+        Raises:
+            SessionNotFoundError: If the session doesn't exist in this node
+            NotImplementedError: If this node type doesn't support programmable calls
+            RuntimeInternalError: If execution fails or validation errors occur
+
+        Note:
+            Most node types (scheduler, email, aggregator, etc.) don't support programmable calls.
+            Only agent nodes (like claude_code) that can process structured requests and return
+            structured responses should override this method.
+            Default implementation raises NotImplementedError.
+
+        Implementation pattern for agent nodes:
+            async def execute_programmable_call(self, session_id, call_id, method, instruction, kwargs, return_schema, command):
+                # 1. Get the session from the session map
+                mosaic_session = self._sessions.get(session_id)
+                if not mosaic_session:
+                    raise SessionNotFoundError(f"Session not found: {session_id}")
+
+                # 2. Delegate to the session's execute_programmable_call method
+                await mosaic_session.execute_programmable_call(
+                    call_id=call_id,
+                    method=method,
+                    instruction=instruction,
+                    kwargs=kwargs,
+                    return_schema=return_schema,
+                    command=command
+                )
+        """
+        raise NotImplementedError(
+            f"Node type {self.node.node_type} does not support execute_programmable_call"
+        )
 
     @abstractmethod
     async def close_session(self, session_id: str) -> None:

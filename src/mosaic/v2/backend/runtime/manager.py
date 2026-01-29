@@ -55,16 +55,18 @@ class RuntimeManager:
 
     _instance: Optional['RuntimeManager'] = None
 
-    def __init__(self, async_session_factory, config: dict):
+    def __init__(self, async_session_factory, config: dict, user_message_broker):
         """
         Initialize runtime manager.
 
         Args:
             async_session_factory: AsyncSession factory from app.state
             config: Configuration dict from app.state
+            user_message_broker: UserMessageBroker instance for WebSocket communication
         """
         self.async_session_factory = async_session_factory
         self.config = config
+        self.user_message_broker = user_message_broker
 
         # Runtime state
         self._started = False
@@ -84,13 +86,18 @@ class RuntimeManager:
         self._starting_count = 0  # Number of mosaics currently starting
         self._all_started_event: Optional[asyncio.Event] = None  # Set in start()
 
+        # Terminal manager (runs in main event loop)
+        from ..terminal import TerminalManager
+        self.terminal_manager = TerminalManager(user_message_broker)
+
         logger.info("RuntimeManager initialized")
 
     @classmethod
     def create_instance(
         cls,
         async_session_factory,
-        config: dict
+        config: dict,
+        user_message_broker
     ) -> 'RuntimeManager':
         """
         Create and store the singleton instance.
@@ -98,6 +105,7 @@ class RuntimeManager:
         Args:
             async_session_factory: AsyncSession factory from app.state
             config: Configuration dict from app.state
+            user_message_broker: UserMessageBroker instance
 
         Returns:
             Created RuntimeManager instance
@@ -108,7 +116,7 @@ class RuntimeManager:
         if cls._instance is not None:
             raise RuntimeAlreadyStartedError("RuntimeManager already initialized")
 
-        cls._instance = cls(async_session_factory, config)
+        cls._instance = cls(async_session_factory, config, user_message_broker)
         return cls._instance
 
     # ========== Manager Lifecycle ==========
@@ -659,6 +667,9 @@ class RuntimeManager:
         node: 'Node',
         mode: 'SessionMode',
         model: 'LLMModel',
+        token_threshold_enabled: bool = False,
+        token_threshold: int = 60000,
+        inherit_threshold: bool = True,
         timeout: float = 10.0
     ) -> str:
         """
@@ -671,13 +682,16 @@ class RuntimeManager:
 
         Steps:
         1. Generate a unique session_id
-        2. Create CreateSessionCommand with node, session_id, and config (mode/model)
+        2. Create CreateSessionCommand with node, session_id, config
         3. Submit command and wait for completion
 
         Args:
             node: Node model object (validated by FastAPI layer)
             mode: Session mode (PROGRAM or CHAT)
             model: LLM model to use (SONNET, OPUS, or HAIKU)
+            token_threshold_enabled: Enable token threshold monitoring (default: False)
+            token_threshold: Token count threshold (default: 60000)
+            inherit_threshold: Whether child sessions inherit threshold config (default: True)
             timeout: Maximum wait time in seconds
 
         Returns:
@@ -700,7 +714,10 @@ class RuntimeManager:
         logger.info(
             f"Creating session: session_id={session_id}, "
             f"node_id={node.node_id}, mosaic_id={node.mosaic_id}, "
-            f"mode={mode.value}, model={model.value}"
+            f"mode={mode.value}, model={model.value}, "
+            f"token_threshold_enabled={token_threshold_enabled}, "
+            f"token_threshold={token_threshold}, "
+            f"inherit_threshold={inherit_threshold}"
         )
 
         # Import command here to avoid circular import
@@ -709,7 +726,10 @@ class RuntimeManager:
         # Build config dictionary for agent session
         config = {
             'mode': mode,
-            'model': model
+            'model': model,
+            'token_threshold_enabled': token_threshold_enabled,
+            'token_threshold': token_threshold,
+            'inherit_threshold': inherit_threshold
         }
 
         # Add mcp_servers from node config if present
@@ -732,7 +752,7 @@ class RuntimeManager:
 
         return session_id
 
-    def submit_send_message(self, node: 'Node', session: 'Session', message: str) -> None:
+    def submit_send_message(self, node: 'Node', session: 'Session', message: str, context: Optional[Dict[str, Any]] = None) -> None:
         """
         Submit a send message command (fire-and-forget).
 
@@ -742,6 +762,7 @@ class RuntimeManager:
             node: Node model object (validated by FastAPI layer)
             session: Session model object (validated by FastAPI layer)
             message: User message content
+            context: Optional context data (e.g., GeoGebra states)
 
         Raises:
             MosaicNotRunningError: If mosaic not running
@@ -763,6 +784,7 @@ class RuntimeManager:
             node=node,
             session=session,
             message=message,
+            context=context,
             future=None  # Don't wait for result
         )
 
@@ -771,6 +793,68 @@ class RuntimeManager:
 
         logger.debug(
             f"Message submitted for session: session_id={session.session_id}, node_id={node.node_id}"
+        )
+
+    def submit_tool_response(
+        self,
+        node: 'Node',
+        session: 'Session',
+        response_id: str,
+        result: Any
+    ) -> None:
+        """
+        Submit a tool response from frontend (fire-and-forget).
+
+        This method is called when the frontend sends back a response to a tool execution
+        (e.g., GeoGebra command execution result). The response will be matched with a
+        pending Future using the response_id, allowing the tool to complete its async wait.
+
+        Flow:
+        1. Tool (e.g., execute_geogebra_command) sends command to frontend with response_id
+        2. Tool creates Future and stores in session._pending_responses[response_id]
+        3. Tool awaits the Future (with timeout)
+        4. Frontend executes command and sends result back via WebSocket
+        5. WebSocket handler calls this method
+        6. This method routes to the session to set the Future result
+        7. Tool receives result and returns to Claude
+
+        Args:
+            node: Node model object (validated by FastAPI layer)
+            session: Session model object (validated by FastAPI layer)
+            response_id: Unique identifier matching the pending response
+            result: Response data from frontend (can be any structure)
+
+        Raises:
+            MosaicNotRunningError: If mosaic not running
+
+        Note:
+            This is a non-blocking operation. The actual Future completion happens
+            in the runtime thread.
+            FastAPI layer must validate node and session existence/permissions before calling.
+        """
+        logger.debug(
+            f"Submitting tool response for session: session_id={session.session_id}, "
+            f"node_id={node.node_id}, response_id={response_id}"
+        )
+
+        # Import command here to avoid circular import
+        from .command import ToolResponseCommand
+
+        # Create ToolResponseCommand (no future needed, fire-and-forget)
+        command = ToolResponseCommand(
+            node=node,
+            session=session,
+            response_id=response_id,
+            result=result,
+            future=None  # Don't wait for result
+        )
+
+        # Submit command without waiting (fire-and-forget)
+        self._submit_command_no_wait(node.mosaic_id, command)
+
+        logger.debug(
+            f"Tool response submitted for session: session_id={session.session_id}, "
+            f"response_id={response_id}"
         )
 
     async def interrupt_session(self, node: 'Node', session: 'Session', timeout: float = 5.0) -> None:
@@ -860,6 +944,111 @@ class RuntimeManager:
         logger.info(
             f"Session closed successfully: session_id={session.session_id}, node_id={node.node_id}"
         )
+
+    async def execute_programmable_call(
+        self,
+        node: 'Node',
+        session: 'Session',
+        call_id: str,
+        method: str,
+        instruction: Optional[str],
+        kwargs: dict[str, Any],
+        return_schema: Optional[dict[str, Any]],
+        timeout: float = 60.0
+    ) -> Any:
+        """
+        Execute a programmable call on a node and wait for result.
+
+        This method implements the core logic for SDK programmable calls:
+        1. Create ProgrammableCallCommand with all parameters (including call_id from API layer)
+        2. Submit command to runtime and wait for result
+        3. Return result data or raise exception on error/timeout
+
+        The actual call execution happens in the runtime layer:
+        - MosaicInstance routes the command to the target node
+        - Node uses the session object directly
+        - Session sends programmable_call event to agent
+        - Agent processes the call and sends programmable_return event
+        - Session matches the return event by call_id and resolves the Future
+        - Result is returned through the command's future
+
+        Uses command queue with Future for async wait (same pattern as other session operations).
+
+        Args:
+            node: Node model object (validated by FastAPI layer)
+            session: Session model object (validated by FastAPI layer, must be already created)
+            call_id: Unique call identifier (UUID, generated by API layer)
+            method: Semantic method identifier (e.g., "analyze_data", "extract_entities")
+            instruction: Optional detailed task description for complex multi-step tasks
+            kwargs: Keyword arguments for the call (must be JSON-serializable)
+            return_schema: Optional JSON Schema Draft 7 for return value validation
+            timeout: Maximum wait time in seconds (default: 60, range: 1-600)
+
+        Returns:
+            Result data from the node. Type depends on return_schema or node's response format.
+            Can be any JSON-serializable type: dict, list, str, int, float, bool, None.
+
+        Raises:
+            MosaicNotRunningError: If mosaic not running
+            NodeNotFoundError: If node not found in the running mosaic
+            RuntimeTimeoutError: If call doesn't complete within timeout period
+            RuntimeInternalError: If node returns error status or internal error occurs
+
+        Note:
+            FastAPI layer must validate:
+            - Node existence and user permissions
+            - Session existence and ownership
+            - Request data serialization (kwargs, return_schema)
+
+            Session management (pool vs explicit) is handled by FastAPI layer:
+            - FastAPI can implement session pool logic if needed
+            - This method accepts an existing session object only
+            - No automatic session creation happens in this method
+
+        Example flow:
+            # FastAPI layer
+            call_id = str(uuid4())  # Generate call_id at API layer
+            session = await get_or_create_pooled_session(user_id, mosaic_id, node_id)
+            result = await runtime_manager.execute_programmable_call(
+                node=node,
+                session=session,
+                call_id=call_id,
+                method="analyze_risk",
+                instruction="Analyze user behavior and return risk assessment",
+                kwargs={"user_data": {...}, "threshold": 0.95},
+                return_schema={"type": "object", "properties": {...}},
+                timeout=60.0
+            )
+        """
+        logger.info(
+            f"Executing programmable call: call_id={call_id}, "
+            f"session_id={session.session_id}, node_id={node.node_id}, "
+            f"method={method}, timeout={timeout}"
+        )
+
+        # Import command here to avoid circular import
+        from .command import ProgrammableCallCommand
+
+        # Create ProgrammableCallCommand
+        command = ProgrammableCallCommand(
+            node=node,
+            session=session,
+            call_id=call_id,
+            method=method,
+            instruction=instruction,
+            kwargs=kwargs,
+            return_schema=return_schema
+        )
+
+        # Submit command and wait for result
+        result = await self._submit_command_and_wait(node.mosaic_id, command, timeout)
+
+        logger.info(
+            f"Programmable call completed: call_id={call_id}, "
+            f"session_id={session.session_id}, node_id={node.node_id}"
+        )
+
+        return result
 
     # ========== Command Submission Utilities ==========
 
@@ -1208,3 +1397,125 @@ class RuntimeManager:
                 self._thread_loops.pop(current_thread, None)
 
             logger.info(f"Event loop stopped and cleaned up: {current_thread.name}")
+
+    # ========== Terminal Operations ==========
+
+    async def start_terminal(
+        self,
+        node: 'Node',
+        session: 'Session',
+        user_id: int,
+        workspace_path,
+        timeout: float = 10.0
+    ) -> None:
+        """
+        Start a terminal session for workspace mode.
+
+        Delegates to TerminalManager for actual PTY management.
+
+        Args:
+            node: Node model object (validated by FastAPI layer)
+            session: Session model object (validated by FastAPI layer)
+            user_id: User database ID (for message routing)
+            workspace_path: Path to node's workspace directory
+            timeout: Maximum wait time in seconds
+
+        Note:
+            FastAPI layer must validate node and session existence/permissions before calling.
+        """
+        logger.info(
+            f"[Terminal] Start request: session_id={session.session_id}, "
+            f"node_id={node.node_id}, user_id={user_id}, workspace_path={workspace_path}"
+        )
+
+        # Delegate to TerminalManager
+        await self.terminal_manager.start_terminal(
+            session_id=session.session_id,
+            workspace_path=workspace_path,
+            user_id=user_id
+        )
+
+    async def send_terminal_input(
+        self,
+        session: 'Session',
+        data: str
+    ) -> None:
+        """
+        Send user input to terminal session.
+
+        Delegates to TerminalManager for actual PTY I/O.
+
+        Args:
+            session: Session model object (validated by FastAPI layer)
+            data: User input data (keystrokes)
+
+        Note:
+            FastAPI layer must validate session existence/permissions before calling.
+        """
+        logger.debug(
+            f"[Terminal] Input received: session_id={session.session_id}, "
+            f"data_length={len(data)}, data_repr={repr(data[:50])}"
+        )
+
+        # Delegate to TerminalManager
+        await self.terminal_manager.send_input(
+            session_id=session.session_id,
+            data=data
+        )
+
+    async def resize_terminal(
+        self,
+        session: 'Session',
+        cols: int,
+        rows: int
+    ) -> None:
+        """
+        Resize terminal window.
+
+        Delegates to TerminalManager for actual PTY ioctl.
+
+        Args:
+            session: Session model object (validated by FastAPI layer)
+            cols: Terminal columns
+            rows: Terminal rows
+
+        Note:
+            FastAPI layer must validate session existence/permissions before calling.
+        """
+        logger.info(
+            f"[Terminal] Resize request: session_id={session.session_id}, "
+            f"cols={cols}, rows={rows}"
+        )
+
+        # Delegate to TerminalManager
+        await self.terminal_manager.resize_terminal(
+            session_id=session.session_id,
+            cols=cols,
+            rows=rows
+        )
+
+    async def stop_terminal(
+        self,
+        session: 'Session',
+        timeout: float = 5.0
+    ) -> None:
+        """
+        Stop a terminal session.
+
+        Delegates to TerminalManager for actual PTY cleanup.
+
+        Args:
+            session: Session model object (validated by FastAPI layer)
+            timeout: Maximum wait time in seconds
+
+        Note:
+            FastAPI layer must validate session existence/permissions before calling.
+        """
+        logger.info(
+            f"[Terminal] Stop request: session_id={session.session_id}"
+        )
+
+        # Delegate to TerminalManager
+        await self.terminal_manager.stop_terminal(
+            session_id=session.session_id
+        )

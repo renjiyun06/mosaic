@@ -26,19 +26,44 @@ export interface WSError {
   message: string
 }
 
+// GeoGebra object state
+export interface GeoGebraObject {
+  name: string
+  type: string
+  definition: string
+  x?: number
+  y?: number
+}
+
+// GeoGebra instance state
+export interface GeoGebraInstanceState {
+  instanceNumber: number
+  objects: GeoGebraObject[]
+}
+
+// Context data attached to user messages
+export interface MessageContext {
+  geogebra_states?: GeoGebraInstanceState[]
+}
+
 // Message sent from client to server
 export interface WSClientMessage {
   session_id: string
-  type: 'user_message' | 'interrupt'
+  type: 'user_message' | 'interrupt' | 'terminal_start' | 'terminal_input' | 'terminal_resize' | 'terminal_stop'
   message?: string
+  data?: string // For terminal input
+  cols?: number // For terminal resize
+  rows?: number // For terminal resize
+  context?: MessageContext // Supplementary data (e.g., GeoGebra states)
 }
 
 type MessageHandler = (message: WSMessage | WSError) => void
 
 interface WebSocketContextType {
   isConnected: boolean
-  sendMessage: (sessionId: string, message: string) => void
+  sendMessage: (sessionId: string, message: string, context?: MessageContext) => void
   interrupt: (sessionId: string) => void
+  sendRaw: (data: any) => void // Generic method for sending any JSON data
   subscribe: (sessionId: string, handler: MessageHandler) => () => void
 }
 
@@ -179,7 +204,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, [isAuthenticated, token, connect, disconnect])
 
   // Send user message to session
-  const sendMessage = useCallback((sessionId: string, message: string) => {
+  const sendMessage = useCallback((sessionId: string, message: string, context?: MessageContext) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       console.error('[WebSocket] Cannot send message: not connected')
       return
@@ -188,7 +213,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     const payload: WSClientMessage = {
       session_id: sessionId,
       type: 'user_message',
-      message
+      message,
+      ...(context && { context })
     }
 
     console.log('[WebSocket] Sending message:', payload)
@@ -209,6 +235,17 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
     console.log('[WebSocket] Sending interrupt:', payload)
     wsRef.current.send(JSON.stringify(payload))
+  }, [])
+
+  // Send raw JSON data (generic method for custom message types)
+  const sendRaw = useCallback((data: any) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.error('[WebSocket] Cannot send raw data: not connected')
+      return
+    }
+
+    console.log('[WebSocket] Sending raw data:', data)
+    wsRef.current.send(JSON.stringify(data))
   }, [])
 
   // Subscribe to messages for a specific session
@@ -237,6 +274,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     isConnected,
     sendMessage,
     interrupt,
+    sendRaw,
     subscribe
   }
 

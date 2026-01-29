@@ -33,6 +33,7 @@ import { Plus, Trash2, Loader2, Edit, ArrowRight, Bell } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
 import { EventType, type ConnectionOut, type SubscriptionOut } from "@/lib/types"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 // Event type display configuration
 const EVENT_TYPE_LABELS: Record<EventType, string> = {
@@ -69,6 +70,9 @@ export default function SubscriptionsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(false)
+
   // Create dialog state
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -90,6 +94,14 @@ export default function SubscriptionsPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deletingSubscription, setDeletingSubscription] = useState<SubscriptionOut | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // Mobile detection effect
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Fetch subscriptions and connections
   useEffect(() => {
@@ -221,8 +233,8 @@ export default function SubscriptionsPage() {
   // Loading state
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="flex items-center justify-center min-h-[300px] sm:min-h-[400px]">
+        <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-muted-foreground" />
       </div>
     )
   }
@@ -230,23 +242,24 @@ export default function SubscriptionsPage() {
   // Error state
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <p className="text-muted-foreground mb-4">{error}</p>
+      <div className="flex flex-col items-center justify-center min-h-[300px] sm:min-h-[400px] px-4">
+        <p className="text-muted-foreground mb-4 text-sm sm:text-base text-center">{error}</p>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col h-full space-y-6 overflow-auto">
+    <div className="flex flex-col h-full space-y-3 sm:space-y-4 md:space-y-6 overflow-auto">
       <div className="flex-shrink-0">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold">事件订阅</h1>
-            <p className="text-muted-foreground mt-1">管理节点之间的事件订阅关系</p>
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">事件订阅</h1>
+            <p className="text-muted-foreground mt-1 text-sm md:text-base">管理节点之间的事件订阅关系</p>
           </div>
           <Button
             onClick={() => setCreateDialogOpen(true)}
             disabled={connections.length === 0}
+            className="w-full md:w-auto"
           >
             <Plus className="mr-2 h-4 w-4" />
             新建订阅
@@ -255,11 +268,11 @@ export default function SubscriptionsPage() {
       </div>
 
       {subscriptions.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center pt-16 border rounded-lg">
-          <Bell className="h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-xl font-semibold mb-2">还没有创建任何订阅</h2>
-          <p className="text-muted-foreground text-center mb-6 max-w-lg">
-            事件订阅定义了节点之间的消息传递规则。<br />
+        <div className="flex-1 flex flex-col items-center justify-center pt-8 sm:pt-16 border rounded-lg px-4">
+          <Bell className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground mb-3 sm:mb-4" />
+          <h2 className="text-lg sm:text-xl font-semibold mb-2 text-center">还没有创建任何订阅</h2>
+          <p className="text-muted-foreground text-center mb-4 sm:mb-6 max-w-lg text-sm sm:text-base">
+            事件订阅定义了节点之间的消息传递规则。
             {connections.length > 0 ? (
               "在已有的连接上创建订阅，指定要传递的事件类型。"
             ) : (
@@ -267,13 +280,76 @@ export default function SubscriptionsPage() {
             )}
           </p>
           {connections.length > 0 && (
-            <Button onClick={() => setCreateDialogOpen(true)}>
+            <Button onClick={() => setCreateDialogOpen(true)} className="w-full sm:w-auto">
               <Plus className="mr-2 h-4 w-4" />
               创建第一个订阅
             </Button>
           )}
         </div>
+      ) : isMobile ? (
+        // Mobile card view
+        <div className="flex-1 overflow-auto space-y-3">
+          {subscriptions.map((subscription) => (
+            <Card key={subscription.id}>
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-base font-mono truncate flex-1">
+                    {subscription.source_node_id}
+                  </CardTitle>
+                  <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <CardTitle className="text-base font-mono truncate flex-1">
+                    {subscription.target_node_id}
+                  </CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">事件类型：</span>
+                  <Badge variant="outline" className="text-xs">
+                    {EVENT_TYPE_LABELS[subscription.event_type]}
+                  </Badge>
+                </div>
+                {subscription.description && (
+                  <p className="text-sm text-muted-foreground line-clamp-2">
+                    {subscription.description}
+                  </p>
+                )}
+                <div className="text-xs text-muted-foreground">
+                  创建于 {new Date(subscription.created_at).toLocaleString("zh-CN", {
+                    year: "numeric",
+                    month: "2-digit",
+                    day: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: false
+                  })}
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openEditDialog(subscription)}
+                    className="flex-1"
+                  >
+                    <Edit className="mr-1.5 h-3.5 w-3.5" />
+                    编辑
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openDeleteDialog(subscription)}
+                    className="text-destructive hover:text-destructive flex-1"
+                  >
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                    删除
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       ) : (
+        // Desktop table view
         <div className="flex-1 flex flex-col min-h-0 border rounded-lg">
           <div className="flex-1 overflow-auto">
             <Table>
@@ -349,23 +425,23 @@ export default function SubscriptionsPage() {
 
       {/* Create Subscription Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-scroll">
+        <DialogContent className="sm:max-w-2xl max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>创建新订阅</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-lg sm:text-xl">创建新订阅</DialogTitle>
+            <DialogDescription className="text-sm">
               在已有的连接上创建事件订阅
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="connection_id">连接 *</Label>
+              <Label htmlFor="connection_id" className="text-sm">连接 *</Label>
               <Select
                 value={formData.connection_id}
                 onValueChange={(value) =>
                   setFormData({ ...formData, connection_id: value })
                 }
               >
-                <SelectTrigger id="connection_id">
+                <SelectTrigger id="connection_id" className="text-base">
                   <SelectValue placeholder="选择一个连接" />
                 </SelectTrigger>
                 <SelectContent>
@@ -375,7 +451,7 @@ export default function SubscriptionsPage() {
                     </div>
                   ) : (
                     connections.map((connection) => (
-                      <SelectItem key={connection.id} value={String(connection.id)}>
+                      <SelectItem key={connection.id} value={String(connection.id)} className="text-base">
                         {connection.source_node_id} → {connection.target_node_id}
                       </SelectItem>
                     ))
@@ -389,19 +465,19 @@ export default function SubscriptionsPage() {
               )}
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="event_type">事件类型 *</Label>
+              <Label htmlFor="event_type" className="text-sm">事件类型 *</Label>
               <Select
                 value={formData.event_type}
                 onValueChange={(value) =>
                   setFormData({ ...formData, event_type: value as EventType })
                 }
               >
-                <SelectTrigger id="event_type">
+                <SelectTrigger id="event_type" className="text-base">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {SUBSCRIBABLE_EVENT_TYPES.map(([type, label]) => (
-                    <SelectItem key={type} value={type}>
+                    <SelectItem key={type} value={type} className="text-base">
                       {label}
                     </SelectItem>
                   ))}
@@ -409,7 +485,7 @@ export default function SubscriptionsPage() {
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="description">描述（可选）</Label>
+              <Label htmlFor="description" className="text-sm">描述（可选）</Label>
               <Textarea
                 id="description"
                 placeholder="描述这个订阅的用途..."
@@ -419,20 +495,23 @@ export default function SubscriptionsPage() {
                 }
                 maxLength={1000}
                 rows={3}
+                className="text-base resize-none"
               />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
             <Button
               variant="outline"
               onClick={() => setCreateDialogOpen(false)}
               disabled={creating}
+              className="w-full sm:w-auto"
             >
               取消
             </Button>
             <Button
               onClick={handleCreateSubscription}
               disabled={creating || !formData.connection_id || connections.length === 0}
+              className="w-full sm:w-auto"
             >
               {creating ? (
                 <>
@@ -449,28 +528,28 @@ export default function SubscriptionsPage() {
 
       {/* Edit Subscription Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-scroll">
+        <DialogContent className="sm:max-w-2xl max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>编辑订阅</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-lg sm:text-xl">编辑订阅</DialogTitle>
+            <DialogDescription className="text-sm">
               更新订阅的描述信息
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label>连接</Label>
-              <div className="px-3 py-2 bg-muted rounded-md text-sm">
+              <Label className="text-sm">连接</Label>
+              <div className="px-3 py-2 bg-muted rounded-md text-sm break-words">
                 {editingSubscription && getConnectionDisplay(editingSubscription.connection_id)}
               </div>
             </div>
             <div className="grid gap-2">
-              <Label>事件类型</Label>
+              <Label className="text-sm">事件类型</Label>
               <div className="px-3 py-2 bg-muted rounded-md text-sm">
                 {editingSubscription && EVENT_TYPE_LABELS[editingSubscription.event_type]}
               </div>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit_description">描述（可选）</Label>
+              <Label htmlFor="edit_description" className="text-sm">描述（可选）</Label>
               <Textarea
                 id="edit_description"
                 placeholder="描述这个订阅的用途..."
@@ -480,18 +559,20 @@ export default function SubscriptionsPage() {
                 }
                 maxLength={1000}
                 rows={3}
+                className="text-base resize-none"
               />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
             <Button
               variant="outline"
               onClick={() => setEditDialogOpen(false)}
               disabled={updating}
+              className="w-full sm:w-auto"
             >
               取消
             </Button>
-            <Button onClick={handleUpdateSubscription} disabled={updating}>
+            <Button onClick={handleUpdateSubscription} disabled={updating} className="w-full sm:w-auto">
               {updating ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -507,23 +588,23 @@ export default function SubscriptionsPage() {
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[500px] max-w-[calc(100vw-2rem)]">
           <DialogHeader>
-            <DialogTitle>确认删除订阅？</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-lg sm:text-xl">确认删除订阅？</DialogTitle>
+            <DialogDescription className="text-sm">
               此操作将删除事件订阅。此操作不可撤销。
             </DialogDescription>
           </DialogHeader>
           {deletingSubscription && (
             <div className="py-4">
               <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
+                <div className="flex flex-col sm:flex-row sm:justify-between gap-1 sm:gap-2">
                   <span className="text-muted-foreground">连接：</span>
-                  <span className="font-medium">
+                  <span className="font-medium break-words">
                     {deletingSubscription.source_node_id} → {deletingSubscription.target_node_id}
                   </span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex flex-col sm:flex-row sm:justify-between gap-1 sm:gap-2">
                   <span className="text-muted-foreground">事件类型：</span>
                   <span className="font-medium">
                     {EVENT_TYPE_LABELS[deletingSubscription.event_type]}
@@ -532,11 +613,12 @@ export default function SubscriptionsPage() {
               </div>
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
             <Button
               variant="outline"
               onClick={() => setDeleteDialogOpen(false)}
               disabled={deleting}
+              className="w-full sm:w-auto"
             >
               取消
             </Button>
@@ -544,6 +626,7 @@ export default function SubscriptionsPage() {
               variant="destructive"
               onClick={handleDeleteSubscription}
               disabled={deleting}
+              className="w-full sm:w-auto"
             >
               {deleting ? (
                 <>

@@ -4,7 +4,7 @@ from sqlmodel import Field, Column, JSON
 from datetime import datetime
 from typing import Optional
 from .base import BaseModel
-from ..enum import SessionMode, SessionStatus, LLMModel
+from ..enum import SessionMode, SessionStatus, LLMModel, RuntimeStatus
 
 
 class Session(BaseModel, table=True):
@@ -52,6 +52,18 @@ class Session(BaseModel, table=True):
     status: SessionStatus = Field(
         description="Session status"
     )
+    runtime_status: RuntimeStatus = Field(
+        default=RuntimeStatus.IDLE,
+        description="Runtime processing status (idle/busy)"
+    )
+
+    # Session metadata
+    topic: Optional[str] = Field(
+        default=None,
+        max_length=80,
+        index=True,
+        description="Auto-generated session topic/title (maximum 80 characters)"
+    )
 
     # Statistics
     message_count: int = Field(
@@ -69,6 +81,14 @@ class Session(BaseModel, table=True):
     total_cost_usd: float = Field(
         default=0.0,
         description="Cumulative cost in USD"
+    )
+    context_usage: int = Field(
+        default=0,
+        description="Current context window usage (input + cache tokens)"
+    )
+    context_percentage: float = Field(
+        default=0.0,
+        description="Context window usage percentage (0-100)"
     )
 
     # Additional timestamps (beyond BaseModel's created_at, updated_at, deleted_at)

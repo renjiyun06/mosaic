@@ -26,7 +26,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Loader2, Activity, ChevronLeft, ChevronRight, X } from "lucide-react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Loader2, Activity, ChevronLeft, ChevronRight, X, ArrowRight } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
 import { EventType, type NodeOut, type EventListOut, type EventDetailOut } from "@/lib/types"
@@ -52,6 +53,9 @@ export default function EventsPage() {
   const params = useParams()
   const { token } = useAuth()
   const mosaicId = params.mosaicId as string
+
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(false)
 
   // Node list state
   const [nodes, setNodes] = useState<NodeOut[]>([])
@@ -82,6 +86,14 @@ export default function EventsPage() {
   // Event detail dialog state
   const [selectedEvent, setSelectedEvent] = useState<EventDetailOut | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
+
+  // Mobile detection effect
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Initialize time range to last 24 hours
   useEffect(() => {
@@ -231,8 +243,8 @@ export default function EventsPage() {
   // Loading nodes state
   if (loadingNodes) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="flex items-center justify-center min-h-[300px] sm:min-h-[400px]">
+        <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-muted-foreground" />
       </div>
     )
   }
@@ -241,293 +253,314 @@ export default function EventsPage() {
   const isTimeRangeValid = startDateTime && endDateTime && new Date(startDateTime) < new Date(endDateTime)
 
   return (
-    <div className="flex flex-col h-full space-y-6 overflow-auto">
+    <div className="flex flex-col h-full space-y-3 sm:space-y-4 md:space-y-6 overflow-auto">
       {/* Header */}
       <div className="flex-shrink-0">
-        <h1 className="text-3xl font-bold">事件监控</h1>
-        <p className="text-muted-foreground mt-1">查看系统事件流历史记录</p>
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">事件监控</h1>
+        <p className="text-muted-foreground mt-1 text-sm md:text-base">查看系统事件流历史记录</p>
       </div>
 
       {/* Filters */}
-      <div className="flex-shrink-0 space-y-2">
-        {/* First row: Source node, Source session, Target node, Target session */}
-        <div className="grid gap-3 md:grid-cols-4">
+      <div className="flex-shrink-0 space-y-3 sm:space-y-4">
+        <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
           {/* Source node filter */}
-          <div className="flex items-center gap-2">
-            <label htmlFor="source-node-filter" className="text-sm font-medium whitespace-nowrap w-16 flex-shrink-0">
-              源节点
-            </label>
-            <div className="flex-1">
-              <Select
-                value={sourceNodeId}
-                onValueChange={(value) => {
-                  setSourceNodeId(value)
-                  setCurrentPage(1)
-                }}
-              >
-                <SelectTrigger id="source-node-filter" className="h-9 w-full">
-                  <SelectValue placeholder="全部" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部源节点</SelectItem>
-                  {nodes.map((node) => (
-                    <SelectItem key={node.id} value={node.node_id}>
-                      {node.node_id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          <Select
+            value={sourceNodeId}
+            onValueChange={(value) => {
+              setSourceNodeId(value)
+              setCurrentPage(1)
+            }}
+          >
+            <SelectTrigger id="source-node-filter">
+              <SelectValue placeholder="源节点" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部源节点</SelectItem>
+              {nodes.map((node) => (
+                <SelectItem key={node.id} value={node.node_id}>
+                  {node.node_id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           {/* Source session filter */}
-          <div className="flex items-center gap-2">
-            <label htmlFor="source-session-filter" className="text-sm font-medium whitespace-nowrap w-16 flex-shrink-0">
-              源会话
-            </label>
-            <div className="relative flex-1">
-              <Input
-                id="source-session-filter"
-                placeholder="会话 ID..."
-                value={sourceSessionId}
-                onChange={(e) => {
-                  setSourceSessionId(e.target.value)
+          <div className="relative">
+            <Input
+              id="source-session-filter"
+              placeholder="源会话 ID..."
+              value={sourceSessionId}
+              onChange={(e) => {
+                setSourceSessionId(e.target.value)
+                setCurrentPage(1)
+              }}
+              className="pr-8 focus-visible:ring-0 focus-visible:ring-offset-0"
+            />
+            {sourceSessionId && (
+              <button
+                onClick={() => {
+                  setSourceSessionId("")
                   setCurrentPage(1)
                 }}
-                className="h-9 pr-8 focus-visible:ring-0 focus-visible:ring-offset-0"
-              />
-              {sourceSessionId && (
-                <button
-                  onClick={() => {
-                    setSourceSessionId("")
-                    setCurrentPage(1)
-                  }}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </div>
 
           {/* Target node filter */}
-          <div className="flex items-center gap-2">
-            <label htmlFor="target-node-filter" className="text-sm font-medium whitespace-nowrap w-16 flex-shrink-0">
-              目标节点
-            </label>
-            <div className="flex-1">
-              <Select
-                value={targetNodeId}
-                onValueChange={(value) => {
-                  setTargetNodeId(value)
-                  setCurrentPage(1)
-                }}
-              >
-                <SelectTrigger id="target-node-filter" className="h-9 w-full">
-                  <SelectValue placeholder="全部" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部目标节点</SelectItem>
-                  {nodes.map((node) => (
-                    <SelectItem key={node.id} value={node.node_id}>
-                      {node.node_id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          <Select
+            value={targetNodeId}
+            onValueChange={(value) => {
+              setTargetNodeId(value)
+              setCurrentPage(1)
+            }}
+          >
+            <SelectTrigger id="target-node-filter">
+              <SelectValue placeholder="目标节点" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部目标节点</SelectItem>
+              {nodes.map((node) => (
+                <SelectItem key={node.id} value={node.node_id}>
+                  {node.node_id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           {/* Target session filter */}
-          <div className="flex items-center gap-2">
-            <label htmlFor="target-session-filter" className="text-sm font-medium whitespace-nowrap w-16 flex-shrink-0">
-              目标会话
-            </label>
-            <div className="relative flex-1">
-              <Input
-                id="target-session-filter"
-                placeholder="会话 ID..."
-                value={targetSessionId}
-                onChange={(e) => {
-                  setTargetSessionId(e.target.value)
+          <div className="relative">
+            <Input
+              id="target-session-filter"
+              placeholder="目标会话 ID..."
+              value={targetSessionId}
+              onChange={(e) => {
+                setTargetSessionId(e.target.value)
+                setCurrentPage(1)
+              }}
+              className="pr-8 focus-visible:ring-0 focus-visible:ring-offset-0"
+            />
+            {targetSessionId && (
+              <button
+                onClick={() => {
+                  setTargetSessionId("")
                   setCurrentPage(1)
                 }}
-                className="h-9 pr-8 focus-visible:ring-0 focus-visible:ring-offset-0"
-              />
-              {targetSessionId && (
-                <button
-                  onClick={() => {
-                    setTargetSessionId("")
-                    setCurrentPage(1)
-                  }}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </div>
+
+          {/* Event type filter */}
+          <Select
+            value={eventType}
+            onValueChange={(value) => {
+              setEventType(value as EventType | "all")
+              setCurrentPage(1)
+            }}
+          >
+            <SelectTrigger id="event-type-filter">
+              <SelectValue placeholder="事件类型" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部类型</SelectItem>
+              {Object.entries(EVENT_TYPE_CONFIG).map(([type, config]) => (
+                <SelectItem key={type} value={type}>
+                  {config.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
-        {/* Second row: Event type, Time range */}
-        <div className="grid gap-3 md:grid-cols-4">
-          {/* Event type filter */}
-          <div className="flex items-center gap-2">
-            <label htmlFor="event-type-filter" className="text-sm font-medium whitespace-nowrap w-16 flex-shrink-0">
-              事件类型
-            </label>
-            <div className="flex-1">
-              <Select
-                value={eventType}
-                onValueChange={(value) => {
-                  setEventType(value as EventType | "all")
-                  setCurrentPage(1)
-                }}
-              >
-                <SelectTrigger id="event-type-filter" className="h-9 w-full">
-                  <SelectValue placeholder="全部" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部类型</SelectItem>
-                  {Object.entries(EVENT_TYPE_CONFIG).map(([type, config]) => (
-                    <SelectItem key={type} value={type}>
-                      {config.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Time range filter */}
-          <div className="flex items-center gap-2 md:col-span-3">
-            <label className="text-sm font-medium whitespace-nowrap w-16 flex-shrink-0">
-              时间范围 <span className="text-destructive">*</span>
-            </label>
-            <Input
-              id="start-time"
-              type="datetime-local"
-              value={startDateTime}
-              onChange={(e) => {
-                setStartDateTime(e.target.value)
-                setCurrentPage(1)
-              }}
-              className="h-9 flex-1 text-right focus-visible:ring-0 focus-visible:ring-offset-0"
-            />
-            <span className="text-sm text-muted-foreground flex-shrink-0">至</span>
-            <Input
-              id="end-time"
-              type="datetime-local"
-              value={endDateTime}
-              onChange={(e) => {
-                setEndDateTime(e.target.value)
-                setCurrentPage(1)
-              }}
-              className="h-9 flex-1 text-right focus-visible:ring-0 focus-visible:ring-offset-0"
-            />
-          </div>
+        {/* Time range filter - separate row to avoid overflow */}
+        <div className="flex items-center gap-2">
+          <Input
+            id="start-time"
+            type="datetime-local"
+            value={startDateTime}
+            onChange={(e) => {
+              setStartDateTime(e.target.value)
+              setCurrentPage(1)
+            }}
+            className="flex-1 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+          />
+          <span className="text-sm text-muted-foreground flex-shrink-0">至</span>
+          <Input
+            id="end-time"
+            type="datetime-local"
+            value={endDateTime}
+            onChange={(e) => {
+              setEndDateTime(e.target.value)
+              setCurrentPage(1)
+            }}
+            className="flex-1 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+          />
         </div>
       </div>
 
       {/* Event list */}
       {!isTimeRangeValid ? (
-        <div className="flex-1 flex flex-col items-center pt-16 border rounded-lg">
-          <Activity className="h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-xl font-semibold mb-2">请选择有效的时间范围</h2>
-          <p className="text-muted-foreground text-center mb-6 max-w-lg">
+        <div className="flex-1 flex flex-col items-center pt-8 sm:pt-16 border rounded-lg px-4">
+          <Activity className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground mb-3 sm:mb-4" />
+          <h2 className="text-lg sm:text-xl font-semibold mb-2 text-center">请选择有效的时间范围</h2>
+          <p className="text-sm sm:text-base text-muted-foreground text-center mb-4 sm:mb-6 max-w-lg">
             开始时间必须早于结束时间。默认显示最近24小时的事件。
           </p>
         </div>
       ) : loading ? (
-        <div className="flex items-center justify-center min-h-[400px]">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="flex items-center justify-center min-h-[300px] sm:min-h-[400px]">
+          <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-muted-foreground" />
         </div>
       ) : error ? (
-        <div className="flex flex-col items-center justify-center min-h-[400px]">
-          <p className="text-muted-foreground mb-4">{error}</p>
+        <div className="flex flex-col items-center justify-center min-h-[300px] sm:min-h-[400px] px-4">
+          <p className="text-sm sm:text-base text-muted-foreground mb-4 text-center">{error}</p>
         </div>
       ) : events.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center pt-16 border rounded-lg">
-          <Activity className="h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-xl font-semibold mb-2">没有找到事件</h2>
-          <p className="text-muted-foreground text-center mb-6 max-w-lg">
+        <div className="flex-1 flex flex-col items-center pt-8 sm:pt-16 border rounded-lg px-4">
+          <Activity className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground mb-3 sm:mb-4" />
+          <h2 className="text-lg sm:text-xl font-semibold mb-2 text-center">没有找到事件</h2>
+          <p className="text-sm sm:text-base text-muted-foreground text-center mb-4 sm:mb-6 max-w-lg">
             当前时间范围和筛选条件下没有事件记录。请尝试调整筛选条件。
           </p>
         </div>
       ) : (
         <>
-          <div className="flex-1 flex flex-col min-h-0 border rounded-lg">
-            <div className="flex-1 overflow-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="text-center">事件 ID</TableHead>
-                    <TableHead className="text-center">事件类型</TableHead>
-                    <TableHead className="text-center">源节点</TableHead>
-                    <TableHead className="text-center">源会话</TableHead>
-                    <TableHead className="text-center">目标节点</TableHead>
-                    <TableHead className="text-center">目标会话</TableHead>
-                    <TableHead className="text-center">创建时间</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {events.map((event) => (
-                    <TableRow key={event.event_id} className="cursor-pointer hover:bg-muted/50">
-                      <TableCell
-                        className="text-center"
-                        onClick={() => handleEventClick(event.event_id)}
-                      >
-                        <span className="font-mono text-sm text-primary hover:underline">
-                          {truncateId(event.event_id)}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Badge variant={EVENT_TYPE_CONFIG[event.event_type].variant}>
-                          {EVENT_TYPE_CONFIG[event.event_type].label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="font-mono text-sm">{event.source_node_id}</span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="font-mono text-sm">{truncateId(event.source_session_id)}</span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="font-mono text-sm">{event.target_node_id}</span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="font-mono text-sm">{truncateId(event.target_session_id)}</span>
-                      </TableCell>
-                      <TableCell className="text-center text-sm text-muted-foreground">
+          {/* Mobile Card View */}
+          {isMobile ? (
+            <div className="flex-1 overflow-auto space-y-3">
+              {events.map((event) => (
+                <Card
+                  key={event.event_id}
+                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                  onClick={() => handleEventClick(event.event_id)}
+                >
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <Badge variant={EVENT_TYPE_CONFIG[event.event_type].variant} className="text-xs">
+                        {EVENT_TYPE_CONFIG[event.event_type].label}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
                         {new Date(event.created_at).toLocaleString("zh-CN", {
-                          year: "numeric",
                           month: "2-digit",
                           day: "2-digit",
                           hour: "2-digit",
                           minute: "2-digit",
-                          second: "2-digit",
                           hour12: false
                         })}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                      </span>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">事件 ID:</span>
+                      <span className="font-mono text-xs text-primary">{truncateId(event.event_id)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 space-y-1">
+                        <div className="text-xs text-muted-foreground">源节点</div>
+                        <div className="font-mono text-xs">{event.source_node_id}</div>
+                      </div>
+                      <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      <div className="flex-1 space-y-1">
+                        <div className="text-xs text-muted-foreground">目标节点</div>
+                        <div className="font-mono text-xs">{event.target_node_id}</div>
+                      </div>
+                    </div>
+                    <div className="pt-1 space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">源会话:</span>
+                        <span className="font-mono">{truncateId(event.source_session_id)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">目标会话:</span>
+                        <span className="font-mono">{truncateId(event.target_session_id)}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
-          </div>
+          ) : (
+            /* Desktop Table View */
+            <div className="flex-1 flex flex-col min-h-0 border rounded-lg">
+              <div className="flex-1 overflow-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-center">事件 ID</TableHead>
+                      <TableHead className="text-center">事件类型</TableHead>
+                      <TableHead className="text-center">源节点</TableHead>
+                      <TableHead className="text-center">源会话</TableHead>
+                      <TableHead className="text-center">目标节点</TableHead>
+                      <TableHead className="text-center">目标会话</TableHead>
+                      <TableHead className="text-center">创建时间</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {events.map((event) => (
+                      <TableRow key={event.event_id} className="cursor-pointer hover:bg-muted/50">
+                        <TableCell
+                          className="text-center"
+                          onClick={() => handleEventClick(event.event_id)}
+                        >
+                          <span className="font-mono text-sm text-primary hover:underline">
+                            {truncateId(event.event_id)}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant={EVENT_TYPE_CONFIG[event.event_type].variant}>
+                            {EVENT_TYPE_CONFIG[event.event_type].label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="font-mono text-sm">{event.source_node_id}</span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="font-mono text-sm">{truncateId(event.source_session_id)}</span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="font-mono text-sm">{event.target_node_id}</span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="font-mono text-sm">{truncateId(event.target_session_id)}</span>
+                        </TableCell>
+                        <TableCell className="text-center text-sm text-muted-foreground">
+                          {new Date(event.created_at).toLocaleString("zh-CN", {
+                            year: "numeric",
+                            month: "2-digit",
+                            day: "2-digit",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit",
+                            hour12: false
+                          })}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex-shrink-0 flex items-center justify-between">
-              <div className="text-sm text-muted-foreground">
+            <div className="flex-shrink-0 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
+              <div className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">
                 共 {total} 条记录，第 {currentPage} / {totalPages} 页
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 w-full sm:w-auto">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handlePreviousPage}
                   disabled={currentPage === 1}
+                  className="flex-1 sm:flex-initial"
                 >
                   <ChevronLeft className="h-4 w-4 mr-1" />
                   上一页
@@ -537,6 +570,7 @@ export default function EventsPage() {
                   size="sm"
                   onClick={handleNextPage}
                   disabled={currentPage === totalPages}
+                  className="flex-1 sm:flex-initial"
                 >
                   下一页
                   <ChevronRight className="h-4 w-4 ml-1" />
@@ -549,7 +583,7 @@ export default function EventsPage() {
 
       {/* Event Detail Dialog */}
       <Dialog open={!!selectedEvent} onOpenChange={(open) => !open && setSelectedEvent(null)}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-scroll">
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-2xl md:max-w-3xl max-h-[80vh] overflow-y-scroll">
           <DialogHeader>
             <DialogTitle>事件详情</DialogTitle>
           </DialogHeader>
@@ -561,7 +595,7 @@ export default function EventsPage() {
             <div className="space-y-4">
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground mb-1">事件 ID</h3>
-                <p className="font-mono text-sm">{selectedEvent.event_id}</p>
+                <p className="font-mono text-xs sm:text-sm break-all">{selectedEvent.event_id}</p>
               </div>
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground mb-1">事件类型</h3>
@@ -569,29 +603,29 @@ export default function EventsPage() {
                   {EVENT_TYPE_CONFIG[selectedEvent.event_type].label}
                 </Badge>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <h3 className="text-sm font-medium text-muted-foreground mb-1">源节点 ID</h3>
-                  <p className="font-mono text-sm">{selectedEvent.source_node_id}</p>
+                  <p className="font-mono text-xs sm:text-sm break-all">{selectedEvent.source_node_id}</p>
                 </div>
                 <div>
                   <h3 className="text-sm font-medium text-muted-foreground mb-1">源会话 ID</h3>
-                  <p className="font-mono text-sm">{selectedEvent.source_session_id}</p>
+                  <p className="font-mono text-xs sm:text-sm break-all">{selectedEvent.source_session_id}</p>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <h3 className="text-sm font-medium text-muted-foreground mb-1">目标节点 ID</h3>
-                  <p className="font-mono text-sm">{selectedEvent.target_node_id}</p>
+                  <p className="font-mono text-xs sm:text-sm break-all">{selectedEvent.target_node_id}</p>
                 </div>
                 <div>
                   <h3 className="text-sm font-medium text-muted-foreground mb-1">目标会话 ID</h3>
-                  <p className="font-mono text-sm">{selectedEvent.target_session_id}</p>
+                  <p className="font-mono text-xs sm:text-sm break-all">{selectedEvent.target_session_id}</p>
                 </div>
               </div>
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground mb-1">创建时间</h3>
-                <p className="text-sm">
+                <p className="text-xs sm:text-sm">
                   {new Date(selectedEvent.created_at).toLocaleString("zh-CN", {
                     year: "numeric",
                     month: "2-digit",
@@ -605,7 +639,7 @@ export default function EventsPage() {
               </div>
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground mb-1">Payload</h3>
-                <pre className="bg-muted p-4 rounded-lg text-xs overflow-auto max-h-96">
+                <pre className="bg-muted p-3 sm:p-4 rounded-lg text-xs overflow-auto max-h-60 sm:max-h-96">
                   {JSON.stringify(selectedEvent.payload, null, 2)}
                 </pre>
               </div>

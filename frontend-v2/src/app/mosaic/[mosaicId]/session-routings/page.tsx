@@ -19,7 +19,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Loader2, Route, ChevronLeft, ChevronRight, X } from "lucide-react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Loader2, Route, ChevronLeft, ChevronRight, X, ArrowRight } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
 import type { SessionRoutingOut, NodeOut } from "@/lib/types"
@@ -38,6 +39,9 @@ export default function SessionRoutingsPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(false)
+
   // Filter state
   const [localNodeIdFilter, setLocalNodeIdFilter] = useState<string>("all")
   const [localSessionIdFilter, setLocalSessionIdFilter] = useState("")
@@ -49,6 +53,14 @@ export default function SessionRoutingsPage() {
   const [pageSize] = useState(20)
   const [totalPages, setTotalPages] = useState(0)
   const [total, setTotal] = useState(0)
+
+  // Mobile detection effect
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Fetch nodes on mount
   useEffect(() => {
@@ -163,22 +175,22 @@ export default function SessionRoutingsPage() {
   // Loading nodes state
   if (loadingNodes) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="flex items-center justify-center min-h-[300px] sm:min-h-[400px]">
+        <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-muted-foreground" />
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col h-full space-y-6 overflow-auto">
+    <div className="flex flex-col h-full space-y-3 sm:space-y-4 md:space-y-6 overflow-auto">
       {/* Header */}
       <div className="flex-shrink-0">
-        <h1 className="text-3xl font-bold">会话路由</h1>
-        <p className="text-muted-foreground mt-1">查看节点间的会话路由映射关系</p>
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">会话路由</h1>
+        <p className="text-muted-foreground mt-1 text-sm md:text-base">查看节点间的会话路由映射关系</p>
       </div>
 
       {/* Filters */}
-      <div className="flex-shrink-0 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="flex-shrink-0 grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
         {/* Local Node ID filter */}
         <Select
           value={localNodeIdFilter}
@@ -256,18 +268,18 @@ export default function SessionRoutingsPage() {
 
       {/* Session routing list */}
       {loading ? (
-        <div className="flex items-center justify-center min-h-[400px]">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="flex items-center justify-center min-h-[300px] sm:min-h-[400px]">
+          <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-muted-foreground" />
         </div>
       ) : error ? (
-        <div className="flex flex-col items-center justify-center min-h-[400px]">
-          <p className="text-muted-foreground mb-4">{error}</p>
+        <div className="flex flex-col items-center justify-center min-h-[300px] sm:min-h-[400px] px-4">
+          <p className="text-muted-foreground mb-4 text-sm sm:text-base text-center">{error}</p>
         </div>
       ) : routings.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center pt-16 border rounded-lg">
-          <Route className="h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-xl font-semibold mb-2">没有找到会话路由</h2>
-          <p className="text-muted-foreground text-center mb-6 max-w-lg">
+        <div className="flex-1 flex flex-col items-center pt-8 sm:pt-16 border rounded-lg px-4">
+          <Route className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground mb-3 sm:mb-4" />
+          <h2 className="text-lg sm:text-xl font-semibold mb-2 text-center">没有找到会话路由</h2>
+          <p className="text-muted-foreground text-center mb-4 sm:mb-6 max-w-lg text-sm sm:text-base">
             {localNodeIdFilter !== "all" ||
             localSessionIdFilter ||
             remoteNodeIdFilter !== "all" ||
@@ -276,7 +288,52 @@ export default function SessionRoutingsPage() {
               : "该 Mosaic 还没有任何会话路由记录。"}
           </p>
         </div>
+      ) : isMobile ? (
+        // Mobile card view
+        <div className="flex-1 overflow-auto space-y-3">
+          {routings.map((routing, index) => (
+            <Card key={index}>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base font-semibold">路由记录</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground min-w-[60px]">本地节点：</span>
+                    <span className="font-mono text-sm break-all flex-1">{routing.local_node_id}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground min-w-[60px]">本地会话：</span>
+                    <span className="font-mono text-xs break-all flex-1">{routing.local_session_id}</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground min-w-[60px]">远程节点：</span>
+                    <span className="font-mono text-sm break-all flex-1">{routing.remote_node_id}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground min-w-[60px]">远程会话：</span>
+                    <span className="font-mono text-xs break-all flex-1">{routing.remote_session_id}</span>
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground pt-2 border-t">
+                  创建于 {new Date(routing.created_at).toLocaleString("zh-CN", {
+                    year: "numeric",
+                    month: "2-digit",
+                    day: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                    hour12: false,
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       ) : (
+        // Desktop table view
         <>
           <div className="flex-1 flex flex-col min-h-0 border rounded-lg">
             <div className="flex-1 overflow-auto">
@@ -323,35 +380,38 @@ export default function SessionRoutingsPage() {
             </div>
           </div>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex-shrink-0 flex items-center justify-between">
-              <div className="text-sm text-muted-foreground">
-                共 {total} 条记录，第 {currentPage} / {totalPages} 页
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handlePreviousPage}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4 mr-1" />
-                  上一页
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleNextPage}
-                  disabled={currentPage === totalPages}
-                >
-                  下一页
-                  <ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
-              </div>
-            </div>
-          )}
         </>
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && routings.length > 0 && (
+        <div className="flex-shrink-0 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
+          <div className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">
+            共 {total} 条记录，第 {currentPage} / {totalPages} 页
+          </div>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePreviousPage}
+              disabled={currentPage === 1}
+              className="flex-1 sm:flex-initial"
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" />
+              上一页
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleNextPage}
+              disabled={currentPage === totalPages}
+              className="flex-1 sm:flex-initial"
+            >
+              下一页
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        </div>
       )}
     </div>
   )

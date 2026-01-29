@@ -54,6 +54,18 @@ import type {
   // SessionRouting types
   SessionRoutingOut,
 
+  // Workspace types
+  WorkspaceInfoOut,
+  WorkspaceFilesOut,
+  WorkspaceFileContentOut,
+
+  // CodeServer types
+  CodeServerStatusOut,
+  CodeServerUrlOut,
+
+  // Image types
+  UploadImageResponse,
+
   // Utility types
   PaginatedData
 } from './types'
@@ -423,6 +435,27 @@ class ApiClient {
   }
 
   // ========================================================================
+  // Code-Server API
+  // ========================================================================
+
+  /**
+   * Get code-server URL for a node's workspace
+   */
+  async getCodeServerUrl(mosaicId: number, nodeId: string): Promise<CodeServerUrlOut> {
+    return request<CodeServerUrlOut>(
+      `/api/mosaics/${mosaicId}/nodes/${nodeId}/code-server/url`,
+      {
+        method: 'GET',
+        context: 'node.codeserver.url',
+        autoToast: {
+          success: false,
+          error: true
+        }
+      }
+    )
+  }
+
+  // ========================================================================
   // Connection Management API
   // ========================================================================
 
@@ -618,6 +651,23 @@ class ApiClient {
   }
 
   /**
+   * Batch archive all closed sessions
+   */
+  async batchArchiveSessions(mosaicId: number, nodeId?: string): Promise<{ archived_count: number; failed_sessions: string[] }> {
+    const queryParams = new URLSearchParams()
+    if (nodeId) queryParams.append('node_id', nodeId)
+
+    const url = `/api/mosaics/${mosaicId}/sessions/batch-archive${queryParams.toString() ? '?' + queryParams.toString() : ''}`
+    return request<{ archived_count: number; failed_sessions: string[] }>(url, {
+      method: 'POST',
+      autoToast: {
+        success: false,
+        error: true
+      }
+    })
+  }
+
+  /**
    * List sessions with filters and pagination
    */
   async listSessions(mosaicId: number, nodeId?: string, params?: ListSessionsRequest): Promise<PaginatedData<SessionOut>> {
@@ -791,6 +841,29 @@ class ApiClient {
     const url = `/api/mosaics/${mosaicId}/session-routings${queryString ? `?${queryString}` : ''}`
 
     return request<PaginatedData<SessionRoutingOut>>(url, {
+      autoToast: {
+        success: false,
+        error: true
+      }
+    })
+  }
+
+  // ========================================================================
+  // Image API
+  // ========================================================================
+
+  /**
+   * Upload image file
+   * Returns full URLs for original image and thumbnail
+   */
+  async uploadImage(file: File): Promise<UploadImageResponse> {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    return request<UploadImageResponse>('/api/images/upload', {
+      method: 'POST',
+      body: formData,
+      isFormData: true,
       autoToast: {
         success: false,
         error: true

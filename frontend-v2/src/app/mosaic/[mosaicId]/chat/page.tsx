@@ -11,7 +11,7 @@
  * - Session creation, close, and archive
  */
 
-import { useState, useEffect, useRef, useCallback, Fragment } from "react"
+import { useState, useEffect, useRef, useCallback, Fragment, memo } from "react"
 import { useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -24,7 +24,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
 import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -33,6 +41,19 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import {
   Send,
   Loader2,
   StopCircle,
@@ -40,6 +61,8 @@ import {
   MessageSquare,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
+  ChevronUp,
   Bot,
   Archive,
   Lock,
@@ -50,13 +73,36 @@ import {
   FileText,
   FileCode,
   RefreshCw,
+  MoreVertical,
+  List,
+  LayoutList,
+  FolderTree,
+  Circle,
+  Menu,
+  Mic,
+  Network,
+  Terminal as TerminalIcon,
+  X,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  Coins,
+  BarChart3,
+  Play,
+  Square,
+  Power,
+  Code2,
+  Copy,
+  Check,
 } from "lucide-react"
 import { apiClient } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
 import { useWebSocket } from "@/contexts/websocket-context"
+import { useVoiceInput } from "@/hooks/use-voice-input"
 import {
   SessionMode,
   SessionStatus,
+  RuntimeStatus,
   LLMModel,
   NodeType,
   NodeStatus,
@@ -67,6 +113,12 @@ import {
   type MessageOut,
   type WorkspaceFileItem,
 } from "@/lib/types"
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import { SerializeAddon } from '@xterm/addon-serialize'
+import '@xterm/xterm/css/xterm.css'
+import { ChatSession } from "./components/ChatSession"
+import { WorkspaceView } from "./components/WorkspaceView"
 
 interface ParsedMessage extends MessageOut {
   contentParsed: any
@@ -77,47 +129,121 @@ interface NodeWithSessions extends NodeOut {
   expanded: boolean
 }
 
+// Session tree node (for tree view)
+interface SessionTreeNode extends SessionOut {
+  children: SessionTreeNode[]
+  depth: number
+}
+
 // Workspace file tree types (extend WorkspaceFileItem with expanded state)
 interface FileNode extends WorkspaceFileItem {
   expanded?: boolean
 }
 
 type ViewMode = 'chat' | 'workspace'
+type SessionListMode = 'detailed' | 'compact'
+type SessionViewMode = 'tree' | 'grouped'
+
+// Circular progress component for context usage
+const CircularProgress = memo(({ percentage }: { percentage: number }) => {
+  // Determine color based on percentage (lighter versions)
+  const getColor = () => {
+    if (percentage < 60) return 'rgba(34, 197, 94, 0.4)' // green-500 with 40% opacity
+    if (percentage < 85) return 'rgba(234, 179, 8, 0.4)' // yellow-500 with 40% opacity
+    if (percentage < 95) return 'rgba(249, 115, 22, 0.4)' // orange-500 with 40% opacity
+    return 'rgba(239, 68, 68, 0.5)' // red-500 with 50% opacity (slightly more visible when critical)
+  }
+
+  const color = getColor()
+  const circumference = 2 * Math.PI * 15.9155
+  const strokeDashoffset = circumference - (percentage / 100) * circumference
+
+  return (
+    <svg className="h-4 w-4 -rotate-90" viewBox="0 0 36 36">
+      {/* Background circle - highly visible */}
+      <circle
+        cx="18"
+        cy="18"
+        r="15.9155"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        className="text-muted"
+      />
+      {/* Progress circle - lighter color */}
+      <circle
+        cx="18"
+        cy="18"
+        r="15.9155"
+        fill="none"
+        stroke={color}
+        strokeWidth="3"
+        strokeDasharray={circumference}
+        strokeDashoffset={strokeDashoffset}
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+})
+
+CircularProgress.displayName = 'CircularProgress'
 
 export default function ChatPage() {
   const params = useParams()
   const { token } = useAuth()
   const mosaicId = parseInt(params.mosaicId as string)
-  const { isConnected, sendMessage, interrupt, subscribe } = useWebSocket()
+  const { isConnected, sendMessage, interrupt, sendRaw, subscribe } = useWebSocket()
+
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(false)
+  const [sessionSheetOpen, setSessionSheetOpen] = useState(false)
 
   // View mode
   const [viewMode, setViewMode] = useState<ViewMode>('chat')
 
+  // Session list mode
+  const [sessionListMode, setSessionListMode] = useState<SessionListMode>('compact')
+  const [sessionViewMode, setSessionViewMode] = useState<SessionViewMode>('grouped')
+  const [treeExpandedSessions, setTreeExpandedSessions] = useState<Set<string>>(new Set())
+  const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null)
+
   // Node and session management
   const [nodes, setNodes] = useState<NodeWithSessions[]>([])
+  // Initialize as null - will be validated and set after loading nodes
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
-  const [messages, setMessages] = useState<ParsedMessage[]>([])
 
-  // Workspace state
-  const [fileTree, setFileTree] = useState<FileNode[]>([])
-  const [selectedFile, setSelectedFile] = useState<{ path: string; content: string; language: string | null } | null>(null)
-  const [workspaceLoading, setWorkspaceLoading] = useState(false)
-  const [fileContentLoading, setFileContentLoading] = useState(false)
+  // Lazy-loaded sessions (懒加载会话集合)
+  const [loadedSessions, setLoadedSessions] = useState<Set<string>>(new Set())
 
-  // Input and loading states
-  const [input, setInput] = useState("")
-  const [loading, setLoading] = useState(false)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // Input state - Store input per session to preserve content when switching sessions
+  const [sessionInputs, setSessionInputs] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {}
+    try {
+      const saved = localStorage.getItem(`mosaic-${mosaicId}-session-inputs`)
+      return saved ? JSON.parse(saved) : {}
+    } catch (error) {
+      console.error("Failed to load session inputs from localStorage:", error)
+      return {}
+    }
+  })
 
-  // Session usage statistics
-  const [sessionStats, setSessionStats] = useState<{
+  // Session statistics - Store stats per session
+  const [sessionStats, setSessionStats] = useState<Record<string, {
     total_cost_usd?: number
     total_input_tokens?: number
     total_output_tokens?: number
-  } | null>(null)
+    context_usage?: number
+    context_percentage?: number
+  } | null>>({})
 
-  // Collapsed messages (thinking, system, and tool use messages, by message_id)
-  const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set())
+  // Session scroll states - Store scroll position and auto-scroll state per session
+  const [sessionScrollStates, setSessionScrollStates] = useState<Record<string, {
+    scrollTop: number
+    autoScrollEnabled: boolean
+  }>>({})
+
+  // Get current active session stats
+  const currentStats = activeSessionId ? sessionStats[activeSessionId] : null
 
   // Create session dialog state
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -131,13 +257,52 @@ export default function ChatPage() {
   const [closingSession, setClosingSession] = useState<{ sessionId: string; nodeId: string } | null>(null)
   const [closing, setClosing] = useState(false)
 
+  // Batch archive confirmation dialog state
+  const [batchArchiveDialogOpen, setBatchArchiveDialogOpen] = useState(false)
+  const [batchArchivingNode, setBatchArchivingNode] = useState<{ nodeId: string; closedSessionIds: string[] } | null>(null)
+  const [batchArchiving, setBatchArchiving] = useState(false)
+
+  // Node control state - Track which nodes are being started/stopped
+  const [nodeControlLoading, setNodeControlLoading] = useState<Record<string, boolean>>({})
+
+  // Code-server state - Per node (simplified)
+  const [nodeCodeServerUrl, setNodeCodeServerUrl] = useState<Record<string, string | null>>({})
+  const [copiedCodeServerUrl, setCopiedCodeServerUrl] = useState<string | null>(null)
+
+  // Notification state - Store notification enabled state
+  const [notificationEnabled, setNotificationEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true // Default enabled
+    try {
+      const saved = localStorage.getItem(`mosaic-${mosaicId}-notification-enabled`)
+      return saved !== 'false' // Default enabled if not set
+    } catch (error) {
+      console.error('[ChatPage] Failed to load notification setting:', error)
+      return true
+    }
+  })
+
   // Refs
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const maxSequenceRef = useRef<number>(0) // Track max sequence number for gap detection
   const sessionStartedResolvers = useRef<Map<string, (value: boolean) => void>>(new Map())
 
+  // Wrapper function to set active session and persist to localStorage
+  const selectSession = useCallback((sessionId: string | null) => {
+    setActiveSessionId(sessionId)
+    if (typeof window !== 'undefined') {
+      try {
+        if (sessionId) {
+          localStorage.setItem(`mosaic-${mosaicId}-active-session`, sessionId)
+        } else {
+          localStorage.removeItem(`mosaic-${mosaicId}-active-session`)
+        }
+      } catch (error) {
+        console.error("Failed to save active session to localStorage:", error)
+      }
+    }
+  }, [mosaicId])
+
   // Load nodes and sessions function
-  const loadNodesAndSessions = useCallback(async () => {
+  // autoSelectSession: whether to automatically select a session when no session is active
+  const loadNodesAndSessions = useCallback(async (autoSelectSession = true) => {
     try {
       // Load all nodes
       const nodesData = await apiClient.listNodes(mosaicId)
@@ -186,27 +351,215 @@ export default function ChatPage() {
 
       setNodes(nodesWithSessions)
 
-      // Auto-select first active session
-      if (!activeSessionId) {
+      // Only auto-select session if the flag is true
+      if (autoSelectSession) {
+        // Auto-select session (prioritize saved session, then first active session)
         const allSessions = nodesWithSessions.flatMap((n) => n.sessions)
-        const activeSession = allSessions.find((s) => s.status === SessionStatus.ACTIVE)
-        if (activeSession) {
-          setActiveSessionId(activeSession.session_id)
-        } else if (allSessions.length > 0) {
-          // If no active session, select first one (to view history)
-          setActiveSessionId(allSessions[0].session_id)
+
+        // 1. Check if there's a saved session selection
+        const savedSessionId = typeof window !== 'undefined'
+          ? localStorage.getItem(`mosaic-${mosaicId}-active-session`)
+          : null
+
+        let shouldSetSession = false
+        let targetSessionId = null
+
+        // 2. If saved session exists and is still available (not archived), restore it
+        if (savedSessionId && allSessions.some(s => s.session_id === savedSessionId)) {
+          targetSessionId = savedSessionId
+          shouldSetSession = true
+        } else if (savedSessionId) {
+          // Saved session is invalid (archived or deleted), clean up localStorage
+          console.log('[ChatPage] Saved session no longer available, cleaning up localStorage:', savedSessionId)
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.removeItem(`mosaic-${mosaicId}-active-session`)
+            } catch (error) {
+              console.error('[ChatPage] Failed to clean up localStorage:', error)
+            }
+          }
+
+          // Select a new session
+          const activeSession = allSessions.find((s) => s.status === SessionStatus.ACTIVE)
+          if (activeSession) {
+            targetSessionId = activeSession.session_id
+            shouldSetSession = true
+          } else if (allSessions.length > 0) {
+            // If no active session, select first one (to view history)
+            targetSessionId = allSessions[0].session_id
+            shouldSetSession = true
+          }
+        } else if (!activeSessionId) {
+          // 3. No saved session, only select if no session is currently active
+          // This prevents auto-selection after archiving
+          const activeSession = allSessions.find((s) => s.status === SessionStatus.ACTIVE)
+          if (activeSession) {
+            targetSessionId = activeSession.session_id
+            shouldSetSession = true
+          } else if (allSessions.length > 0) {
+            // If no active session, select first one (to view history)
+            targetSessionId = allSessions[0].session_id
+            shouldSetSession = true
+          }
+        }
+
+        // 4. Only update if needed (avoid unnecessary re-renders)
+        if (shouldSetSession && targetSessionId !== activeSessionId) {
+          selectSession(targetSessionId)
         }
       }
     } catch (error) {
       console.error("Failed to load nodes and sessions:", error)
     }
-  }, [mosaicId, activeSessionId])
+  }, [mosaicId, selectSession])
+
+  // Node control functions
+  const handleStartNode = useCallback(async (nodeId: string) => {
+    try {
+      setNodeControlLoading(prev => ({ ...prev, [nodeId]: true }))
+      await apiClient.startNode(mosaicId, nodeId)
+
+      // Refresh nodes and sessions to get updated status
+      await loadNodesAndSessions(false)
+      console.log('[ChatPage] Node started:', nodeId)
+    } catch (error) {
+      console.error('[ChatPage] Failed to start node:', error)
+    } finally {
+      setNodeControlLoading(prev => ({ ...prev, [nodeId]: false }))
+    }
+  }, [mosaicId, loadNodesAndSessions])
+
+  const handleStopNode = useCallback(async (nodeId: string) => {
+    try {
+      setNodeControlLoading(prev => ({ ...prev, [nodeId]: true }))
+      await apiClient.stopNode(mosaicId, nodeId)
+
+      // Refresh nodes and sessions to get updated status
+      await loadNodesAndSessions(false)
+      console.log('[ChatPage] Node stopped:', nodeId)
+    } catch (error) {
+      console.error('[ChatPage] Failed to stop node:', error)
+    } finally {
+      setNodeControlLoading(prev => ({ ...prev, [nodeId]: false }))
+    }
+  }, [mosaicId, loadNodesAndSessions])
+
+  // Code-server control functions
+
+  const handleCopyCodeServerUrl = useCallback(async (nodeId: string) => {
+    const url = nodeCodeServerUrl[nodeId]
+    if (!url) return
+
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedCodeServerUrl(nodeId)
+      setTimeout(() => setCopiedCodeServerUrl(null), 2000)
+    } catch (error) {
+      console.error('[ChatPage] Failed to copy code-server URL:', error)
+    }
+  }, [nodeCodeServerUrl])
+
+  // Show desktop/browser notification for new result messages
+  const showNotification = useCallback((message: any) => {
+    // Check if notifications are enabled
+    if (!notificationEnabled) {
+      return
+    }
+
+    // Check if browser supports notifications and permission is granted
+    if (!('Notification' in window) || Notification.permission !== 'granted') {
+      return
+    }
+
+    // Find session information
+    const sessionInfo = nodes
+      .flatMap((node) =>
+        node.sessions.map((session) => ({
+          nodeId: node.node_id,
+          session,
+        }))
+      )
+      .find((info) => info.session.session_id === message.session_id)
+
+    if (!sessionInfo) return
+
+    // Create notification title and body
+    // Use topic if available, otherwise use full session_id
+    const sessionName = sessionInfo.session.topic || message.session_id
+    const title = 'Mosaic - 新消息'
+    const body = `${sessionInfo.nodeId} / ${sessionName}\n收到新的响应消息`
+
+    // Create notification
+    // Use message_id as tag to ensure each message gets its own notification
+    // If no message_id, use timestamp to make it unique
+    const notificationTag = message.message_id || `${message.session_id}-${Date.now()}`
+    const notification = new Notification(title, {
+      body,
+      icon: '/favicon.ico',
+      tag: notificationTag, // Each message gets its own notification
+      requireInteraction: false, // Auto-dismiss
+      silent: false, // Allow sound
+    })
+
+    // Click notification to switch to the session
+    notification.onclick = () => {
+      window.focus()
+      selectSession(message.session_id)
+      notification.close()
+    }
+
+    console.log('[ChatPage] Notification shown for session:', message.session_id)
+  }, [notificationEnabled, nodes, selectSession])
+
+  // Mobile detection effect
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
+  // Save notification enabled state to localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      localStorage.setItem(
+        `mosaic-${mosaicId}-notification-enabled`,
+        notificationEnabled.toString()
+      )
+    } catch (error) {
+      console.error('[ChatPage] Failed to save notification setting:', error)
+    }
+  }, [notificationEnabled, mosaicId])
+
+  // Request notification permission on mount
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return
+
+    // Only request if permission hasn't been determined yet
+    if (Notification.permission === 'default') {
+      console.log('[ChatPage] Requesting notification permission...')
+      Notification.requestPermission().then(permission => {
+        console.log('[ChatPage] Notification permission:', permission)
+      })
+    } else {
+      console.log('[ChatPage] Notification permission already:', Notification.permission)
+    }
+  }, [])
 
   // Load nodes and sessions on mount
   useEffect(() => {
     if (!token) return
     loadNodesAndSessions()
   }, [token, loadNodesAndSessions])
+
+  // Lazy-load sessions: add to loadedSessions when activeSessionId changes
+  useEffect(() => {
+    if (activeSessionId && !loadedSessions.has(activeSessionId)) {
+      console.log('[ChatPage] Lazy-loading session:', activeSessionId)
+      setLoadedSessions(prev => new Set(prev).add(activeSessionId))
+    }
+  }, [activeSessionId, loadedSessions])
 
   // Listen for mosaic status changes and refresh node/session list
   useEffect(() => {
@@ -259,127 +612,47 @@ export default function ChatPage() {
           console.log("[Chat] Session ended, refreshing session list")
           loadNodesAndSessions()
         }
-      }
-    })
-
-    return () => {
-      unsubscribe()
-    }
-  }, [subscribe, loadNodesAndSessions])
-
-  // Subscribe to WebSocket messages for active session
-  useEffect(() => {
-    if (!activeSessionId) return
-
-    // Load message history from database
-    loadMessages(activeSessionId)
-
-    // Reset session stats and collapsed messages when switching sessions
-    setSessionStats(null)
-    setCollapsedMessages(new Set())
-
-    // Reset sequence tracking
-    maxSequenceRef.current = 0
-
-    // Subscribe to messages for this session
-    const unsubscribe = subscribe(activeSessionId, (message) => {
-      console.log("[Chat] Received message:", message)
-
-      // Check if it's an error message
-      if ("type" in message && message.type === "error") {
-        console.error("[Chat] WebSocket error:", message.message)
-        return
-      }
-
-      // Type assertion: we've checked it's not an error, so it must be WSMessage
-      const wsMessage = message as import("@/contexts/websocket-context").WSMessage
-
-      // Verify session_id matches (double-check even though context already filters)
-      if (wsMessage.session_id !== activeSessionId) {
-        console.warn("[Chat] Ignoring message from different session:", wsMessage.session_id)
-        return
-      }
-
-      // Check for sequence gap (message loss detection)
-      if (maxSequenceRef.current > 0) {
-        const expectedSequence = maxSequenceRef.current + 1
-        if (wsMessage.sequence > expectedSequence) {
-          console.warn(
-            `[Chat] Sequence gap detected! Expected ${expectedSequence}, got ${wsMessage.sequence}. Reloading messages...`
-          )
-          // Reload all messages from database to fill the gap
-          loadMessages(activeSessionId)
-          return
+        if (wsMessage.message_type === "topic_updated") {
+          console.log("[Chat] Topic updated, refreshing session list")
+          loadNodesAndSessions(false) // Don't auto-select session
+        }
+        if (wsMessage.message_type === "runtime_status_changed") {
+          console.log("[Chat] Runtime status changed, refreshing session list")
+          loadNodesAndSessions(false) // Don't auto-select session
         }
       }
 
-      // Update max sequence number
-      maxSequenceRef.current = Math.max(maxSequenceRef.current, wsMessage.sequence)
-
-      // Skip notification messages (they are for logic only, not for display)
-      if (wsMessage.role === 'notification') {
-        console.log("[Chat] Skipping notification message (not for display):", wsMessage)
-        return
-      }
-
-      // Update session statistics if this is a result message
-      if (wsMessage.message_type === "assistant_result" && wsMessage.payload) {
-        setSessionStats({
-          total_cost_usd: wsMessage.payload.total_cost_usd,
-          total_input_tokens: wsMessage.payload.total_input_tokens,
-          total_output_tokens: wsMessage.payload.total_output_tokens,
-        })
-      }
-
-      // All non-notification messages should have message_id
-      if (!wsMessage.message_id) {
-        console.error("[Chat] Non-notification message missing message_id:", wsMessage)
-        return
-      }
-
-      // Add message to list
-      const newMessage: ParsedMessage = {
-        id: 0, // Will be replaced by server
-        message_id: wsMessage.message_id,
-        user_id: 0, // Will be filled by server
-        mosaic_id: mosaicId,
-        node_id: "", // Will be filled by server
-        session_id: activeSessionId,
-        role: wsMessage.role as MessageRole,
-        message_type: wsMessage.message_type as MessageType,
-        payload: wsMessage.payload,
-        contentParsed: wsMessage.payload,
-        sequence: wsMessage.sequence,
-        created_at: wsMessage.timestamp,
-      }
-
-      setMessages((prev) => [...prev, newMessage])
-
-      // Collapse thinking, system, and tool use messages by default
-      if (wsMessage.message_type === "assistant_thinking" || wsMessage.message_type === "system_message" || wsMessage.message_type === "assistant_tool_use") {
-        setCollapsedMessages((prev) => new Set(prev).add(wsMessage.message_id!)) // message_id is guaranteed to exist (checked above)
-      }
-
-      // Stop loading on result
-      if (wsMessage.message_type === "assistant_result") {
-        setLoading(false)
+      // Handle assistant result messages - Show notification for all sessions
+      if (wsMessage.role === "assistant" && wsMessage.message_type === "assistant_result") {
+        console.log("[Chat] Received assistant result:", wsMessage.session_id)
+        // Show notification for all sessions (including currently active one)
+        showNotification(wsMessage)
       }
     })
 
-    // Cleanup subscription on unmount or session change
     return () => {
       unsubscribe()
     }
-  }, [activeSessionId, subscribe])
+  }, [subscribe, loadNodesAndSessions, showNotification])
 
-  // Auto-scroll to bottom
+  // Scroll and message loading logic removed - now handled by ChatSession component
+
+  // Old WebSocket subscription logic removed - now handled by ChatSession component
+
+  // Save session inputs to localStorage whenever they change
   useEffect(() => {
-    console.log("[Chat] Messages changed, count:", messages.length)
-    if (messages.length > 0) {
-      console.log("[Chat] Message IDs in state:", messages.map(m => `${m.message_id.slice(0, 8)} (seq: ${m.sequence})`))
+    if (typeof window === 'undefined') return
+    try {
+      localStorage.setItem(
+        `mosaic-${mosaicId}-session-inputs`,
+        JSON.stringify(sessionInputs)
+      )
+    } catch (error) {
+      console.error("Failed to save session inputs to localStorage:", error)
     }
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+  }, [sessionInputs, mosaicId])
+
+  // Message tracking and scroll logic removed - now handled by ChatSession component
 
   // Cleanup pending session_started resolvers on unmount
   useEffect(() => {
@@ -387,155 +660,43 @@ export default function ChatPage() {
       sessionStartedResolvers.current.clear()
     }
   }, [])
+  // loadMessages removed - now handled by ChatSession component
+  // loadWorkspace removed - now handled by WorkspaceView component
+  // handleSendMessage removed - now handled by ChatSession component
+  // handleInterrupt removed - now handled by ChatSession component
 
-  // Load workspace files
-  const loadWorkspace = async (nodeId: string) => {
-    if (!nodeId) return
+  // Callback for ChatInput component - track input changes
+  const handleInputChange = useCallback((sessionId: string, value: string) => {
+    setSessionInputs(prev => ({
+      ...prev,
+      [sessionId]: value
+    }))
+  }, [])
 
-    try {
-      setWorkspaceLoading(true)
-      const data = await apiClient.listWorkspaceFiles(mosaicId, nodeId, {
-        path: '/',
-        recursive: true,
-        max_depth: 10
-      })
+  // Callback for ChatSession component - track session statistics
+  const handleStatsUpdate = useCallback((sessionId: string, stats: {
+    total_cost_usd?: number
+    total_input_tokens?: number
+    total_output_tokens?: number
+    context_usage?: number
+    context_percentage?: number
+  } | null) => {
+    setSessionStats(prev => ({
+      ...prev,
+      [sessionId]: stats
+    }))
+  }, [])
 
-      // Convert WorkspaceFileItem[] to FileNode[] (add expanded property)
-      const convertToFileNodes = (items: WorkspaceFileItem[]): FileNode[] => {
-        return items.map(item => ({
-          ...item,
-          expanded: false,
-          children: item.children ? convertToFileNodes(item.children) : undefined
-        }))
-      }
-
-      setFileTree(convertToFileNodes(data.items))
-    } catch (error) {
-      console.error("Failed to load workspace:", error)
-      setFileTree([])
-    } finally {
-      setWorkspaceLoading(false)
-    }
-  }
-
-  // Load workspace when switching to workspace view or when active session changes
-  useEffect(() => {
-    if (viewMode === 'workspace' && currentSessionInfo) {
-      loadWorkspace(currentSessionInfo.nodeId)
-    }
-  }, [viewMode, activeSessionId])
-
-  const loadMessages = async (sessionId: string) => {
-    try {
-      // Find the session's node_id
-      let nodeId: string | null = null
-      for (const node of nodes) {
-        const session = node.sessions.find((s) => s.session_id === sessionId)
-        if (session) {
-          nodeId = node.node_id
-          break
-        }
-      }
-
-      if (!nodeId) {
-        console.error("Node not found for session:", sessionId)
-        return
-      }
-
-      const data = await apiClient.listMessages(mosaicId, {
-        nodeId,
-        sessionId,
-        page: 1,
-        pageSize: 9999
-      })
-      const parsed = data.items.map((msg) => ({
-        ...msg,
-        contentParsed: typeof msg.payload === "string" ? JSON.parse(msg.payload) : msg.payload,
-      }))
-      setMessages(parsed)
-
-      // Update max sequence number from loaded messages
-      if (parsed.length > 0) {
-        const maxSeq = Math.max(...parsed.map((msg) => msg.sequence))
-        maxSequenceRef.current = maxSeq
-        console.log("[Chat] Loaded messages, max sequence:", maxSeq)
-      } else {
-        maxSequenceRef.current = 0
-      }
-
-      // Collapse all thinking, system, and tool use messages by default
-      const collapsibleIds = parsed
-        .filter((msg) => msg.message_type === MessageType.ASSISTANT_THINKING || msg.message_type === MessageType.SYSTEM_MESSAGE || msg.message_type === MessageType.ASSISTANT_TOOL_USE)
-        .map((msg) => msg.message_id)
-      setCollapsedMessages(new Set(collapsibleIds))
-
-      // Extract session stats from the last assistant_result message
-      const lastResult = [...parsed].reverse().find((msg) => msg.message_type === MessageType.ASSISTANT_RESULT)
-      if (lastResult && lastResult.contentParsed) {
-        setSessionStats({
-          total_cost_usd: lastResult.contentParsed.total_cost_usd,
-          total_input_tokens: lastResult.contentParsed.total_input_tokens,
-          total_output_tokens: lastResult.contentParsed.total_output_tokens,
-        })
-      }
-    } catch (error) {
-      console.error("Failed to load messages:", error)
-    }
-  }
-
-  const handleSendMessage = () => {
-    if (!input.trim() || !activeSessionId || !isConnected || loading) return
-
-    try {
-      // Send message via global WebSocket
-      sendMessage(activeSessionId, input)
-      setInput("")
-      setLoading(true)
-      // Reset textarea height
-      if (textareaRef.current) {
-        textareaRef.current.style.height = "auto"
-      }
-    } catch (error) {
-      console.error("Failed to send message:", error)
-      setLoading(false)
-    }
-  }
-
-  // Auto-resize textarea based on content
-  useEffect(() => {
-    const textarea = textareaRef.current
-    if (!textarea) return
-
-    // Reset height to auto to get the correct scrollHeight
-    textarea.style.height = "auto"
-
-    // Calculate new height (min 1 line, max 12 lines)
-    const lineHeight = 24 // approximate line height
-    const minHeight = lineHeight * 1 // 1 line for input
-    const maxHeight = lineHeight * 12 // max 12 lines before scroll
-
-    const newHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)
-    textarea.style.height = `${newHeight}px`
-  }, [input])
-
-  // Auto-focus textarea when loading finishes
-  useEffect(() => {
-    if (!loading && activeSessionId && isConnected && textareaRef.current) {
-      textareaRef.current.focus()
-    }
-  }, [loading, activeSessionId, isConnected])
-
-  const handleInterrupt = () => {
-    if (!activeSessionId || !isConnected || !loading) return
-
-    try {
-      // Send interrupt via global WebSocket
-      interrupt(activeSessionId)
-      setLoading(false)
-    } catch (error) {
-      console.error("Failed to interrupt session:", error)
-    }
-  }
+  // Callback for ChatSession component - track session scroll state
+  const handleScrollStateChange = useCallback((sessionId: string, state: {
+    scrollTop: number
+    autoScrollEnabled: boolean
+  }) => {
+    setSessionScrollStates(prev => ({
+      ...prev,
+      [sessionId]: state
+    }))
+  }, [])
 
   const openCreateDialog = (nodeId: string) => {
     setSelectedNodeId(nodeId)
@@ -581,7 +742,7 @@ export default function ChatPage() {
       }
 
       // Activate the new session and close dialog
-      setActiveSessionId(newSession.session_id)
+      selectSession(newSession.session_id)
       setCreateDialogOpen(false)
     } catch (error) {
       console.error("Failed to create session:", error)
@@ -601,6 +762,57 @@ export default function ChatPage() {
     )
   }
 
+  // Toggle tree session expansion
+  const toggleTreeSession = (sessionId: string) => {
+    setTreeExpandedSessions((prev) => {
+      const newSet = new Set(prev)
+      if (newSet.has(sessionId)) {
+        newSet.delete(sessionId)
+      } else {
+        newSet.add(sessionId)
+      }
+      return newSet
+    })
+  }
+
+  // Build session tree from flat session list
+  const buildSessionTree = (sessions: SessionOut[]): SessionTreeNode[] => {
+    const sessionMap = new Map<string, SessionTreeNode>()
+
+    // Create tree nodes for all sessions
+    sessions.forEach(session => {
+      sessionMap.set(session.session_id, {
+        ...session,
+        children: [],
+        depth: 0
+      })
+    })
+
+    const roots: SessionTreeNode[] = []
+
+    // Build parent-child relationships
+    sessions.forEach(session => {
+      const node = sessionMap.get(session.session_id)!
+      if (session.parent_session_id) {
+        const parent = sessionMap.get(session.parent_session_id)
+        if (parent) {
+          parent.children.push(node)
+          node.depth = parent.depth + 1
+        } else {
+          // Parent not in current session list, treat as root
+          roots.push(node)
+        }
+      } else {
+        // No parent, this is a root session
+        roots.push(node)
+      }
+    })
+
+    return roots
+  }
+
+  // cleanupTerminalForSession removed - now handled by WorkspaceView component
+
   const handleArchiveSession = async (sessionId: string, nodeId: string) => {
     try {
       await apiClient.archiveSession(mosaicId, nodeId, sessionId)
@@ -613,12 +825,82 @@ export default function ChatPage() {
         }))
       )
 
+      // Clear input content for this session
+      setSessionInputs(prev => {
+        const newInputs = { ...prev }
+        delete newInputs[sessionId]
+        return newInputs
+      })
+
       // If it was active, clear selection
       if (activeSessionId === sessionId) {
-        setActiveSessionId(null)
+        selectSession(null)
       }
     } catch (error) {
       console.error("Failed to archive session:", error)
+    }
+  }
+
+  const openBatchArchiveDialog = (nodeId: string) => {
+    const node = nodes.find(n => n.node_id === nodeId)
+    if (!node) return
+
+    const closedSessions = node.sessions.filter(s => s.status === SessionStatus.CLOSED)
+    if (closedSessions.length === 0) return
+
+    setBatchArchivingNode({
+      nodeId,
+      closedSessionIds: closedSessions.map(s => s.session_id)
+    })
+    setBatchArchiveDialogOpen(true)
+  }
+
+  const handleBatchArchive = async () => {
+    if (!batchArchivingNode) return
+
+    try {
+      setBatchArchiving(true)
+      const result = await apiClient.batchArchiveSessions(mosaicId, batchArchivingNode.nodeId)
+
+      // Remove archived sessions from current list
+      setNodes((prev) =>
+        prev.map((node) => {
+          if (node.node_id === batchArchivingNode.nodeId) {
+            return {
+              ...node,
+              sessions: node.sessions.filter(
+                (s) => !batchArchivingNode.closedSessionIds.includes(s.session_id)
+              ),
+            }
+          }
+          return node
+        })
+      )
+
+      // Clear input content for archived sessions
+      setSessionInputs(prev => {
+        const newInputs = { ...prev }
+        batchArchivingNode.closedSessionIds.forEach(sessionId => {
+          delete newInputs[sessionId]
+        })
+        return newInputs
+      })
+
+      // If active session was archived, clear selection
+      if (activeSessionId && batchArchivingNode.closedSessionIds.includes(activeSessionId)) {
+        selectSession(null)
+      }
+
+      // Show result message
+      if (result.failed_sessions.length > 0) {
+        console.warn(`批量归档完成，但有 ${result.failed_sessions.length} 个会话失败`)
+      }
+
+      setBatchArchiveDialogOpen(false)
+    } catch (error) {
+      console.error("Failed to batch archive sessions:", error)
+    } finally {
+      setBatchArchiving(false)
     }
   }
 
@@ -652,8 +934,6 @@ export default function ChatPage() {
         }))
       )
 
-      console.log("[Chat] Local state updated, messages count:", messages.length)
-
       setCloseDialogOpen(false)
       setClosingSession(null)
     } catch (error) {
@@ -681,493 +961,697 @@ export default function ChatPage() {
     currentSessionInfo.nodeStatus === NodeStatus.RUNNING &&
     currentSessionInfo.session.status === SessionStatus.ACTIVE
 
-  const toggleThinkingCollapse = (messageId: string) => {
-    setCollapsedMessages((prev) => {
-      const newSet = new Set(prev)
-      if (newSet.has(messageId)) {
-        newSet.delete(messageId)
-      } else {
-        newSet.add(messageId)
+  // Load code-server URL when switching to workspace view
+  useEffect(() => {
+    const loadCodeServerUrl = async (nodeId: string) => {
+      try {
+        const result = await apiClient.getCodeServerUrl(mosaicId, nodeId)
+        setNodeCodeServerUrl(prev => ({ ...prev, [nodeId]: result.url }))
+        console.log('[ChatPage] Code-server URL loaded:', result.url)
+      } catch (error) {
+        console.error('[ChatPage] Failed to load code-server URL:', error)
       }
-      return newSet
-    })
-  }
-
-  // Workspace functions
-  const toggleDirectory = (path: string) => {
-    const toggleInTree = (nodes: FileNode[]): FileNode[] => {
-      return nodes.map(node => {
-        if (node.path === path && node.type === 'directory') {
-          return { ...node, expanded: !node.expanded }
-        }
-        if (node.children) {
-          return { ...node, children: toggleInTree(node.children) }
-        }
-        return node
-      })
     }
-    setFileTree(toggleInTree(fileTree))
-  }
 
-  const handleFileClick = async (path: string, nodeId: string) => {
-    if (!nodeId) return
+    if (viewMode === 'workspace' && currentSessionInfo?.nodeId) {
+      loadCodeServerUrl(currentSessionInfo.nodeId)
+    }
+  }, [viewMode, mosaicId, currentSessionInfo?.nodeId])
+
+  // Handle copy session ID (referenced from sessions page)
+  const handleCopySessionId = async (sessionId: string) => {
+    console.log("handleCopySessionId called for:", sessionId)
+    console.log("navigator.clipboard:", navigator.clipboard)
+    console.log("window.isSecureContext:", window.isSecureContext)
 
     try {
-      setFileContentLoading(true)
-      const data = await apiClient.getWorkspaceFileContent(mosaicId, nodeId, {
-        path,
-        encoding: 'utf-8',
-        max_size: 1048576 // 1MB
-      })
+      // Try modern clipboard API first
+      if (navigator.clipboard && window.isSecureContext) {
+        console.log("Using navigator.clipboard.writeText")
+        await navigator.clipboard.writeText(sessionId)
+        console.log("Copy successful via clipboard API")
+        setCopiedSessionId(sessionId)
+        setTimeout(() => setCopiedSessionId(null), 1000)
+      } else {
+        // Fallback for older browsers or non-secure contexts
+        console.log("Using execCommand fallback")
 
-      setSelectedFile({
-        path: data.path,
-        content: data.content,
-        language: data.language
-      })
+        // Create and immediately append textarea
+        const textArea = document.createElement("textarea")
+        textArea.value = sessionId
+        textArea.style.position = "fixed"
+        textArea.style.left = "0"
+        textArea.style.top = "0"
+        textArea.style.width = "2em"
+        textArea.style.height = "2em"
+        textArea.style.padding = "0"
+        textArea.style.border = "none"
+        textArea.style.outline = "none"
+        textArea.style.boxShadow = "none"
+        textArea.style.background = "transparent"
+
+        document.body.appendChild(textArea)
+
+        // Store current selection
+        const selected = document.getSelection()?.rangeCount ? document.getSelection()?.getRangeAt(0) : null
+
+        // Select the textarea content
+        textArea.select()
+        textArea.setSelectionRange(0, textArea.value.length)
+
+        // Execute copy command
+        let successful = false
+        try {
+          successful = document.execCommand('copy')
+          console.log("execCommand result:", successful)
+        } catch (err) {
+          console.error("execCommand error:", err)
+        }
+
+        // Restore previous selection
+        if (selected) {
+          document.getSelection()?.removeAllRanges()
+          document.getSelection()?.addRange(selected)
+        }
+
+        document.body.removeChild(textArea)
+
+        if (successful) {
+          setCopiedSessionId(sessionId)
+          setTimeout(() => setCopiedSessionId(null), 1000)
+        } else {
+          throw new Error("Copy command failed")
+        }
+      }
     } catch (error) {
-      console.error("Failed to load file content:", error)
-      setSelectedFile({
-        path,
-        content: `// Failed to load file: ${error}`,
-        language: null
-      })
-    } finally {
-      setFileContentLoading(false)
+      console.error("Copy failed:", error)
     }
   }
 
-  const renderFileTree = (nodes: FileNode[], nodeId: string, level: number = 0) => {
-    return nodes.map((node) => (
-      <div key={node.path}>
-        <div
-          className={`flex items-center gap-2 px-2 py-1 hover:bg-muted/50 cursor-pointer ${
-            selectedFile?.path === node.path ? 'bg-muted' : ''
-          }`}
-          style={{ paddingLeft: `${level * 16 + 8}px` }}
-          onClick={() => {
-            if (node.type === 'directory') {
-              toggleDirectory(node.path)
-            } else {
-              handleFileClick(node.path, nodeId)
-            }
-          }}
-        >
-          {node.type === 'directory' ? (
-            <>
-              {node.expanded ? (
-                <ChevronDown className="h-4 w-4 shrink-0" />
-              ) : (
-                <ChevronRight className="h-4 w-4 shrink-0" />
-              )}
-              {node.expanded ? (
-                <FolderOpen className="h-4 w-4 shrink-0 text-yellow-500" />
-              ) : (
-                <Folder className="h-4 w-4 shrink-0 text-yellow-500" />
-              )}
-            </>
-          ) : (
-            <>
-              <span className="w-4" />
-              {node.name.endsWith('.tsx') || node.name.endsWith('.ts') || node.name.endsWith('.jsx') || node.name.endsWith('.js') ? (
-                <FileCode className="h-4 w-4 shrink-0 text-blue-500" />
-              ) : node.name.endsWith('.json') ? (
-                <FileText className="h-4 w-4 shrink-0 text-green-500" />
-              ) : node.name.endsWith('.md') ? (
-                <FileText className="h-4 w-4 shrink-0 text-purple-500" />
-              ) : (
-                <File className="h-4 w-4 shrink-0 text-muted-foreground" />
-              )}
-            </>
-          )}
-          <span className="text-sm truncate">{node.name}</span>
-        </div>
-        {node.type === 'directory' && node.expanded && node.children && (
-          <div>{renderFileTree(node.children, nodeId, level + 1)}</div>
-        )}
-      </div>
-    ))
-  }
+  // Session action menu component
+  const SessionActionMenu = ({ session, nodeId }: { session: SessionOut; nodeId: string }) => {
+    const handleCopy = () => {
+      console.log("handleCopy triggered in SessionActionMenu")
 
-  const renderMessage = (msg: ParsedMessage) => {
-    console.log("[Chat] renderMessage called for:", {
-      message_id: msg.message_id,
-      message_type: msg.message_type,
-      role: msg.role,
-      sequence: msg.sequence
-    })
+      // 延迟执行复制操作，确保在菜单关闭后执行
+      setTimeout(() => {
+        console.log("Executing delayed copy operation")
 
-    // Don't render assistant_result messages (stats shown in header)
-    if (msg.message_type === MessageType.ASSISTANT_RESULT) {
-      console.log("[Chat] Skipping ASSISTANT_RESULT message:", msg.message_id)
-      return null
+        // Create a hidden input element
+        const input = document.createElement("input")
+        input.value = session.session_id
+        input.style.position = "fixed"
+        input.style.top = "0"
+        input.style.left = "0"
+        input.style.width = "2em"
+        input.style.height = "2em"
+        input.style.padding = "0"
+        input.style.border = "none"
+        input.style.outline = "none"
+        input.style.boxShadow = "none"
+        input.style.background = "transparent"
+        input.setAttribute("readonly", "")
+
+        document.body.appendChild(input)
+
+        // Focus and select the input content
+        input.focus()
+        input.select()
+        input.setSelectionRange(0, input.value.length)
+
+        // Copy using execCommand
+        let successful = false
+        try {
+          successful = document.execCommand('copy')
+          console.log("execCommand result:", successful)
+
+          if (successful) {
+            console.log("Setting copiedSessionId to:", session.session_id)
+            setCopiedSessionId(session.session_id)
+            setTimeout(() => {
+              console.log("Clearing copiedSessionId")
+              setCopiedSessionId(null)
+            }, 1000)
+          } else {
+            console.error("execCommand returned false")
+          }
+        } catch (err) {
+          console.error("Copy error:", err)
+        }
+
+        document.body.removeChild(input)
+        console.log("Copy operation completed")
+      }, 100) // 100ms 延迟，足够菜单关闭
     }
 
-    const isUser = msg.role === MessageRole.USER
-    const isThinking = msg.message_type === MessageType.ASSISTANT_THINKING
-    const isSystemMessage = msg.message_type === MessageType.SYSTEM_MESSAGE
-    const isToolUse = msg.message_type === MessageType.ASSISTANT_TOOL_USE
-    const isCollapsible = isThinking || isSystemMessage || isToolUse
-    const isCollapsed = isCollapsible && collapsedMessages.has(msg.message_id)
+    const handleClose = (e: Event) => {
+      e.preventDefault()
+      openCloseDialog(session.session_id, nodeId)
+    }
+
+    const handleArchive = (e: Event) => {
+      e.preventDefault()
+      handleArchiveSession(session.session_id, nodeId)
+    }
 
     return (
-      <div
-        className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}
-      >
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <MoreVertical className="h-3.5 w-3.5 icon-secondary" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
+          <DropdownMenuItem
+            onSelect={(e) => {
+              // 阻止默认的菜单关闭行为（如果需要）
+              // e.preventDefault()
+              handleCopy()
+            }}
+          >
+            复制会话 ID
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {session.status === SessionStatus.ACTIVE && (
+            <DropdownMenuItem onSelect={handleClose}>
+              关闭会话
+            </DropdownMenuItem>
+          )}
+          {session.status === SessionStatus.CLOSED && (
+            <DropdownMenuItem onSelect={handleArchive}>
+              归档会话
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
+
+  // Session tree node component (recursive)
+  const SessionTreeNodeComponent = ({
+    session,
+    depth,
+    onSelect,
+    isLast = false,
+  }: {
+    session: SessionTreeNode
+    depth: number
+    onSelect: (sessionId: string) => void
+    isLast?: boolean
+  }) => {
+    const isExpanded = treeExpandedSessions.has(session.session_id)
+    const isActive = activeSessionId === session.session_id
+    const hasChildren = session.child_count > 0
+
+    return (
+      <div>
+        {/* Session item */}
         <div
-          className={`max-w-[70%] rounded-lg ${
-            isUser ? "bg-primary text-primary-foreground" : "bg-muted"
-          } ${isCollapsible ? "px-2 py-1" : "px-4 py-2"}`}
+          className={`group relative cursor-pointer hover:bg-muted/50 transition-colors ${
+            isActive
+              ? "bg-primary/10 border-l-3 border-l-primary"
+              : "border-l-3 border-l-transparent"
+          }`}
+          onClick={() => onSelect(session.session_id)}
         >
-          {isThinking ? (
-            <div>
+          {/* Tree lines for children (not root) - VSCode style */}
+          {depth > 0 && (
+            <>
+              {/* Vertical line */}
               <div
-                className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
-                onClick={() => toggleThinkingCollapse(msg.message_id)}
+                className="absolute top-0 bottom-0 w-px bg-muted-foreground/30"
+                style={{ left: `${(depth - 1) * 16 + 16}px` }}
               >
-                {isCollapsed ? (
-                  <ChevronRight className="h-3 w-3 opacity-70" />
-                ) : (
-                  <ChevronDown className="h-3 w-3 opacity-70" />
-                )}
-                <span className="text-xs opacity-70">💭 思考中...</span>
+                {isLast && <div className="absolute top-5 left-0 w-px h-full bg-background" />}
               </div>
-              {!isCollapsed && (
-                <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0">
-                  {msg.contentParsed.message}
-                </div>
-              )}
-            </div>
-          ) : isSystemMessage ? (
-            <div>
+              {/* Horizontal line */}
               <div
-                className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
-                onClick={() => toggleThinkingCollapse(msg.message_id)}
-              >
-                {isCollapsed ? (
-                  <ChevronRight className="h-3 w-3 opacity-70" />
+                className="absolute top-5 h-px bg-muted-foreground/30"
+                style={{
+                  left: `${(depth - 1) * 16 + 16}px`,
+                  width: '12px'
+                }}
+              />
+            </>
+          )}
+
+          {sessionListMode === 'detailed' ? (
+            /* Detailed mode */
+            <div className="pr-3 py-2" style={{ paddingLeft: `${depth * 16 + 12}px` }}>
+              {/* Line 1: Expand button + Root badge + Session ID + Status + Menu */}
+              <div className="flex items-center gap-2 mb-1">
+                {/* Expand/collapse button for sessions with children */}
+                {hasChildren ? (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleTreeSession(session.session_id)
+                    }}
+                    className="shrink-0"
+                  >
+                    {isExpanded ? (
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground icon-secondary" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground icon-secondary" />
+                    )}
+                  </button>
                 ) : (
-                  <ChevronDown className="h-3 w-3 opacity-70" />
+                  <div className="w-3.5" />
                 )}
-                <span className="text-xs opacity-70">🔔 系统消息</span>
-              </div>
-              {!isCollapsed && (
-                <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0">
-                  {msg.contentParsed.message}
-                </div>
-              )}
-            </div>
-          ) : isToolUse ? (
-            <div>
-              <div
-                className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1"
-                onClick={() => toggleThinkingCollapse(msg.message_id)}
-              >
-                {isCollapsed ? (
-                  <ChevronRight className="h-3 w-3 opacity-70" />
-                ) : (
-                  <ChevronDown className="h-3 w-3 opacity-70" />
+
+                {/* Root badge if no parent */}
+                {!session.parent_session_id && (
+                  <Badge variant="outline" className="text-xs h-5 px-1.5 shrink-0">
+                    根
+                  </Badge>
                 )}
-                <span className="text-xs opacity-70">🔧 {msg.contentParsed.tool_name}</span>
-              </div>
-              {!isCollapsed && (
-                <div className="text-sm whitespace-pre-wrap break-words px-2 pb-1 pt-0">
-                  {JSON.stringify(msg.contentParsed.tool_input, null, 2)}
+
+                <span
+                  className={`font-mono text-xs truncate ${
+                    isActive ? "font-semibold" : "text-muted-foreground"
+                  }`}
+                  title={session.topic || session.session_id}
+                >
+                  {session.topic || session.session_id.slice(0, 8)}
+                </span>
+                <Badge
+                  variant={
+                    session.status === SessionStatus.ACTIVE
+                      ? "default"
+                      : "secondary"
+                  }
+                  className="text-xs h-5 px-1.5"
+                >
+                  {session.status === SessionStatus.ACTIVE && "活跃"}
+                  {session.status === SessionStatus.CLOSED && "已关闭"}
+                </Badge>
+                <div className="ml-auto">
+                  <SessionActionMenu session={session} nodeId={session.node_id} />
                 </div>
-              )}
+              </div>
+
+              {/* Line 2: Node ID + Mode + Model */}
+              <div style={{ paddingLeft: hasChildren ? '14px' : '0px' }} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className="text-amber-600 font-medium">{session.node_id}</span>
+                <span>·</span>
+                <span>{session.mode}</span>
+                <span>·</span>
+                <span>{session.model || 'sonnet'}</span>
+              </div>
             </div>
           ) : (
-            <div className="text-sm whitespace-pre-wrap break-words">
-              {msg.contentParsed.message}
+            /* Compact mode */
+            <div className="pr-3 py-1.5" style={{ paddingLeft: `${depth * 16 + 12}px` }}>
+              <div className="flex items-center gap-2">
+                {/* Expand/collapse button */}
+                {hasChildren ? (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleTreeSession(session.session_id)
+                    }}
+                    className="shrink-0"
+                  >
+                    {isExpanded ? (
+                      <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                    )}
+                  </button>
+                ) : (
+                  <div className="w-3" />
+                )}
+
+                {/* Root badge */}
+                {!session.parent_session_id && (
+                  <Badge variant="outline" className="text-xs h-4 px-1 shrink-0">
+                    根
+                  </Badge>
+                )}
+
+                <span
+                  className={`font-mono text-xs truncate ${
+                    isActive ? "font-semibold" : "text-muted-foreground"
+                  }`}
+                  title={session.topic || session.session_id}
+                >
+                  {session.topic || session.session_id.slice(0, 8)}
+                </span>
+                <span className="text-xs text-amber-600 font-medium truncate">
+                  {session.node_id}
+                </span>
+                <Circle
+                  className={`h-1.5 w-1.5 shrink-0 ml-auto ${
+                    session.status === SessionStatus.ACTIVE && session.runtime_status === RuntimeStatus.IDLE
+                      ? 'fill-green-500 text-green-500'
+                      : session.status === SessionStatus.ACTIVE && session.runtime_status === RuntimeStatus.BUSY
+                      ? 'fill-orange-500 text-orange-500'
+                      : 'fill-gray-400 text-gray-400'
+                  }`}
+                />
+                <div>
+                  <SessionActionMenu session={session} nodeId={session.node_id} />
+                </div>
+              </div>
             </div>
           )}
         </div>
+
+        {/* Recursively render children */}
+        {isExpanded && session.children.map((child, index) => (
+          <SessionTreeNodeComponent
+            key={child.session_id}
+            session={child}
+            depth={depth + 1}
+            onSelect={onSelect}
+            isLast={index === session.children.length - 1}
+          />
+        ))}
       </div>
     )
   }
 
+
   return (
     <div className="flex absolute inset-0 overflow-hidden">
+      {/* Mobile session list button - Fixed on right edge */}
+      {isMobile && (
+        <button
+          onClick={() => setSessionSheetOpen(true)}
+          className="fixed right-0 top-1/2 -translate-y-1/2 z-40 bg-background/80 backdrop-blur border border-border rounded-l-md shadow-sm px-1.5 py-2 hover:bg-muted/80 transition-colors md:hidden flex items-center"
+          style={{ writingMode: 'vertical-rl' }}
+        >
+          <span className="text-xs text-muted-foreground">会话列表</span>
+        </button>
+      )}
+
       {/* Middle: Main Content Area */}
       <div className="flex-1 flex flex-col bg-muted/20 min-w-0">
         {/* Tab Switcher + Header */}
-        <div className="border-b bg-background flex items-center justify-between shrink-0 h-11">
-          {/* Left: Tab buttons */}
-          <div className="flex items-center">
-            <Button
-              variant={viewMode === 'chat' ? 'default' : 'ghost'}
-              size="sm"
-              className="rounded-none h-11 px-6"
-              onClick={() => setViewMode('chat')}
-            >
-              <MessageSquare className="h-4 w-4 mr-2" />
-              聊天
-            </Button>
-            <Button
-              variant={viewMode === 'workspace' ? 'default' : 'ghost'}
-              size="sm"
-              className="rounded-none h-11 px-6"
-              onClick={() => setViewMode('workspace')}
-            >
-              <Folder className="h-4 w-4 mr-2" />
-              工作区
-            </Button>
-          </div>
+        <div className="border-b bg-background flex items-center justify-between shrink-0 h-11 px-3 sm:px-4">
+          {/* Left: Session info - Node and Session ID */}
+          {viewMode === 'chat' ? (
+            currentSessionInfo ? (
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                {/* Node and Session ID */}
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-xs sm:text-sm font-mono text-muted-foreground truncate">
+                    {currentSessionInfo.nodeId}
+                    <span className="mx-1">/</span>
+                    {currentSessionInfo.session.topic
+                      ? (currentSessionInfo.session.topic.length > 15
+                          ? currentSessionInfo.session.topic.slice(0, 15) + '…'
+                          : currentSessionInfo.session.topic)
+                      : activeSessionId?.slice(0, 8)}
+                  </span>
+                </div>
 
-          {/* Right: Session info and stats */}
-          {viewMode === 'chat' && currentSessionInfo && (
-            <div className="flex items-center gap-4 px-6">
-              {/* Session path */}
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-mono text-muted-foreground">
-                  {currentSessionInfo.nodeId}
-                  <span className="mx-1">/</span>
-                  {activeSessionId?.slice(0, 8)}
-                </span>
-                <Badge variant="outline" className="text-xs">
-                  {currentSessionInfo.session.mode}
-                </Badge>
-                {currentSessionInfo.session.model && (
-                  <Badge variant="outline" className="text-xs">
-                    {currentSessionInfo.session.model}
+                {/* Show badges only on desktop */}
+                <div className="hidden sm:flex items-center gap-1.5">
+                  <Badge variant="outline" className="text-xs shrink-0">
+                    {currentSessionInfo.session.mode}
                   </Badge>
-                )}
+                  {currentSessionInfo.session.model && (
+                    <Badge variant="outline" className="text-xs shrink-0">
+                      {currentSessionInfo.session.model}
+                    </Badge>
+                  )}
+                </div>
               </div>
-
-              {/* WebSocket status */}
-              {currentSessionInfo.session.status === SessionStatus.ACTIVE && (
-                <div className="flex items-center">
-                  <div
-                    className={`h-2 w-2 rounded-full ${
-                      isConnected ? "bg-green-500" : "bg-red-500"
-                    }`}
-                  />
-                </div>
-              )}
-
-              {/* Usage statistics */}
-              {sessionStats && (
-                <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                  {sessionStats.total_cost_usd !== undefined && (
-                    <div className="flex items-center gap-1">
-                      <span>💰</span>
-                      <span className="font-mono">
-                        ${sessionStats.total_cost_usd.toFixed(4)}
-                      </span>
-                    </div>
-                  )}
-                  {(sessionStats.total_input_tokens !== undefined ||
-                    sessionStats.total_output_tokens !== undefined) && (
-                    <div className="flex items-center gap-1">
-                      <span>📊</span>
-                      <span className="font-mono">
-                        {sessionStats.total_input_tokens?.toLocaleString() || 0}↑
-                        <span className="mx-0.5">/</span>
-                        {sessionStats.total_output_tokens?.toLocaleString() || 0}↓
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Workspace header */}
-          {viewMode === 'workspace' && (
-            <div className="flex items-center gap-2 px-6">
-              <span className="text-sm text-muted-foreground">
+            ) : (
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <span className="text-xs sm:text-sm text-muted-foreground truncate">
+                  请选择会话
+                </span>
+              </div>
+            )
+          ) : (
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              {/* Node ID */}
+              <span className="text-xs sm:text-sm text-muted-foreground truncate">
                 {currentSessionInfo ? `节点: ${currentSessionInfo.nodeId}` : '请选择会话'}
               </span>
             </div>
           )}
+
+          {/* Right: View mode toggle */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Copy Code-Server URL button (workspace mode only) */}
+            {viewMode === 'workspace' && currentSessionInfo && (() => {
+              const nodeId = currentSessionInfo.nodeId
+              const url = nodeCodeServerUrl[nodeId]
+              const isCopied = copiedCodeServerUrl === nodeId
+
+              return url ? (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleCopyCodeServerUrl(nodeId)}
+                        className="h-7 text-xs"
+                      >
+                        {isCopied ? (
+                          <Check className="h-3.5 w-3.5 mr-1.5 text-green-600 icon-success" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5 mr-1.5 icon-primary" />
+                        )}
+                        {isCopied ? '已复制' : '复制地址'}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      复制 Code-Server 地址到剪贴板
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : null
+            })()}
+
+            {/* Usage statistics */}
+            {viewMode === 'chat' && currentStats && (
+              <div className="hidden lg:flex items-center gap-3 text-xs text-muted-foreground border-r pr-3">
+                {/* Cost */}
+                {currentStats.total_cost_usd !== undefined && (
+                  <div className="flex items-center gap-1">
+                    <Coins className="h-3.5 w-3.5 icon-secondary" />
+                    <span className="font-mono">${currentStats.total_cost_usd.toFixed(2)}</span>
+                  </div>
+                )}
+                {/* Tokens: Input / Output */}
+                {(currentStats.total_input_tokens !== undefined || currentStats.total_output_tokens !== undefined) && (
+                  <div className="flex items-center gap-1">
+                    <BarChart3 className="h-3.5 w-3.5 icon-secondary" />
+                    {currentStats.total_input_tokens !== undefined && (
+                      <>
+                        <span className="font-mono">{currentStats.total_input_tokens.toLocaleString()}</span>
+                        <ArrowUp className="h-3 w-3 icon-secondary" />
+                      </>
+                    )}
+                    {currentStats.total_input_tokens !== undefined && currentStats.total_output_tokens !== undefined && (
+                      <span className="mx-0.5">/</span>
+                    )}
+                    {currentStats.total_output_tokens !== undefined && (
+                      <>
+                        <span className="font-mono">{currentStats.total_output_tokens.toLocaleString()}</span>
+                        <ArrowDown className="h-3 w-3 icon-secondary" />
+                      </>
+                    )}
+                  </div>
+                )}
+                {/* Context Window Usage */}
+                {(currentStats.context_usage !== undefined && currentStats.context_percentage !== undefined && currentStats.context_percentage > 0) && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center gap-1">
+                          <CircularProgress percentage={currentStats.context_percentage} />
+                          <span className="font-mono">{currentStats.context_percentage.toFixed(1)}%</span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <div className="space-y-1">
+                          <div className="font-semibold">Context Window Usage</div>
+                          <div className="text-xs space-y-0.5">
+                            <div>Used: {currentStats.context_usage.toLocaleString()} / 200,000 tokens</div>
+                            <div>Percentage: {currentStats.context_percentage.toFixed(2)}%</div>
+                          </div>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+              </div>
+            )}
+
+            {/* View mode toggle - Hidden on mobile */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs hidden sm:inline-flex"
+              onClick={() => setViewMode(viewMode === 'chat' ? 'workspace' : 'chat')}
+            >
+              {viewMode === 'chat' ? '切换到工作区' : '切换到聊天区'}
+            </Button>
+          </div>
         </div>
 
         {/* Content Area - Switch between Chat and Workspace */}
         {viewMode === 'chat' ? (
-          /* Chat View */
+          /* Chat View - Lazy-loaded sessions */
           !activeSessionId ? (
             <div className="flex-1 flex items-center justify-center">
-              <div className="text-center text-muted-foreground">
-                <MessageSquare className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                <p>请选择一个会话</p>
+              <div className="text-center text-muted-foreground px-4">
+                <MessageSquare className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 mx-auto mb-3 sm:mb-4 opacity-30" />
+                <p className="text-sm sm:text-base">请选择一个会话</p>
               </div>
             </div>
           ) : !isConnected ? (
             <div className="flex-1 flex items-center justify-center">
-              <Loader2 className="h-8 w-8 animate-spin" />
-              <span className="ml-2">连接中...</span>
+              <Loader2 className="h-6 w-6 sm:h-7 sm:w-7 md:h-8 md:w-8 animate-spin icon-primary" />
+              <span className="ml-2 text-sm sm:text-base">连接中...</span>
             </div>
           ) : (
+            /* Render all loaded ChatSession instances */
             <>
-              {/* Messages Area */}
-              <div className="flex-1 overflow-y-auto p-6">
-              {messages.length === 0 ? (
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                  <div className="text-center">
-                    <MessageSquare className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                    <p>发送消息开始对话</p>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {(() => {
-                    console.log("[Chat] Rendering messages, total count:", messages.length)
-                    console.log("[Chat] Message IDs:", messages.map(m => m.message_id))
-
-                    // Check for duplicate message_ids
-                    const ids = messages.map(m => m.message_id)
-                    const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index)
-                    if (duplicates.length > 0) {
-                      console.error("[Chat] DUPLICATE message_ids found:", duplicates)
-                    }
-
-                    return messages.map((msg) => {
-                      console.log("[Chat] Mapping message:", msg.message_id)
-                      // Use message_id as key since it's guaranteed to exist and be unique
-                      return (
-                        <Fragment key={msg.message_id}>
-                          {renderMessage(msg)}
-                        </Fragment>
-                      )
-                    })
-                  })()}
-                  <div ref={messagesEndRef} />
-                </>
-              )}
-            </div>
-
-            {/* Input Area */}
-            <div className="border-t bg-background">
-              <div className="bg-background overflow-hidden">
-                <Textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && e.ctrlKey) {
-                      e.preventDefault()
-                      handleSendMessage()
-                    }
-                  }}
-                  placeholder={
-                    !currentSessionInfo
-                      ? "请选择会话"
-                      : currentSessionInfo.session.status === SessionStatus.CLOSED
-                      ? "会话已关闭，只能查看内容"
-                      : currentSessionInfo.nodeStatus !== NodeStatus.RUNNING
-                      ? "节点未运行，无法发送消息"
-                      : !isConnected
-                      ? "WebSocket 连接中..."
-                      : "输入消息... (Ctrl+Enter发送)"
-                  }
-                  disabled={loading || !isConnected || !canSendMessage}
-                  className="w-full resize-none overflow-y-auto border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-3 pt-3"
-                  style={{ minHeight: "24px" }}
+              {Array.from(loadedSessions).map(sessionId => (
+                <ChatSession
+                  key={sessionId}
+                  sessionId={sessionId}
+                  isVisible={sessionId === activeSessionId}
+                  mosaicId={mosaicId}
+                  nodes={nodes}
+                  onInputChange={handleInputChange}
+                  sessionInput={sessionInputs[sessionId] || ""}
+                  onStatsUpdate={handleStatsUpdate}
+                  onScrollStateChange={(state) => handleScrollStateChange(sessionId, state)}
+                  initialScrollState={sessionScrollStates[sessionId]}
                 />
-                <div className="flex justify-end px-2 pb-2">
-                  {loading ? (
-                    <Button onClick={handleInterrupt} variant="destructive" size="icon">
-                      <StopCircle className="h-4 w-4" />
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={handleSendMessage}
-                      disabled={!input.trim() || !isConnected || !canSendMessage}
-                      size="icon"
-                    >
-                      <Send className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </>
-        )
+              ))}
+            </>
+          )
         ) : (
-          /* Workspace View */
+          /* Workspace View - Lazy-loaded */
           !activeSessionId ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center text-muted-foreground">
-                <Folder className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                <p>请选择一个会话查看工作区</p>
+                <Folder className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 mx-auto mb-3 sm:mb-4 opacity-30 icon-secondary" />
+                <p className="text-sm sm:text-base px-4">请选择一个会话查看工作区</p>
               </div>
             </div>
           ) : (
-            <div className="flex-1 flex overflow-hidden">
-              {/* Left: File Tree */}
-              <div className="w-80 border-r bg-background overflow-y-auto">
-                <div className="px-3 py-1.5 border-b bg-background flex items-center justify-between shrink-0">
-                  <div className="flex items-center gap-2">
-                    <Folder className="h-4 w-4" />
-                    <span className="text-sm font-medium">文件树</span>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 p-0"
-                    onClick={() => currentSessionInfo && loadWorkspace(currentSessionInfo.nodeId)}
-                    disabled={workspaceLoading}
-                  >
-                    <RefreshCw className={`h-3.5 w-3.5 ${workspaceLoading ? 'animate-spin' : ''}`} />
-                  </Button>
-                </div>
-                <div className="py-2">
-                  {workspaceLoading ? (
-                    <div className="p-4 text-center text-sm text-muted-foreground">
-                      <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-                      加载中...
-                    </div>
-                  ) : fileTree.length === 0 ? (
-                    <div className="p-4 text-center text-sm text-muted-foreground">
-                      工作区为空
-                    </div>
-                  ) : (
-                    currentSessionInfo && renderFileTree(fileTree, currentSessionInfo.nodeId)
-                  )}
-                </div>
-              </div>
+            /* Render WorkspaceView for each loaded session */
+            <>
+              {Array.from(loadedSessions).map(sessionId => {
+                const sessionInfo = nodes
+                  .flatMap((node) =>
+                    node.sessions.map((session) => ({
+                      nodeId: node.node_id,
+                      session,
+                    }))
+                  )
+                  .find((info) => info.session.session_id === sessionId)
 
-              {/* Right: File Content Viewer */}
-              <div className="flex-1 flex flex-col bg-muted/20 overflow-hidden">
-                {fileContentLoading ? (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center text-muted-foreground">
-                      <Loader2 className="h-12 w-12 animate-spin mx-auto mb-2" />
-                      <p>加载文件内容...</p>
-                    </div>
-                  </div>
-                ) : selectedFile ? (
-                  <>
-                    {/* File header */}
-                    <div className="border-b bg-background px-4 py-2 shrink-0">
-                      <div className="flex items-center gap-2">
-                        <FileCode className="h-4 w-4 text-blue-500" />
-                        <span className="text-sm font-mono">{selectedFile.path}</span>
-                      </div>
-                    </div>
-                    {/* File content */}
-                    <div className="flex-1 overflow-auto">
-                      <pre className="p-4 text-sm font-mono">
-                        <code>{selectedFile.content}</code>
-                      </pre>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center text-muted-foreground">
-                      <FileText className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                      <p>选择一个文件查看内容</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+                return sessionInfo ? (
+                  <WorkspaceView
+                    key={sessionId}
+                    sessionId={sessionId}
+                    nodeId={sessionInfo.nodeId}
+                    mosaicId={mosaicId}
+                    isVisible={sessionId === activeSessionId}
+                    codeServerUrl={nodeCodeServerUrl[sessionInfo.nodeId] || null}
+                  />
+                ) : null
+              })}
+            </>
           )
         )}
       </div>
 
-      {/* Right: Session List */}
-      <div className="w-80 border-l flex flex-col">
+      {/* Right: Session List (desktop only) */}
+      <div className="w-80 border-l flex-col bg-background hidden md:flex">
+        {/* Header with view and mode toggle */}
+        <div className="h-11 border-b px-3 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">会话列表</span>
+            {/* Connection status indicator */}
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div>
+                    <Circle className={`h-2 w-2 ${isConnected ? 'fill-green-500 text-green-500' : 'fill-red-500 text-red-500'}`} />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {isConnected ? 'WebSocket 已连接' : 'WebSocket 已断开'}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+          <div className="flex items-center gap-1">
+            {/* View mode toggle (tree/grouped) */}
+            <TooltipProvider>
+              <div className="inline-flex rounded border p-0.5 gap-0.5">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={sessionViewMode === 'tree' ? 'default' : 'ghost'}
+                      size="sm"
+                      className="h-6 w-6 p-0"
+                      onClick={() => setSessionViewMode('tree')}
+                    >
+                      <Network className={`h-3.5 w-3.5 ${sessionViewMode === 'tree' ? 'icon-foreground' : 'icon-secondary'}`} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>树形视图</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={sessionViewMode === 'grouped' ? 'default' : 'ghost'}
+                      size="sm"
+                      className="h-6 w-6 p-0"
+                      onClick={() => setSessionViewMode('grouped')}
+                    >
+                      <FolderTree className={`h-3.5 w-3.5 ${sessionViewMode === 'grouped' ? 'icon-foreground' : 'icon-secondary'}`} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>节点分组</TooltipContent>
+                </Tooltip>
+              </div>
+            </TooltipProvider>
+
+            {/* List mode toggle (detailed/compact) */}
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    onClick={() => setSessionListMode(mode => mode === 'detailed' ? 'compact' : 'detailed')}
+                  >
+                    {sessionListMode === 'detailed' ? (
+                      <LayoutList className="h-4 w-4 icon-secondary" />
+                    ) : (
+                      <List className="h-4 w-4 icon-secondary" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {sessionListMode === 'detailed' ? '切换到紧凑模式' : '切换到详细模式'}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        </div>
+
+        {/* Session tree */}
         <div
           className="flex-1 overflow-y-auto"
           style={{
@@ -1176,142 +1660,236 @@ export default function ChatPage() {
           }}
         >
           {nodes.length === 0 ? (
-            <div className="p-4 text-center text-sm text-muted-foreground border rounded-lg mx-4 mt-16">
+            <div className="p-4 text-center text-sm text-muted-foreground">
               <Bot className="h-12 w-12 mx-auto mb-2 opacity-50" />
               <p>暂无 Claude Code 节点</p>
               <p className="text-xs mt-1">请先创建节点</p>
             </div>
+          ) : sessionViewMode === 'tree' ? (
+            /* Tree view */
+            (() => {
+              // Get all sessions from all nodes
+              const allSessions = nodes.flatMap(node => node.sessions)
+              // Build tree structure
+              const treeRoots = buildSessionTree(allSessions)
+
+              return treeRoots.length === 0 ? (
+                <div className="p-4 text-center text-sm text-muted-foreground">
+                  <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>暂无会话</p>
+                </div>
+              ) : (
+                treeRoots.map((rootSession, index) => (
+                  <SessionTreeNodeComponent
+                    key={rootSession.session_id}
+                    session={rootSession}
+                    depth={0}
+                    onSelect={selectSession}
+                    isLast={index === treeRoots.length - 1}
+                  />
+                ))
+              )
+            })()
           ) : (
+            /* Grouped view (current behavior) */
             nodes.map((node) => (
-              <div key={node.node_id} className="border-b">
+              <div key={node.node_id} className="border-b last:border-b-0">
                 {/* Node header */}
-                <div className="p-3 bg-muted/50">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 w-6 p-0 shrink-0"
-                      onClick={() => toggleNode(node.node_id)}
-                    >
-                      {node.expanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                    </Button>
-                    <Bot className="h-4 w-4 shrink-0" />
+                <div
+                  className="px-3 py-2.5 bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer"
+                  onClick={() => toggleNode(node.node_id)}
+                >
+                  <div className="flex items-center gap-2">
+                    {/* Expand/collapse icon */}
+                    {node.expanded ? (
+                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground icon-secondary" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground icon-secondary" />
+                    )}
+
+                    {/* Node name */}
                     <span
-                      className="font-medium text-sm truncate min-w-0"
+                      className="font-medium text-sm truncate flex-1 min-w-0"
                       title={node.node_id}
                     >
                       {node.node_id}
                     </span>
-                    <Badge variant="outline" className="ml-auto text-xs shrink-0">
-                      {node.sessions.length} 会话
-                    </Badge>
+
+                    {/* Node control buttons */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Start/Stop node button */}
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (node.status === NodeStatus.RUNNING) {
+                                  handleStopNode(node.node_id)
+                                } else {
+                                  handleStartNode(node.node_id)
+                                }
+                              }}
+                              disabled={nodeControlLoading[node.node_id]}
+                            >
+                              {nodeControlLoading[node.node_id] ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin icon-primary" />
+                              ) : node.status === NodeStatus.RUNNING ? (
+                                <Square className="h-3.5 w-3.5 text-red-600 icon-destructive" />
+                              ) : (
+                                <Play className="h-3.5 w-3.5 text-green-600 icon-success" />
+                              )}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {node.status === NodeStatus.RUNNING ? '停止节点' : '启动节点'}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+
+                      {/* Batch archive button - always visible */}
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-100"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openBatchArchiveDialog(node.node_id)
+                              }}
+                              disabled={node.sessions.filter(s => s.status === SessionStatus.CLOSED).length === 0}
+                            >
+                              <Archive className="h-3.5 w-3.5 icon-secondary" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            批量归档已关闭会话
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+
+                      {/* Create session button */}
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openCreateDialog(node.node_id)
+                              }}
+                              disabled={node.status !== NodeStatus.RUNNING || !isConnected}
+                            >
+                              <Plus className="h-3.5 w-3.5 icon-primary" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            创建新会话
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full h-7"
-                    onClick={() => openCreateDialog(node.node_id)}
-                    disabled={node.status !== NodeStatus.RUNNING || !isConnected}
-                  >
-                    <Plus className="h-3 w-3 mr-1" />
-                    新建会话
-                  </Button>
-                  {node.status !== NodeStatus.RUNNING ? (
-                    <div className="mt-1 text-xs text-muted-foreground text-center">
-                      节点未运行，请先启动节点
-                    </div>
-                  ) : !isConnected ? (
-                    <div className="mt-1 text-xs text-muted-foreground text-center">
-                      WebSocket 连接中...
-                    </div>
-                  ) : null}
                 </div>
 
                 {/* Sessions under this node */}
                 {node.expanded && (
-                  <div>
-                    {node.sessions.length === 0 ? (
-                      <div className="p-3 text-center text-xs text-muted-foreground">
-                        暂无会话
-                      </div>
-                    ) : (
-                      node.sessions.map((session) => (
-                        <div
-                          key={session.session_id}
-                          className={`p-3 cursor-pointer hover:bg-muted/50 border-l-2 ${
-                            activeSessionId === session.session_id
-                              ? "border-l-primary bg-muted/50"
-                              : "border-l-transparent"
-                          }`}
-                          onClick={() => setActiveSessionId(session.session_id)}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {session.session_id.slice(0, 8)}
-                            </span>
-                            <div className="flex items-center gap-1">
-                              <Badge
-                                variant={
-                                  session.status === SessionStatus.ACTIVE
-                                    ? "default"
-                                    : "secondary"
-                                }
-                                className="text-xs h-5"
-                              >
-                                {session.status === SessionStatus.ACTIVE && "活跃"}
-                                {session.status === SessionStatus.CLOSED && "已关闭"}
-                                {session.status === SessionStatus.ARCHIVED && "已归档"}
-                              </Badge>
+                  <div className="bg-background">
+                    {node.sessions.length > 0 && (
+                      node.sessions.map((session, index) => {
+                        const isLast = index === node.sessions.length - 1
+                        const isFirst = index === 0
+                        const isActive = activeSessionId === session.session_id
 
-                              {/* Close button (only for active sessions) */}
-                              {session.status === SessionStatus.ACTIVE && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-6 w-6 p-0"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    openCloseDialog(session.session_id, node.node_id)
-                                  }}
-                                  title="关闭会话"
-                                >
-                                  <Lock className="h-3 w-3" />
-                                </Button>
-                              )}
-
-                              {/* Archive button (only for closed sessions) */}
-                              {session.status === SessionStatus.CLOSED && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-6 w-6 p-0"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleArchiveSession(session.session_id, node.node_id)
-                                  }}
-                                  title="归档会话"
-                                >
-                                  <Archive className="h-3 w-3" />
-                                </Button>
-                              )}
+                        return (
+                          <div
+                            key={session.session_id}
+                            className={`group relative cursor-pointer hover:bg-muted/50 transition-colors ${
+                              isActive
+                                ? "bg-primary/10 border-l-3 border-l-primary"
+                                : "border-l-3 border-l-transparent"
+                            }`}
+                            onClick={() => selectSession(session.session_id)}
+                          >
+                            {/* Tree line - VSCode style */}
+                            <div className={`absolute left-[17px] ${isFirst ? '-top-[10px]' : 'top-0'} ${isFirst && isLast ? 'h-[30px]' : 'bottom-0'} w-px bg-muted-foreground/30`}>
+                              {isLast && !isFirst && <div className="absolute top-5 left-0 w-px h-full bg-background" />}
                             </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs">
-                              {session.mode}
-                            </Badge>
-                            {session.model && (
-                              <Badge variant="outline" className="text-xs">
-                                {session.model}
-                              </Badge>
+                            <div className="absolute left-[17px] top-5 w-3 h-px bg-muted-foreground/30" />
+
+                            {sessionListMode === 'detailed' ? (
+                              /* Detailed mode: Two-line layout */
+                              <div className="pl-8 pr-3 py-2">
+                                {/* Line 1: Session ID + Status + Menu */}
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span
+                                    className={`font-mono text-xs truncate ${
+                                      isActive ? "font-semibold" : "text-muted-foreground"
+                                    }`}
+                                    title={session.topic || session.session_id}
+                                  >
+                                    {session.topic || session.session_id.slice(0, 8)}
+                                  </span>
+                                  <Badge
+                                    variant={
+                                      session.status === SessionStatus.ACTIVE
+                                        ? "default"
+                                        : "secondary"
+                                    }
+                                    className="text-xs h-5 px-1.5"
+                                  >
+                                    {session.status === SessionStatus.ACTIVE && "活跃"}
+                                    {session.status === SessionStatus.CLOSED && "已关闭"}
+                                  </Badge>
+                                  <div className="ml-auto">
+                                    <SessionActionMenu session={session} nodeId={node.node_id} />
+                                  </div>
+                                </div>
+
+                                {/* Line 2: Mode · Model · Message count */}
+                                <div className="pl-5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                                  <span>{session.mode}</span>
+                                  <span>·</span>
+                                  <span>{session.model || 'sonnet'}</span>
+                                </div>
+                              </div>
+                            ) : (
+                              /* Compact mode: Single line */
+                              <div className="pl-8 pr-3 py-1.5">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`font-mono text-xs truncate ${
+                                      isActive ? "font-semibold" : "text-muted-foreground"
+                                    }`}
+                                    title={session.topic || session.session_id}
+                                  >
+                                    {session.topic || session.session_id.slice(0, 8)}
+                                  </span>
+                                  <Circle
+                                    className={`h-1.5 w-1.5 shrink-0 ml-auto ${
+                                      session.status === SessionStatus.ACTIVE && session.runtime_status === RuntimeStatus.IDLE
+                                        ? 'fill-green-500 text-green-500'
+                                        : session.status === SessionStatus.ACTIVE && session.runtime_status === RuntimeStatus.BUSY
+                                        ? 'fill-orange-500 text-orange-500'
+                                        : 'fill-gray-400 text-gray-400'
+                                    }`}
+                                  />
+                                  <div>
+                                    <SessionActionMenu session={session} nodeId={node.node_id} />
+                                  </div>
+                                </div>
+                              </div>
                             )}
                           </div>
-                        </div>
-                      ))
+                        )
+                      })
                     )}
                   </div>
                 )}
@@ -1323,7 +1901,7 @@ export default function ChatPage() {
 
       {/* Create Session Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-scroll">
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md max-h-[90vh] overflow-y-scroll">
           <DialogHeader>
             <DialogTitle>新建会话</DialogTitle>
             <DialogDescription>
@@ -1346,6 +1924,9 @@ export default function ChatPage() {
                   </SelectItem>
                   <SelectItem value={SessionMode.PROGRAM}>
                     Program - 编程模式
+                  </SelectItem>
+                  <SelectItem value={SessionMode.LONG_RUNNING}>
+                    Long Running - 长期运行模式
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -1381,7 +1962,7 @@ export default function ChatPage() {
 
       {/* Close Session Confirmation Dialog */}
       <Dialog open={closeDialogOpen} onOpenChange={setCloseDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
           <DialogHeader>
             <DialogTitle>确认关闭会话？</DialogTitle>
           </DialogHeader>
@@ -1408,7 +1989,7 @@ export default function ChatPage() {
             >
               {closing ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin icon-primary" />
                   关闭中...
                 </>
               ) : (
@@ -1418,6 +1999,346 @@ export default function ChatPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Batch Archive Confirmation Dialog */}
+      <Dialog open={batchArchiveDialogOpen} onOpenChange={setBatchArchiveDialogOpen}>
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>批量归档会话</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-4">
+            <p className="text-sm text-muted-foreground">
+              确定要归档 <span className="font-semibold text-foreground">{batchArchivingNode?.nodeId}</span> 节点下的{" "}
+              <span className="font-semibold text-foreground">{batchArchivingNode?.closedSessionIds.length}</span>{" "}
+              个已关闭会话吗？
+            </p>
+            {batchArchivingNode && batchArchivingNode.closedSessionIds.length > 0 && (
+              <div className="bg-muted/50 rounded-md p-3 space-y-1">
+                <p className="text-xs font-medium text-muted-foreground mb-2">会话列表：</p>
+                {batchArchivingNode.closedSessionIds.slice(0, 5).map((sessionId) => (
+                  <p key={sessionId} className="text-xs font-mono text-muted-foreground">
+                    • {sessionId.slice(0, 8)}
+                  </p>
+                ))}
+                {batchArchivingNode.closedSessionIds.length > 5 && (
+                  <p className="text-xs text-muted-foreground">
+                    ... 等 {batchArchivingNode.closedSessionIds.length - 5} 个会话
+                  </p>
+                )}
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground">
+              归档后这些会话将不再显示在列表中。
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setBatchArchiveDialogOpen(false)}
+              disabled={batchArchiving}
+            >
+              取消
+            </Button>
+            <Button
+              variant="default"
+              onClick={handleBatchArchive}
+              disabled={batchArchiving}
+              className="bg-orange-600 hover:bg-orange-700"
+            >
+              {batchArchiving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin icon-primary" />
+                  归档中...
+                </>
+              ) : (
+                "确认归档"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mobile Session List Sheet */}
+      <Sheet open={sessionSheetOpen} onOpenChange={setSessionSheetOpen}>
+        <SheetContent side="right" className="p-0 w-[85vw] sm:w-96" showClose={false}>
+          <div className="flex h-full w-full flex-col bg-background relative">
+            {/* Mobile Close Button */}
+            <button
+              onClick={() => setSessionSheetOpen(false)}
+              className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 z-50 rounded-full bg-background border shadow-md p-2 hover:bg-accent transition-colors"
+              aria-label="关闭会话列表"
+            >
+              <ChevronRight className="h-4 w-4 icon-primary" />
+            </button>
+
+          <SheetHeader className="h-11 border-b px-3 flex flex-row items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
+              <SheetTitle className="text-sm font-medium">会话列表</SheetTitle>
+              {/* Connection status indicator */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div>
+                      <Circle className={`h-2 w-2 ${isConnected ? 'fill-green-500 text-green-500' : 'fill-red-500 text-red-500'}`} />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {isConnected ? 'WebSocket 已连接' : 'WebSocket 已断开'}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    onClick={() => setSessionListMode(mode => mode === 'detailed' ? 'compact' : 'detailed')}
+                  >
+                    {sessionListMode === 'detailed' ? (
+                      <LayoutList className="h-4 w-4 icon-secondary" />
+                    ) : (
+                      <List className="h-4 w-4 icon-secondary" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {sessionListMode === 'detailed' ? '切换到紧凑模式' : '切换到详细模式'}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </SheetHeader>
+
+          {/* Session tree */}
+          <div
+            className="flex-1 overflow-y-auto"
+            style={{
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'hsl(var(--border)) transparent'
+            }}
+          >
+            {nodes.length === 0 ? (
+              <div className="p-4 text-center text-sm text-muted-foreground">
+                <Bot className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>暂无 Claude Code 节点</p>
+                <p className="text-xs mt-1">请先创建节点</p>
+              </div>
+            ) : (
+              nodes.map((node) => (
+                <div key={node.node_id} className="border-b last:border-b-0">
+                  {/* Node header */}
+                  <div
+                    className="px-3 py-2.5 bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer"
+                    onClick={() => toggleNode(node.node_id)}
+                  >
+                    <div className="flex items-center gap-2">
+                      {/* Expand/collapse icon */}
+                      {node.expanded ? (
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      )}
+
+                      {/* Node name */}
+                      <span
+                        className="font-medium text-sm truncate flex-1 min-w-0"
+                        title={node.node_id}
+                      >
+                        {node.node_id}
+                      </span>
+
+                      {/* Node control buttons */}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {/* Start/Stop node button */}
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  if (node.status === NodeStatus.RUNNING) {
+                                    handleStopNode(node.node_id)
+                                  } else {
+                                    handleStartNode(node.node_id)
+                                  }
+                                }}
+                                disabled={nodeControlLoading[node.node_id]}
+                              >
+                                {nodeControlLoading[node.node_id] ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : node.status === NodeStatus.RUNNING ? (
+                                  <Square className="h-3.5 w-3.5 text-red-600" />
+                                ) : (
+                                  <Play className="h-3.5 w-3.5 text-green-600" />
+                                )}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {node.status === NodeStatus.RUNNING ? '停止节点' : '启动节点'}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+
+                        {/* Batch archive button - always visible */}
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-100"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  openBatchArchiveDialog(node.node_id)
+                                  setSessionSheetOpen(false)
+                                }}
+                                disabled={node.sessions.filter(s => s.status === SessionStatus.CLOSED).length === 0}
+                              >
+                                <Archive className="h-3.5 w-3.5 icon-secondary" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              批量归档已关闭会话
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+
+                        {/* Create session button */}
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  openCreateDialog(node.node_id)
+                                  setSessionSheetOpen(false)
+                                }}
+                                disabled={node.status !== NodeStatus.RUNNING || !isConnected}
+                              >
+                                <Plus className="h-3.5 w-3.5 icon-primary" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              创建新会话
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sessions under this node */}
+                  {node.expanded && (
+                    <div className="bg-background">
+                      {node.sessions.length > 0 && (
+                        node.sessions.map((session, index) => {
+                          const isLast = index === node.sessions.length - 1
+                          const isFirst = index === 0
+                          const isActive = activeSessionId === session.session_id
+
+                          return (
+                            <div
+                              key={session.session_id}
+                              className={`group relative cursor-pointer hover:bg-muted/50 transition-colors ${
+                                isActive
+                                  ? "bg-primary/10 border-l-3 border-l-primary"
+                                  : "border-l-3 border-l-transparent"
+                              }`}
+                              onClick={() => {
+                                selectSession(session.session_id)
+                                setSessionSheetOpen(false)
+                              }}
+                            >
+                              {/* Tree line - VSCode style */}
+                              <div className={`absolute left-[17px] ${isFirst ? '-top-[10px]' : 'top-0'} ${isFirst && isLast ? 'h-[30px]' : 'bottom-0'} w-px bg-muted-foreground/30`}>
+                                {isLast && !isFirst && <div className="absolute top-5 left-0 w-px h-full bg-background" />}
+                              </div>
+                              <div className="absolute left-[17px] top-5 w-3 h-px bg-muted-foreground/30" />
+
+                              {sessionListMode === 'detailed' ? (
+                                /* Detailed mode: Two-line layout */
+                                <div className="pl-8 pr-3 py-2">
+                                  {/* Line 1: Session ID + Status + Menu */}
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span
+                                      className={`font-mono text-xs truncate ${
+                                        isActive ? "font-semibold" : "text-muted-foreground"
+                                      }`}
+                                      title={session.topic || session.session_id}
+                                    >
+                                      {session.topic || session.session_id.slice(0, 8)}
+                                    </span>
+                                    <Badge
+                                      variant={
+                                        session.status === SessionStatus.ACTIVE
+                                          ? "default"
+                                          : "secondary"
+                                      }
+                                      className="text-xs h-5 px-1.5"
+                                    >
+                                      {session.status === SessionStatus.ACTIVE && "活跃"}
+                                      {session.status === SessionStatus.CLOSED && "已关闭"}
+                                    </Badge>
+                                    <div className="ml-auto">
+                                      <SessionActionMenu session={session} nodeId={node.node_id} />
+                                    </div>
+                                  </div>
+
+                                  {/* Line 2: Mode · Model · Message count */}
+                                  <div className="pl-5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                                    <span>{session.mode}</span>
+                                    <span>·</span>
+                                    <span>{session.model || 'sonnet'}</span>
+                                  </div>
+                                </div>
+                              ) : (
+                                /* Compact mode: Single line */
+                                <div className="pl-8 pr-3 py-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className={`font-mono text-xs truncate ${
+                                        isActive ? "font-semibold" : "text-muted-foreground"
+                                      }`}
+                                      title={session.topic || session.session_id}
+                                    >
+                                      {session.topic || session.session_id.slice(0, 8)}
+                                    </span>
+                                    <Circle
+                                      className={`h-1.5 w-1.5 shrink-0 ml-auto ${
+                                        session.status === SessionStatus.ACTIVE && session.runtime_status === RuntimeStatus.IDLE
+                                          ? 'fill-green-500 text-green-500'
+                                          : session.status === SessionStatus.ACTIVE && session.runtime_status === RuntimeStatus.BUSY
+                                          ? 'fill-orange-500 text-orange-500'
+                                          : 'fill-gray-400 text-gray-400'
+                                      }`}
+                                    />
+                                    <div>
+                                      <SessionActionMenu session={session} nodeId={node.node_id} />
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

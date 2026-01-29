@@ -36,12 +36,14 @@ import { useAuth } from "@/contexts/auth-context"
 import { NodeType, NodeStatus, type NodeOut } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { JsonEditor } from "@/components/ui/json-editor"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 // Node type display configuration
 const NODE_TYPE_LABELS: Record<NodeType, string> = {
   [NodeType.CLAUDE_CODE]: 'Claude Code',
   [NodeType.SCHEDULER]: 'Scheduler',
-  [NodeType.EMAIL]: 'Email'
+  [NodeType.EMAIL]: 'Email',
+  [NodeType.AGGREGATOR]: 'Aggregator'
 }
 
 export default function NodesPage() {
@@ -52,6 +54,9 @@ export default function NodesPage() {
   const [nodes, setNodes] = useState<NodeOut[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(false)
 
   // Create dialog state
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -86,6 +91,14 @@ export default function NodesPage() {
 
   // Node operation state (start)
   const [operatingNodeId, setOperatingNodeId] = useState<string | null>(null)
+
+  // Mobile detection effect
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Fetch nodes
   useEffect(() => {
@@ -298,8 +311,8 @@ export default function NodesPage() {
   // Loading state
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="flex items-center justify-center min-h-[300px] sm:min-h-[400px]">
+        <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-muted-foreground" />
       </div>
     )
   }
@@ -307,21 +320,24 @@ export default function NodesPage() {
   // Error state
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <p className="text-muted-foreground mb-4">{error}</p>
+      <div className="flex flex-col items-center justify-center min-h-[300px] sm:min-h-[400px] px-4">
+        <p className="text-muted-foreground mb-4 text-sm sm:text-base text-center">{error}</p>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col h-full space-y-6 overflow-auto">
+    <div className="flex flex-col h-full space-y-3 sm:space-y-4 md:space-y-6 overflow-auto">
       <div className="flex-shrink-0">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold">节点管理</h1>
-            <p className="text-muted-foreground mt-1">管理 Mosaic 实例中的节点</p>
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">节点管理</h1>
+            <p className="text-muted-foreground mt-1 text-sm md:text-base">管理 Mosaic 实例中的节点</p>
           </div>
-          <Button onClick={() => setCreateDialogOpen(true)}>
+          <Button
+            onClick={() => setCreateDialogOpen(true)}
+            className="w-full md:w-auto"
+          >
             <Plus className="mr-2 h-4 w-4" />
             新建节点
           </Button>
@@ -329,25 +345,143 @@ export default function NodesPage() {
       </div>
 
       {nodes.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center pt-16 border rounded-lg">
-          <Box className="h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-xl font-semibold mb-2">还没有创建任何节点</h2>
-          <p className="text-muted-foreground text-center mb-6 max-w-lg">
-            节点是 Mosaic 系统的核心组件，用于处理事件和执行任务。<br />
+        <div className="flex-1 flex flex-col items-center justify-center pt-8 sm:pt-16 border rounded-lg px-4">
+          <Box className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground mb-3 sm:mb-4" />
+          <h2 className="text-lg sm:text-xl font-semibold mb-2 text-center">还没有创建任何节点</h2>
+          <p className="text-muted-foreground text-center mb-4 sm:mb-6 max-w-lg text-sm sm:text-base">
+            节点是 Mosaic 系统的核心组件，用于处理事件和执行任务。
             创建第一个节点来开始构建你的事件网络。
           </p>
-          <Button onClick={() => setCreateDialogOpen(true)}>
+          <Button onClick={() => setCreateDialogOpen(true)} className="w-full sm:w-auto">
             <Plus className="mr-2 h-4 w-4" />
             创建第一个节点
           </Button>
         </div>
+      ) : isMobile ? (
+        // Mobile card view
+        <div className="flex-1 overflow-auto space-y-3">
+          {nodes.map((node) => {
+            const isOperating = operatingNodeId === node.node_id
+            const isRunning = node.status === NodeStatus.RUNNING
+
+            return (
+              <Card key={node.id}>
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <Box className="h-4 w-4 text-blue-500 shrink-0" />
+                      <CardTitle className="text-base font-mono truncate" title={node.node_id}>
+                        {node.node_id}
+                      </CardTitle>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {isRunning ? (
+                        <Badge className="bg-green-500 hover:bg-green-600 text-xs">
+                          <Circle className="mr-1 h-2 w-2 fill-current" />
+                          运行中
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="text-xs">
+                          <Circle className="mr-1 h-2 w-2 fill-current" />
+                          停止
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">类型：</span>
+                      <Badge variant="outline" className="ml-1 text-xs">
+                        {NODE_TYPE_LABELS[node.node_type]}
+                      </Badge>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">会话：</span>
+                      <Badge variant="outline" className="ml-1 text-xs">{node.active_session_count}</Badge>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">自动启动：</span>
+                      <Badge variant={node.auto_start ? "default" : "secondary"} className="ml-1 text-xs">
+                        {node.auto_start ? "是" : "否"}
+                      </Badge>
+                    </div>
+                  </div>
+                  {node.description && (
+                    <p className="text-sm text-muted-foreground line-clamp-2">
+                      {node.description}
+                    </p>
+                  )}
+                  <div className="text-xs text-muted-foreground">
+                    创建于 {new Date(node.created_at).toLocaleString("zh-CN", {
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: false
+                    })}
+                  </div>
+                  <div className="flex gap-2 pt-2">
+                    {isRunning ? (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => openStopDialog(node)}
+                        disabled={isOperating}
+                        className="flex-1"
+                      >
+                        <Square className="mr-1.5 h-3.5 w-3.5" />
+                        停止
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => handleStartNode(node)}
+                        disabled={isOperating}
+                        className="flex-1"
+                      >
+                        {isOperating ? (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Play className="mr-1.5 h-3.5 w-3.5" />
+                        )}
+                        启动
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openEditDialog(node)}
+                      className="flex-1"
+                    >
+                      <Edit className="mr-1.5 h-3.5 w-3.5" />
+                      编辑
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openDeleteDialog(node)}
+                      className="text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
       ) : (
+        // Desktop table view
         <div className="flex-1 flex flex-col min-h-0 border rounded-lg">
           <div className="flex-1 overflow-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-center">节点 ID</TableHead>
+                  <TableHead className="text-left">节点 ID</TableHead>
                   <TableHead className="text-center">类型</TableHead>
                   <TableHead className="text-center">状态</TableHead>
                   <TableHead className="text-center">活跃会话</TableHead>
@@ -364,10 +498,12 @@ export default function NodesPage() {
 
                   return (
                     <TableRow key={node.id}>
-                      <TableCell className="text-center">
-                        <div className="flex items-center gap-2 justify-center">
-                          <Box className="h-4 w-4 text-blue-500" />
-                          <span className="font-medium font-mono">{node.node_id}</span>
+                      <TableCell className="text-left">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Box className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                          <span className="font-medium font-mono truncate block max-w-[20ch]" title={node.node_id}>
+                            {node.node_id}
+                          </span>
                         </div>
                       </TableCell>
                       <TableCell className="text-center">
@@ -396,7 +532,11 @@ export default function NodesPage() {
                           {node.auto_start ? "是" : "否"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-center max-w-xs truncate text-sm text-muted-foreground">
+                      <TableCell className={cn(
+                        "truncate text-sm text-muted-foreground",
+                        node.description ? "text-left max-w-[20ch]" : "text-center"
+                      )}
+                      title={node.description || undefined}>
                         {node.description || "—"}
                       </TableCell>
                       <TableCell className="text-center text-sm text-muted-foreground">
@@ -465,16 +605,16 @@ export default function NodesPage() {
 
       {/* Create Node Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-scroll">
+        <DialogContent className="sm:max-w-2xl max-w-[calc(100vw-2rem)]">
           <DialogHeader>
-            <DialogTitle>创建新节点</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-lg sm:text-xl">创建新节点</DialogTitle>
+            <DialogDescription className="text-sm">
               为当前 Mosaic 实例创建一个新的节点
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="node_id">节点 ID *</Label>
+              <Label htmlFor="node_id" className="text-sm">节点 ID *</Label>
               <Input
                 id="node_id"
                 placeholder="例如：scheduler_1, email_main"
@@ -483,22 +623,23 @@ export default function NodesPage() {
                   setFormData({ ...formData, node_id: e.target.value })
                 }
                 maxLength={100}
+                className="text-base"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="node_type">节点类型 *</Label>
+              <Label htmlFor="node_type" className="text-sm">节点类型 *</Label>
               <Select
                 value={formData.node_type}
                 onValueChange={(value) =>
                   setFormData({ ...formData, node_type: value as NodeType })
                 }
               >
-                <SelectTrigger id="node_type">
+                <SelectTrigger id="node_type" className="text-base">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {Object.entries(NODE_TYPE_LABELS).map(([type, label]) => (
-                    <SelectItem key={type} value={type}>
+                    <SelectItem key={type} value={type} className="text-base">
                       {label}
                     </SelectItem>
                   ))}
@@ -506,7 +647,7 @@ export default function NodesPage() {
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="description">描述（可选）</Label>
+              <Label htmlFor="description" className="text-sm">描述（可选）</Label>
               <Textarea
                 id="description"
                 placeholder="描述这个节点的用途..."
@@ -516,6 +657,7 @@ export default function NodesPage() {
                 }
                 maxLength={1000}
                 rows={3}
+                className="text-base resize-none"
               />
             </div>
             <div className="grid gap-2">
@@ -529,7 +671,7 @@ export default function NodesPage() {
                   }
                   className="h-4 w-4 rounded border-gray-300"
                 />
-                <Label htmlFor="auto_start" className="font-normal cursor-pointer">
+                <Label htmlFor="auto_start" className="text-sm font-normal cursor-pointer">
                   自动启动
                 </Label>
               </div>
@@ -547,17 +689,19 @@ export default function NodesPage() {
               />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
             <Button
               variant="outline"
               onClick={() => setCreateDialogOpen(false)}
               disabled={creating}
+              className="w-full sm:w-auto"
             >
               取消
             </Button>
             <Button
               onClick={handleCreateNode}
               disabled={creating || !formData.node_id.trim()}
+              className="w-full sm:w-auto"
             >
               {creating ? (
                 <>
@@ -574,34 +718,34 @@ export default function NodesPage() {
 
       {/* Edit Node Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-scroll">
+        <DialogContent className="sm:max-w-2xl max-w-[calc(100vw-2rem)]">
           <DialogHeader>
-            <DialogTitle>编辑节点</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-lg sm:text-xl">编辑节点</DialogTitle>
+            <DialogDescription className="text-sm break-words">
               更新节点 {editingNode?.node_id} 的配置信息
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="edit_node_id">节点 ID</Label>
+              <Label htmlFor="edit_node_id" className="text-sm">节点 ID</Label>
               <Input
                 id="edit_node_id"
                 value={editingNode?.node_id || ""}
                 disabled
-                className="bg-muted"
+                className="bg-muted text-base"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit_node_type">节点类型</Label>
+              <Label htmlFor="edit_node_type" className="text-sm">节点类型</Label>
               <Input
                 id="edit_node_type"
                 value={editingNode ? NODE_TYPE_LABELS[editingNode.node_type] : ""}
                 disabled
-                className="bg-muted"
+                className="bg-muted text-base"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit_description">描述（可选）</Label>
+              <Label htmlFor="edit_description" className="text-sm">描述（可选）</Label>
               <Textarea
                 id="edit_description"
                 placeholder="描述这个节点的用途..."
@@ -611,6 +755,7 @@ export default function NodesPage() {
                 }
                 maxLength={1000}
                 rows={3}
+                className="text-base resize-none"
               />
             </div>
             <div className="grid gap-2">
@@ -624,7 +769,7 @@ export default function NodesPage() {
                   }
                   className="h-4 w-4 rounded border-gray-300"
                 />
-                <Label htmlFor="edit_auto_start" className="font-normal cursor-pointer">
+                <Label htmlFor="edit_auto_start" className="text-sm font-normal cursor-pointer">
                   自动启动
                 </Label>
               </div>
@@ -642,15 +787,16 @@ export default function NodesPage() {
               />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
             <Button
               variant="outline"
               onClick={() => setEditDialogOpen(false)}
               disabled={updating}
+              className="w-full sm:w-auto"
             >
               取消
             </Button>
-            <Button onClick={handleUpdateNode} disabled={updating}>
+            <Button onClick={handleUpdateNode} disabled={updating} className="w-full sm:w-auto">
               {updating ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -666,18 +812,19 @@ export default function NodesPage() {
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[425px] max-w-[calc(100vw-2rem)]">
           <DialogHeader>
-            <DialogTitle>确认删除节点？</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-lg sm:text-xl">确认删除节点？</DialogTitle>
+            <DialogDescription className="text-sm break-words">
               此操作将删除节点 <span className="font-semibold text-foreground">{deletingNode?.node_id}</span>。此操作不可撤销。
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
             <Button
               variant="outline"
               onClick={() => setDeleteDialogOpen(false)}
               disabled={deleting}
+              className="w-full sm:w-auto"
             >
               取消
             </Button>
@@ -685,6 +832,7 @@ export default function NodesPage() {
               variant="destructive"
               onClick={handleDeleteNode}
               disabled={deleting}
+              className="w-full sm:w-auto"
             >
               {deleting ? (
                 <>
@@ -701,23 +849,24 @@ export default function NodesPage() {
 
       {/* Stop Confirmation Dialog */}
       <Dialog open={stopDialogOpen} onOpenChange={setStopDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[425px] max-w-[calc(100vw-2rem)]">
           <DialogHeader>
-            <DialogTitle>确认停止节点？</DialogTitle>
+            <DialogTitle className="text-lg sm:text-xl">确认停止节点？</DialogTitle>
           </DialogHeader>
           <div className="space-y-2 py-4">
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground break-words">
               确定要停止节点 <span className="font-semibold text-foreground">{stoppingNode?.node_id}</span> 吗？
             </p>
             <p className="text-sm text-amber-600 font-medium">
               ⚠️ 警告：该节点下的所有活动会话将被无条件关闭。
             </p>
           </div>
-          <DialogFooter>
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
             <Button
               variant="outline"
               onClick={() => setStopDialogOpen(false)}
               disabled={stopping}
+              className="w-full sm:w-auto"
             >
               取消
             </Button>
@@ -725,6 +874,7 @@ export default function NodesPage() {
               variant="destructive"
               onClick={handleStopNode}
               disabled={stopping}
+              className="w-full sm:w-auto"
             >
               {stopping ? (
                 <>

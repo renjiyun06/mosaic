@@ -1,7 +1,11 @@
 @import "tailwindcss";
 
 @layer base {
-  :root {
+  /* ========================================
+     THEME 1: Default (Enterprise Blue)
+     ======================================== */
+  :root,
+  [data-theme="default"] {
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
@@ -22,6 +26,430 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 221.2 83.2% 53.3%;
     --radius: 0.5rem;
+
+    /* Status colors */
+    --status-running: 142 71% 45%;
+    --status-idle: 199 89% 48%;
+    --status-error: 0 84% 60%;
+  }
+
+  /* ========================================
+     THEME 2: Cyberpunk (Neon Glow)
+     ======================================== */
+  [data-theme="cyberpunk"] {
+    /* Background layers */
+    --background: 222 47% 5%;        /* #0A0E27 Deep space blue */
+    --foreground: 210 40% 98%;       /* #F1F5F9 Light text */
+
+    /* Cards */
+    --card: 222 47% 11%;             /* #141827 Elevated dark */
+    --card-foreground: 210 40% 98%;
+
+    /* Popover */
+    --popover: 222 47% 8%;
+    --popover-foreground: 210 40% 98%;
+
+    /* Primary - Neon Cyan */
+    --primary: 180 100% 50%;         /* #00FFFF Cyan */
+    --primary-foreground: 222 47% 5%;
+
+    /* Secondary - Deep slate */
+    --secondary: 215 28% 17%;        /* #1E293B */
+    --secondary-foreground: 210 40% 98%;
+
+    /* Muted */
+    --muted: 215 28% 17%;
+    --muted-foreground: 215 20% 65%; /* #94A3B8 */
+
+    /* Accent - Neon Magenta */
+    --accent: 300 100% 50%;          /* #FF00FF Magenta */
+    --accent-foreground: 210 40% 98%;
+
+    /* Destructive */
+    --destructive: 340 100% 50%;     /* #FF006E Hot pink */
+    --destructive-foreground: 210 40% 98%;
+
+    /* Borders */
+    --border: 215 28% 22%;           /* #334155 */
+    --input: 215 28% 22%;
+    --ring: 180 100% 50%;
+
+    --radius: 0.5rem;
+
+    /* Status colors - Neon */
+    --status-running: 141 100% 50%;  /* #00FF41 Matrix green */
+    --status-idle: 180 100% 50%;     /* #00FFFF Cyan */
+    --status-error: 340 100% 50%;    /* #FF006E Magenta */
+  }
+
+  /* ========================================
+     THEME 3: Glassmorphism (Frosted Glass)
+     ======================================== */
+  [data-theme="glassmorphism"] {
+    /* Background - Gradient */
+    --background: 222 47% 8%;        /* Dark base */
+    --foreground: 210 40% 98%;
+
+    /* Glass cards - semi-transparent */
+    --card: 0 0% 100% / 0.05;        /* White 5% opacity */
+    --card-foreground: 210 40% 98%;
+
+    --popover: 0 0% 100% / 0.08;
+    --popover-foreground: 210 40% 98%;
+
+    /* Primary - Vibrant blue */
+    --primary: 217 91% 60%;          /* #3B82F6 */
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 0 0% 100% / 0.1;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 0 0% 100% / 0.05;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 267 84% 81%;           /* #C4B5FD Purple */
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 0 0% 100% / 0.1;
+    --input: 0 0% 100% / 0.1;
+    --ring: 217 91% 60%;
+
+    --radius: 0.75rem;
+
+    --status-running: 142 71% 45%;
+    --status-idle: 199 89% 48%;
+    --status-error: 0 84% 60%;
+  }
+
+  /* ========================================
+     THEME 4: Terminal (Matrix Hacker)
+     ======================================== */
+  [data-theme="terminal"] {
+    /* Pure black background */
+    --background: 0 0% 0%;           /* #000000 */
+    --foreground: 141 100% 50%;      /* #00FF41 Matrix green */
+
+    --card: 0 0% 5%;                 /* #0D0D0D */
+    --card-foreground: 141 100% 50%;
+
+    --popover: 0 0% 3%;
+    --popover-foreground: 141 100% 50%;
+
+    /* Primary - Matrix green */
+    --primary: 141 100% 50%;         /* #00FF41 */
+    --primary-foreground: 0 0% 0%;
+
+    --secondary: 0 0% 10%;           /* #1A1A1A */
+    --secondary-foreground: 141 100% 50%;
+
+    --muted: 0 0% 8%;
+    --muted-foreground: 141 50% 35%; /* Darker green */
+
+    /* Accent - Cyan */
+    --accent: 180 100% 50%;          /* #00FFFF */
+    --accent-foreground: 0 0% 0%;
+
+    --destructive: 0 100% 50%;       /* #FF0000 Pure red */
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 141 100% 20%;          /* Dark green */
+    --input: 141 100% 20%;
+    --ring: 141 100% 50%;
+
+    --radius: 0.25rem;
+
+    --status-running: 141 100% 50%;  /* Green */
+    --status-idle: 180 100% 50%;     /* Cyan */
+    --status-error: 0 100% 50%;      /* Red */
+  }
+
+  /* ========================================
+     THEME 5: Minimal (Clean & Simple)
+     ======================================== */
+  [data-theme="minimal"] {
+    --background: 0 0% 100%;         /* Pure white #FFFFFF - clean canvas */
+    --foreground: 0 0% 9%;           /* #171717 Near-black for less harsh contrast */
+
+    --card: 0 0% 100%;               /* Pure white */
+    --card-foreground: 0 0% 9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 9%;
+
+    /* Primary - Pure black for maximum contrast */
+    --primary: 0 0% 9%;              /* #171717 Near-black instead of pure black */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 96%;           /* #F5F5F5 Lighter gray for cleaner feel */
+    --secondary-foreground: 0 0% 9%;
+
+    --muted: 0 0% 98%;               /* #FAFAFA Brighter muted background */
+    --muted-foreground: 0 0% 46%;    /* #757575 Lighter gray for better readability */
+
+    --accent: 0 0% 9%;               /* #171717 Near-black for active states */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;        /* #DC2626 Tailwind red-600 - softer red */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 90%;              /* #E5E5E5 Lighter border for cleaner separation */
+    --input: 0 0% 90%;
+    --ring: 0 0% 9%;                 /* Near-black ring */
+
+    --radius: 0.375rem;              /* Slightly rounder for modern minimal */
+
+    --status-running: 142 71% 45%;   /* #22C55E Tailwind green-500 - fresh and modern */
+    --status-idle: 0 0% 64%;         /* #A3A3A3 Lighter neutral gray */
+    --status-error: 0 72% 51%;       /* #DC2626 Tailwind red-600 - softer red */
+  }
+
+  /* ========================================
+     THEME 6: Bright Blue (Fresh & Energetic)
+     ======================================== */
+  [data-theme="bright-blue"] {
+    --background: 216 100% 99%;      /* #FAFBFF Very light blue-white */
+    --foreground: 222 47% 11%;       /* #141827 Deep blue-black */
+
+    --card: 0 0% 100%;               /* Pure white */
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Primary - Bright Blue */
+    --primary: 217 91% 60%;          /* #3B82F6 Bright blue */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 214 95% 97%;        /* #EFF6FF Very light blue */
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 214 95% 97%;            /* #EFF6FF */
+    --muted-foreground: 215 16% 47%; /* #64748B Slate */
+
+    /* Accent - Orange */
+    --accent: 24 95% 53%;            /* #F97316 Orange for contrast */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;        /* #EF4444 Red */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 32% 91%;           /* #DBEAFE Light blue border */
+    --input: 214 32% 91%;
+    --ring: 217 91% 60%;
+
+    --radius: 0.5rem;
+
+    --status-running: 142 71% 45%;   /* #22C55E Green */
+    --status-idle: 217 91% 60%;      /* #3B82F6 Blue */
+    --status-error: 0 84% 60%;       /* #EF4444 Red */
+  }
+
+  /* ========================================
+     THEME 7: Ocean (Fresh & Natural)
+     ======================================== */
+  [data-theme="ocean"] {
+    --background: 174 100% 98%;      /* #F0FDFA Very light cyan */
+    --foreground: 184 65% 14%;       /* #0E4D52 Deep teal */
+
+    --card: 0 0% 100%;               /* Pure white */
+    --card-foreground: 184 65% 14%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 184 65% 14%;
+
+    /* Primary - Cyan */
+    --primary: 188 94% 43%;          /* #06B6D4 Cyan */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 166 76% 97%;        /* #CCFBF1 Very light teal */
+    --secondary-foreground: 184 65% 14%;
+
+    --muted: 166 76% 97%;            /* #CCFBF1 */
+    --muted-foreground: 183 24% 45%; /* #5E7C81 Muted teal */
+
+    /* Accent - Green */
+    --accent: 160 84% 39%;           /* #10B981 Emerald green */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;        /* #EF4444 Red */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 174 44% 89%;           /* #D1F4ED Light cyan border */
+    --input: 174 44% 89%;
+    --ring: 188 94% 43%;
+
+    --radius: 0.5rem;
+
+    --status-running: 160 84% 39%;   /* #10B981 Green */
+    --status-idle: 188 94% 43%;      /* #06B6D4 Cyan */
+    --status-error: 0 84% 60%;       /* #EF4444 Red */
+  }
+
+  /* ========================================
+     THEME 8: Sunset (Warm & Inviting)
+     ======================================== */
+  [data-theme="sunset"] {
+    --background: 40 100% 98%;       /* #FFFBF5 Warm white */
+    --foreground: 24 45% 16%;        /* #3B2815 Warm dark brown */
+
+    --card: 0 0% 100%;               /* Pure white */
+    --card-foreground: 24 45% 16%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 24 45% 16%;
+
+    /* Primary - Amber */
+    --primary: 38 92% 50%;           /* #F59E0B Amber */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 48 100% 96%;        /* #FEF3C7 Very light amber */
+    --secondary-foreground: 24 45% 16%;
+
+    --muted: 48 100% 96%;            /* #FEF3C7 */
+    --muted-foreground: 30 18% 45%;  /* #6B5C4F Warm gray */
+
+    /* Accent - Red */
+    --accent: 0 84% 60%;             /* #EF4444 Red */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;        /* #DC2626 Red */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 43 96% 89%;            /* #FDE68A Light amber border */
+    --input: 43 96% 89%;
+    --ring: 38 92% 50%;
+
+    --radius: 0.5rem;
+
+    --status-running: 142 71% 45%;   /* #22C55E Green */
+    --status-idle: 38 92% 50%;       /* #F59E0B Amber */
+    --status-error: 0 84% 60%;       /* #EF4444 Red */
+  }
+
+  /* ========================================
+     THEME 9: Mint (Cool & Comfortable)
+     ======================================== */
+  [data-theme="mint"] {
+    --background: 138 76% 97%;       /* #F0FDF4 Very light green */
+    --foreground: 152 65% 14%;       /* #0E4D2D Deep green */
+
+    --card: 0 0% 100%;               /* Pure white */
+    --card-foreground: 152 65% 14%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 152 65% 14%;
+
+    /* Primary - Emerald Green */
+    --primary: 160 84% 39%;          /* #10B981 Emerald */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 142 76% 96%;        /* #DCFCE7 Very light green */
+    --secondary-foreground: 152 65% 14%;
+
+    --muted: 142 76% 96%;            /* #DCFCE7 */
+    --muted-foreground: 147 24% 45%; /* #5E816D Muted green */
+
+    /* Accent - Cyan */
+    --accent: 188 94% 43%;           /* #06B6D4 Cyan */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;        /* #EF4444 Red */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 142 52% 89%;           /* #BBFBD1 Light green border */
+    --input: 142 52% 89%;
+    --ring: 160 84% 39%;
+
+    --radius: 0.5rem;
+
+    --status-running: 160 84% 39%;   /* #10B981 Green */
+    --status-idle: 188 94% 43%;      /* #06B6D4 Cyan */
+    --status-error: 0 84% 60%;       /* #EF4444 Red */
+  }
+
+  /* ========================================
+     THEME 10: Lavender (Soft & Elegant)
+     ======================================== */
+  [data-theme="lavender"] {
+    --background: 270 100% 98%;      /* #FAF5FF Very light purple */
+    --foreground: 263 50% 20%;       /* #2D1B4E Deep purple */
+
+    --card: 0 0% 100%;               /* Pure white */
+    --card-foreground: 263 50% 20%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 263 50% 20%;
+
+    /* Primary - Purple */
+    --primary: 258 90% 66%;          /* #8B5CF6 Purple */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 270 100% 98%;       /* #F3E8FF Very light purple */
+    --secondary-foreground: 263 50% 20%;
+
+    --muted: 270 100% 98%;           /* #F3E8FF */
+    --muted-foreground: 252 15% 48%; /* #72728E Muted purple-gray */
+
+    /* Accent - Pink */
+    --accent: 330 81% 60%;           /* #EC4899 Pink */
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;        /* #EF4444 Red */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 270 67% 92%;           /* #E9D5FF Light purple border */
+    --input: 270 67% 92%;
+    --ring: 258 90% 66%;
+
+    --radius: 0.5rem;
+
+    --status-running: 142 71% 45%;   /* #22C55E Green */
+    --status-idle: 258 90% 66%;      /* #8B5CF6 Purple */
+    --status-error: 0 84% 60%;       /* #EF4444 Red */
+  }
+
+  /* ========================================
+     THEME 11: VS Code Light (Modern Flat Tech)
+     ======================================== */
+  [data-theme="vscode-light"] {
+    --background: 0 0% 98%;          /* #FAFAFA Very light gray - modern flat */
+    --foreground: 0 0% 13%;          /* #212121 Dark gray text */
+
+    --card: 0 0% 100%;               /* #FFFFFF White card on light gray */
+    --card-foreground: 0 0% 13%;
+
+    --popover: 0 0% 100%;            /* #FFFFFF */
+    --popover-foreground: 0 0% 13%;
+
+    /* Primary - Tech Cyan (科技青色) */
+    --primary: 187 100% 42%;         /* #00BCD4 Cyan - tech feel */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 96%;           /* #F5F5F5 Flat gray background */
+    --secondary-foreground: 0 0% 13%;
+
+    --muted: 0 0% 96%;               /* #F5F5F5 */
+    --muted-foreground: 0 0% 38%;    /* #616161 Medium gray */
+
+    /* Accent - Light cyan for selection */
+    --accent: 187 100% 94%;          /* #E0F7FA Very light cyan */
+    --accent-foreground: 0 0% 13%;
+
+    --destructive: 4 90% 58%;        /* #F44336 Material red */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 88%;              /* #E0E0E0 Flat border */
+    --input: 0 0% 88%;
+    --ring: 187 100% 42%;            /* #00BCD4 Cyan ring */
+
+    --radius: 0rem;                  /* No radius - completely flat */
+
+    --status-running: 122 39% 49%;   /* #4CAF50 Material green */
+    --status-idle: 0 0% 62%;         /* #9E9E9E Gray */
+    --status-error: 4 90% 58%;       /* #F44336 Material red */
   }
 }
 
@@ -59,5 +487,909 @@
   body {
     @apply bg-background text-foreground;
     height: 100%;
+  }
+}
+
+/* ========================================
+   THEME-SPECIFIC EFFECTS
+   ======================================== */
+
+/* Cyberpunk: Neon glow effects */
+[data-theme="cyberpunk"] {
+  .neon-text {
+    text-shadow:
+      0 0 7px hsl(var(--primary) / 0.8),
+      0 0 10px hsl(var(--primary) / 0.6),
+      0 0 21px hsl(var(--primary) / 0.4);
+  }
+
+  .neon-border {
+    box-shadow:
+      0 0 5px hsl(var(--primary) / 0.5),
+      inset 0 0 5px hsl(var(--primary) / 0.2);
+  }
+
+  /* Pulsing animation for status indicators */
+  @keyframes neon-pulse {
+    0%, 100% {
+      opacity: 1;
+      filter: drop-shadow(0 0 8px hsl(var(--status-running)));
+    }
+    50% {
+      opacity: 0.8;
+      filter: drop-shadow(0 0 12px hsl(var(--status-running)));
+    }
+  }
+
+  .status-pulse {
+    animation: neon-pulse 2s ease-in-out infinite;
+  }
+}
+
+/* Glassmorphism: Frosted glass blur */
+[data-theme="glassmorphism"] {
+  .glass-card {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(16px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow:
+      0 8px 32px 0 rgba(0, 0, 0, 0.37),
+      inset 0 0 20px rgba(255, 255, 255, 0.05);
+  }
+
+  .glass-strong {
+    backdrop-filter: blur(20px) saturate(200%);
+  }
+}
+
+/* Terminal: Scanline effect */
+[data-theme="terminal"] {
+  .terminal-scanline {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .terminal-scanline::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(to bottom,
+      transparent,
+      hsl(var(--primary) / 0.6),
+      transparent
+    );
+    animation: scan 4s linear infinite;
+    pointer-events: none;
+    z-index: 50;
+  }
+
+  @keyframes scan {
+    from { transform: translateY(-100%); }
+    to { transform: translateY(3000%); }
+  }
+
+  /* CRT flicker */
+  @keyframes flicker {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.97; }
+  }
+
+  body {
+    animation: flicker 0.15s infinite;
+  }
+}
+
+/* Reduced motion support for all themes */
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="cyberpunk"] .status-pulse,
+  [data-theme="terminal"] .terminal-scanline::before,
+  [data-theme="terminal"] body {
+    animation: none !important;
+  }
+}
+
+/* ========================================
+   VS CODE LIGHT: FLAT DESIGN (NO RADIUS)
+   ======================================== */
+
+/* Force all elements to have no border radius in VS Code theme */
+[data-theme="vscode-light"] button,
+[data-theme="vscode-light"] input,
+[data-theme="vscode-light"] textarea,
+[data-theme="vscode-light"] select,
+[data-theme="vscode-light"] [role="dialog"],
+[data-theme="vscode-light"] [role="menu"],
+[data-theme="vscode-light"] [role="menuitem"],
+[data-theme="vscode-light"] [class*="card"],
+[data-theme="vscode-light"] [class*="button"],
+[data-theme="vscode-light"] [class*="input"],
+[data-theme="vscode-light"] [class*="badge"],
+[data-theme="vscode-light"] [class*="dialog"],
+[data-theme="vscode-light"] [class*="popover"],
+[data-theme="vscode-light"] [class*="dropdown"],
+[data-theme="vscode-light"] [class*="sheet"],
+[data-theme="vscode-light"] [class*="tooltip"],
+[data-theme="vscode-light"] [class*="alert"] {
+  border-radius: 0 !important;
+}
+
+/* Override Tailwind rounded utility classes */
+[data-theme="vscode-light"] .rounded,
+[data-theme="vscode-light"] .rounded-sm,
+[data-theme="vscode-light"] .rounded-md,
+[data-theme="vscode-light"] .rounded-lg,
+[data-theme="vscode-light"] .rounded-xl,
+[data-theme="vscode-light"] .rounded-2xl,
+[data-theme="vscode-light"] .rounded-3xl,
+[data-theme="vscode-light"] .rounded-full {
+  border-radius: 0 !important;
+}
+
+/* ========================================
+   ICON THEMING SYSTEM
+   ======================================== */
+
+/* Base icon classes - use these on all icons */
+.icon-primary {
+  color: hsl(var(--primary));
+  transition: color 200ms ease, filter 200ms ease;
+}
+
+.icon-secondary {
+  color: hsl(var(--muted-foreground));
+  transition: color 200ms ease, filter 200ms ease;
+}
+
+.icon-foreground {
+  color: hsl(var(--foreground));
+  transition: color 200ms ease, filter 200ms ease;
+}
+
+.icon-destructive {
+  color: hsl(var(--destructive));
+  transition: color 200ms ease, filter 200ms ease;
+}
+
+.icon-success {
+  color: hsl(var(--status-running));
+  transition: color 200ms ease, filter 200ms ease;
+}
+
+/* Default theme - clean enterprise style */
+[data-theme="default"] .icon-primary {
+  color: hsl(var(--primary));
+}
+
+[data-theme="default"] .icon-primary:hover {
+  color: hsl(var(--primary) / 0.8);
+}
+
+/* Cyberpunk theme - neon glow icons */
+[data-theme="cyberpunk"] .icon-primary {
+  color: hsl(var(--primary));
+  filter: drop-shadow(0 0 4px hsl(var(--primary) / 0.7))
+          drop-shadow(0 0 8px hsl(var(--primary) / 0.4));
+}
+
+[data-theme="cyberpunk"] .icon-primary:hover {
+  filter: drop-shadow(0 0 6px hsl(var(--primary) / 0.9))
+          drop-shadow(0 0 12px hsl(var(--primary) / 0.6));
+}
+
+[data-theme="cyberpunk"] .icon-secondary {
+  color: hsl(var(--muted-foreground));
+  filter: drop-shadow(0 0 2px hsl(var(--muted-foreground) / 0.5));
+}
+
+[data-theme="cyberpunk"] .icon-destructive {
+  color: hsl(var(--destructive));
+  filter: drop-shadow(0 0 4px hsl(var(--destructive) / 0.7))
+          drop-shadow(0 0 8px hsl(var(--destructive) / 0.4));
+}
+
+[data-theme="cyberpunk"] .icon-success {
+  color: hsl(var(--status-running));
+  filter: drop-shadow(0 0 4px hsl(var(--status-running) / 0.7))
+          drop-shadow(0 0 8px hsl(var(--status-running) / 0.4));
+}
+
+/* Cyberpunk pulsing icon animation */
+[data-theme="cyberpunk"] .icon-pulse {
+  animation: icon-neon-pulse 2s ease-in-out infinite;
+}
+
+@keyframes icon-neon-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 4px hsl(var(--primary) / 0.7))
+            drop-shadow(0 0 8px hsl(var(--primary) / 0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 6px hsl(var(--primary) / 0.9))
+            drop-shadow(0 0 16px hsl(var(--primary) / 0.6));
+  }
+}
+
+/* Glassmorphism theme - soft semi-transparent icons */
+[data-theme="glassmorphism"] .icon-primary {
+  color: hsl(var(--primary));
+  opacity: 0.95;
+}
+
+[data-theme="glassmorphism"] .icon-primary:hover {
+  opacity: 1;
+  filter: drop-shadow(0 2px 4px hsl(var(--primary) / 0.3));
+}
+
+[data-theme="glassmorphism"] .icon-secondary {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.85;
+}
+
+[data-theme="glassmorphism"] .icon-secondary:hover {
+  opacity: 1;
+}
+
+/* Terminal theme - Matrix green glow */
+[data-theme="terminal"] .icon-primary {
+  color: #00FF41; /* Matrix green */
+  filter: drop-shadow(0 0 3px #00FF41)
+          drop-shadow(0 0 6px rgba(0, 255, 65, 0.5));
+}
+
+[data-theme="terminal"] .icon-primary:hover {
+  filter: drop-shadow(0 0 5px #00FF41)
+          drop-shadow(0 0 10px rgba(0, 255, 65, 0.7));
+}
+
+[data-theme="terminal"] .icon-secondary {
+  color: rgba(0, 255, 65, 0.6);
+  filter: drop-shadow(0 0 2px rgba(0, 255, 65, 0.4));
+}
+
+[data-theme="terminal"] .icon-destructive {
+  color: #FF0000;
+  filter: drop-shadow(0 0 3px #FF0000)
+          drop-shadow(0 0 6px rgba(255, 0, 0, 0.5));
+}
+
+[data-theme="terminal"] .icon-success {
+  color: #00FF41;
+  filter: drop-shadow(0 0 3px #00FF41)
+          drop-shadow(0 0 6px rgba(0, 255, 65, 0.5));
+}
+
+/* Terminal blinking cursor icon */
+[data-theme="terminal"] .icon-blink {
+  animation: terminal-blink 1.2s step-end infinite;
+}
+
+@keyframes terminal-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* Minimal theme - clean black/white with better contrast */
+[data-theme="minimal"] .icon-primary {
+  color: #000000;
+  font-weight: 600; /* Make active icons slightly bolder for visibility */
+}
+
+[data-theme="minimal"] .icon-primary:hover {
+  color: #000000;
+  opacity: 0.8;
+}
+
+[data-theme="minimal"] .icon-secondary {
+  color: #404040; /* Darker gray (#404040) instead of (#666666) for better visibility */
+}
+
+[data-theme="minimal"] .icon-secondary:hover {
+  color: #1a1a1a;
+}
+
+[data-theme="minimal"] .icon-foreground {
+  color: #FFFFFF; /* White for icons on dark backgrounds (selected state) */
+}
+
+[data-theme="minimal"] .icon-foreground:hover {
+  color: #FFFFFF;
+  opacity: 0.9;
+}
+
+[data-theme="minimal"] .icon-destructive {
+  color: #DC2626; /* Tailwind red-600 - softer red */
+}
+
+[data-theme="minimal"] .icon-success {
+  color: #22C55E; /* Tailwind green-500 - fresh and vibrant green */
+}
+
+/* Bright Blue theme - clean blue icons with smooth transitions */
+[data-theme="bright-blue"] .icon-primary {
+  color: #3B82F6; /* Bright blue */
+}
+
+[data-theme="bright-blue"] .icon-primary:hover {
+  color: #2563EB; /* Darker blue on hover */
+}
+
+[data-theme="bright-blue"] .icon-secondary {
+  color: #64748B; /* Slate gray */
+}
+
+[data-theme="bright-blue"] .icon-secondary:hover {
+  color: #475569; /* Darker slate on hover */
+}
+
+[data-theme="bright-blue"] .icon-foreground {
+  color: #FFFFFF; /* White for selected states */
+}
+
+[data-theme="bright-blue"] .icon-destructive {
+  color: #EF4444; /* Red */
+}
+
+[data-theme="bright-blue"] .icon-success {
+  color: #22C55E; /* Green */
+}
+
+/* Ocean theme - cyan-green fresh icons */
+[data-theme="ocean"] .icon-primary {
+  color: #06B6D4; /* Cyan */
+}
+
+[data-theme="ocean"] .icon-primary:hover {
+  color: #0891B2; /* Darker cyan on hover */
+}
+
+[data-theme="ocean"] .icon-secondary {
+  color: #5E7C81; /* Muted teal */
+}
+
+[data-theme="ocean"] .icon-secondary:hover {
+  color: #4A6569; /* Darker teal on hover */
+}
+
+[data-theme="ocean"] .icon-foreground {
+  color: #FFFFFF; /* White for selected states */
+}
+
+[data-theme="ocean"] .icon-destructive {
+  color: #EF4444; /* Red */
+}
+
+[data-theme="ocean"] .icon-success {
+  color: #10B981; /* Emerald green */
+}
+
+/* Sunset theme - warm amber-orange icons */
+[data-theme="sunset"] .icon-primary {
+  color: #F59E0B; /* Amber */
+}
+
+[data-theme="sunset"] .icon-primary:hover {
+  color: #D97706; /* Darker amber on hover */
+}
+
+[data-theme="sunset"] .icon-secondary {
+  color: #6B5C4F; /* Warm gray */
+}
+
+[data-theme="sunset"] .icon-secondary:hover {
+  color: #54483D; /* Darker warm gray on hover */
+}
+
+[data-theme="sunset"] .icon-foreground {
+  color: #FFFFFF; /* White for selected states */
+}
+
+[data-theme="sunset"] .icon-destructive {
+  color: #EF4444; /* Red */
+}
+
+[data-theme="sunset"] .icon-success {
+  color: #22C55E; /* Green */
+}
+
+/* Mint theme - fresh emerald green icons */
+[data-theme="mint"] .icon-primary {
+  color: #10B981; /* Emerald */
+}
+
+[data-theme="mint"] .icon-primary:hover {
+  color: #059669; /* Darker emerald on hover */
+}
+
+[data-theme="mint"] .icon-secondary {
+  color: #5E816D; /* Muted green */
+}
+
+[data-theme="mint"] .icon-secondary:hover {
+  color: #4A6657; /* Darker muted green on hover */
+}
+
+[data-theme="mint"] .icon-foreground {
+  color: #FFFFFF; /* White for selected states */
+}
+
+[data-theme="mint"] .icon-destructive {
+  color: #EF4444; /* Red */
+}
+
+[data-theme="mint"] .icon-success {
+  color: #10B981; /* Emerald green (same as primary) */
+}
+
+/* Lavender theme - soft purple-pink icons */
+[data-theme="lavender"] .icon-primary {
+  color: #8B5CF6; /* Purple */
+}
+
+[data-theme="lavender"] .icon-primary:hover {
+  color: #7C3AED; /* Darker purple on hover */
+}
+
+[data-theme="lavender"] .icon-secondary {
+  color: #72728E; /* Muted purple-gray */
+}
+
+[data-theme="lavender"] .icon-secondary:hover {
+  color: #5A5A71; /* Darker purple-gray on hover */
+}
+
+[data-theme="lavender"] .icon-foreground {
+  color: #FFFFFF; /* White for selected states */
+}
+
+[data-theme="lavender"] .icon-destructive {
+  color: #EF4444; /* Red */
+}
+
+[data-theme="lavender"] .icon-success {
+  color: #22C55E; /* Green */
+}
+
+/* VS Code Light theme - tech cyan icons */
+[data-theme="vscode-light"] .icon-primary {
+  color: #00BCD4; /* Tech Cyan - futuristic feel */
+}
+
+[data-theme="vscode-light"] .icon-primary:hover {
+  color: #0097A7; /* Darker cyan on hover */
+}
+
+[data-theme="vscode-light"] .icon-secondary {
+  color: #616161; /* Material gray */
+}
+
+[data-theme="vscode-light"] .icon-secondary:hover {
+  color: #424242; /* Darker gray on hover */
+}
+
+[data-theme="vscode-light"] .icon-foreground {
+  color: #FFFFFF; /* White for selected states */
+}
+
+[data-theme="vscode-light"] .icon-destructive {
+  color: #F44336; /* Material red */
+}
+
+[data-theme="vscode-light"] .icon-success {
+  color: #4CAF50; /* Material green */
+}
+
+/* Icon size utilities */
+.icon-sm {
+  width: 16px;
+  height: 16px;
+}
+
+.icon-md {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-lg {
+  width: 24px;
+  height: 24px;
+}
+
+.icon-xl {
+  width: 32px;
+  height: 32px;
+}
+
+/* Mobile-friendly ReactFlow styles */
+@layer utilities {
+  .touchdevice-flow {
+    touch-action: none;
+  }
+
+  /* Improve touch targets for ReactFlow controls on mobile */
+  @media (max-width: 640px) {
+    .react-flow__controls button {
+      width: 32px !important;
+      height: 32px !important;
+    }
+
+    .react-flow__controls button svg {
+      max-width: 16px !important;
+      max-height: 16px !important;
+    }
+  }
+
+  /* Ensure ReactFlow pane is scrollable on mobile */
+  .react-flow__pane {
+    cursor: grab;
+  }
+
+  .react-flow__pane:active {
+    cursor: grabbing;
+  }
+
+  /* Tldraw custom styles for geometry canvas */
+
+  /* Hide tldraw watermark */
+  .tl-watermark_SEE-LICENSE {
+    display: none !important;
+  }
+
+  /* Enable pointer events for GeoGebra shapes inside tldraw */
+  .tl-shape .tl-html-container {
+    pointer-events: auto !important;
+  }
+
+  /* Ensure tldraw canvas fills container */
+  .tldraw {
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  /* ========================================
+     MARKDOWN CONTENT STYLES
+     ======================================== */
+
+  /* Markdown container */
+  .markdown-content {
+    @apply text-sm leading-relaxed;
+  }
+
+  /* Code blocks */
+  .markdown-content pre {
+    @apply my-2 overflow-x-auto rounded-md px-3 py-3 bg-muted/50;
+    max-width: 100%;
+    position: relative;
+  }
+
+  /* Code blocks with language labels need more top padding */
+  .markdown-content pre.pt-8 {
+    padding-top: 2rem !important; /* 32px to ensure language label doesn't overlap */
+  }
+
+  .markdown-content pre code {
+    @apply text-xs font-mono;
+    background: transparent !important;
+    padding: 0 !important;
+    display: block;
+  }
+
+  /* Inline code with MAXIMUM no-wrap enforcement */
+  .inline-code-no-wrap,
+  .markdown-content code:not(pre code) {
+    @apply bg-muted px-1.5 py-0.5 rounded text-xs font-mono;
+    /* Ultimate no-wrap solution */
+    display: inline !important;
+    white-space: pre !important; /* pre is stronger than nowrap */
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
+    word-wrap: normal !important;
+    hyphens: none !important;
+    text-wrap: nowrap !important;
+    flex-shrink: 0 !important;
+    flex-wrap: nowrap !important;
+    /* Force width to content */
+    min-width: fit-content !important;
+    width: max-content !important;
+    /* Handle overflow */
+    overflow: visible !important;
+    /* Reset any inherited properties */
+    line-height: inherit !important;
+    vertical-align: baseline !important;
+    position: relative !important;
+  }
+
+  /* Parent elements should wrap normally but respect inline code */
+  .markdown-content p,
+  .markdown-content li,
+  .markdown-content td,
+  .markdown-content th {
+    /* Allow text to wrap normally */
+    overflow-wrap: break-word;
+    word-break: normal;
+    /* But force inline-flex to prevent code breaking */
+    display: block;
+  }
+
+  /* Extra protection for inline code within elements */
+  .markdown-content p > code,
+  .markdown-content li > code,
+  .markdown-content td > code,
+  .markdown-content th > code,
+  .markdown-content span > code,
+  .markdown-content div > code {
+    display: inline !important;
+    white-space: pre !important;
+    word-break: keep-all !important;
+  }
+
+  /* If parent is flex, ensure inline code doesn't wrap */
+  .markdown-content .flex code:not(pre code),
+  .markdown-content [class*="flex"] code:not(pre code) {
+    flex-shrink: 0 !important;
+    white-space: pre !important;
+  }
+
+  /* But inline code should never break */
+  .markdown-content p .inline-code-no-wrap,
+  .markdown-content li .inline-code-no-wrap,
+  .markdown-content td .inline-code-no-wrap,
+  .markdown-content th .inline-code-no-wrap {
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+  }
+
+  /* Lists */
+  .markdown-content ul {
+    @apply list-disc list-inside mb-2 space-y-1;
+  }
+
+  .markdown-content ol {
+    @apply list-decimal list-inside mb-2 space-y-1;
+  }
+
+  .markdown-content li {
+    @apply leading-relaxed;
+  }
+
+  /* Headings */
+  .markdown-content h1 {
+    @apply text-2xl font-bold mb-2 mt-4;
+  }
+
+  .markdown-content h2 {
+    @apply text-xl font-bold mb-2 mt-3;
+  }
+
+  .markdown-content h3 {
+    @apply text-lg font-bold mb-2 mt-2;
+  }
+
+  .markdown-content h4 {
+    @apply text-base font-bold mb-2 mt-2;
+  }
+
+  /* Blockquotes */
+  .markdown-content blockquote {
+    @apply border-l-4 border-primary pl-4 italic my-2;
+  }
+
+  /* Tables */
+  .markdown-content table {
+    @apply min-w-full border border-border my-2;
+  }
+
+  .markdown-content th {
+    @apply border border-border px-3 py-2 bg-muted font-semibold text-left;
+  }
+
+  .markdown-content td {
+    @apply border border-border px-3 py-2;
+  }
+
+  /* Links */
+  .markdown-content a {
+    @apply text-primary hover:underline;
+  }
+
+  /* Paragraphs */
+  .markdown-content p {
+    @apply mb-2;
+  }
+
+  /* Horizontal rules */
+  .markdown-content hr {
+    @apply my-4 border-border;
+  }
+
+  /* Mobile optimization for code blocks */
+  @media (max-width: 640px) {
+    .markdown-content pre {
+      @apply text-xs;
+      max-width: calc(100vw - 6rem);
+    }
+
+    .markdown-content table {
+      @apply text-xs;
+    }
+  }
+
+  /* Highlight.js code block theme adaptation */
+  .hljs {
+    @apply bg-transparent;
+  }
+
+  /* Theme-specific code block styling */
+  [data-theme="cyberpunk"] .markdown-content pre {
+    @apply border border-primary/30;
+    box-shadow: 0 0 8px hsl(var(--primary) / 0.2);
+  }
+
+  [data-theme="glassmorphism"] .markdown-content pre {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(12px);
+    @apply border border-border/50;
+  }
+
+  [data-theme="terminal"] .markdown-content pre {
+    @apply bg-black/80 border border-primary/50 text-primary;
+  }
+
+  [data-theme="minimal"] .markdown-content pre {
+    @apply border-2 border-foreground/20;
+  }
+
+  /* ========================================
+     CUSTOM SCROLLBAR STYLES
+     ======================================== */
+
+  /* Cyberpunk Scrollbar - Default for main canvas */
+  .cyberpunk-scrollbar {
+    /* Firefox */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(34, 211, 238, 0.4) rgba(15, 23, 42, 0.3);
+  }
+
+  /* Webkit browsers (Chrome, Safari, Edge) */
+  .cyberpunk-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .cyberpunk-scrollbar::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.3);
+    border-radius: 4px;
+  }
+
+  .cyberpunk-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(34, 211, 238, 0.4);
+    border-radius: 4px;
+    transition: all 0.3s ease;
+  }
+
+  .cyberpunk-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(34, 211, 238, 0.6);
+    box-shadow:
+      0 0 8px rgba(34, 211, 238, 0.5),
+      0 0 12px rgba(34, 211, 238, 0.3);
+  }
+
+  .cyberpunk-scrollbar::-webkit-scrollbar-thumb:active {
+    background: rgba(34, 211, 238, 0.8);
+    box-shadow:
+      0 0 12px rgba(34, 211, 238, 0.7),
+      0 0 16px rgba(34, 211, 238, 0.5);
+  }
+
+  /* Thin scrollbar variant for textareas and small containers */
+  .cyberpunk-scrollbar-thin {
+    /* Firefox */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(34, 211, 238, 0.3) rgba(15, 23, 42, 0.2);
+  }
+
+  .cyberpunk-scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .cyberpunk-scrollbar-thin::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.2);
+    border-radius: 3px;
+  }
+
+  .cyberpunk-scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(34, 211, 238, 0.3);
+    border-radius: 3px;
+    transition: all 0.3s ease;
+  }
+
+  .cyberpunk-scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: rgba(34, 211, 238, 0.5);
+    box-shadow:
+      0 0 6px rgba(34, 211, 238, 0.4),
+      0 0 10px rgba(34, 211, 238, 0.2);
+  }
+
+  .cyberpunk-scrollbar-thin::-webkit-scrollbar-thumb:active {
+    background: rgba(34, 211, 238, 0.7);
+    box-shadow:
+      0 0 10px rgba(34, 211, 238, 0.6),
+      0 0 14px rgba(34, 211, 238, 0.4);
+  }
+
+  /* Minimal scrollbar - for cleaner look */
+  .minimal-scrollbar {
+    /* Firefox */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
+  }
+
+  .minimal-scrollbar::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .minimal-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .minimal-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.3);
+    border-radius: 2px;
+    transition: background 0.3s ease;
+  }
+
+  .minimal-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.5);
+  }
+
+  /* Hide scrollbar completely - for inline scrolling without visible scrollbar */
+  .scrollbar-hide {
+    /* Firefox */
+    scrollbar-width: none;
+    /* IE and Edge */
+    -ms-overflow-style: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ========================================
+     MARQUEE ANIMATION - For long text overflow
+     ======================================== */
+
+  /* Marquee keyframes - smooth slide left and back */
+  @keyframes marquee-slide {
+    0%, 10% {
+      transform: translateX(0);
+    }
+    40%, 60% {
+      transform: translateX(calc(-1 * var(--scroll-distance, 500px)));
+    }
+    100% {
+      transform: translateX(0);
+    }
+  }
+
+  /* Marquee container */
+  .marquee-container {
+    position: relative;
+    width: 100%;
+  }
+
+  /* Marquee text - default state */
+  .marquee-text {
+    display: inline-block;
+    transition: filter 0.3s ease;
+  }
+
+  /* Trigger animation on hover - smooth linear slide */
+  .group\/topic:hover .marquee-text {
+    animation: marquee-slide 8s linear infinite;
+    animation-delay: 0.2s;
   }
 }

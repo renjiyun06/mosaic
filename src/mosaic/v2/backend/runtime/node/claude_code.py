@@ -5,11 +5,14 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, TYPE_CHECKING
+import jsonschema
+from jsonschema import ValidationError as JsonSchemaValidationError
 
 from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
     AssistantMessage,
+    SystemMessage,
     ResultMessage,
     TextBlock,
     ThinkingBlock,
@@ -28,7 +31,9 @@ from ...enum import (
     LLMModel,
     EventType,
     MessageRole,
-    MessageType
+    MessageType,
+    RuntimeStatus,
+    Nil
 )
 from ...websocket import UserMessageBroker
 from ...exception import SessionNotFoundError, SessionConflictError
@@ -81,8 +86,14 @@ class ClaudeCodeNode(MosaicNode):
         # Contains {session_id} placeholder to be filled per session
         self._system_prompt_template: Optional[str] = None
 
+        # Coze client - initialized on node startup
+        from ...integrations.coze.client import CozeClient
+        cdp_url = node.config.get('coze_cdp_url', 'http://192.168.1.4:19222')
+        self._coze_client = CozeClient(cdp_url=cdp_url)
+
         logger.info(
-            f"Initialized ClaudeCodeNode: node_id={node.node_id}, path={node_path}"
+            f"Initialized ClaudeCodeNode: node_id={node.node_id}, path={node_path}, "
+            f"coze_cdp_url={cdp_url}"
         )
 
     # ========== Lifecycle Hooks ==========
@@ -241,6 +252,8 @@ class ClaudeCodeNode(MosaicNode):
                 f"Session {session_id} not found in node {self.node.node_id}"
             )
 
+        await session.interrupt()
+
         # Call session cleanup (stops worker, calls _on_close hook)
         await session.close()
 
@@ -269,7 +282,7 @@ class ClaudeCodeNode(MosaicNode):
 
         logger.info(f"Claude Code session closed: session_id={session_id}")
 
-    async def send_message(self, session_id: str, message: str) -> None:
+    async def send_message(self, session_id: str, message: str, context: Optional[Dict[str, Any]] = None) -> None:
         """
         Send a user message to a Claude Code session.
 
@@ -278,6 +291,7 @@ class ClaudeCodeNode(MosaicNode):
         Args:
             session_id: Session identifier
             message: User message content
+            context: Optional context data (e.g., GeoGebra states)
 
         Raises:
             SessionNotFoundError: If session not found
@@ -289,13 +303,101 @@ class ClaudeCodeNode(MosaicNode):
             )
 
         # Delegate to session's process_user_message method
-        await session.process_user_message(message)
+        await session.process_user_message(message, context)
 
         logger.debug(
             f"User message sent to session: session_id={session_id}, "
             f"message_length={len(message)}"
         )
 
+    async def handle_tool_response(self, session_id: str, response_id: str, result: Any) -> None:
+        """
+        Handle tool response from frontend.
+
+        This is called from the API layer (WebSocket) when frontend sends back
+        a response to a tool execution (e.g., GeoGebra command result).
+
+        Args:
+            session_id: Session identifier
+            response_id: Unique identifier matching the pending response
+            result: Response data from frontend
+
+        Raises:
+            SessionNotFoundError: If session not found
+        """
+        session = self._sessions.get(session_id)
+        if not session:
+            raise SessionNotFoundError(
+                f"Session {session_id} not found in node {self.node.node_id}"
+            )
+
+        # Delegate to session's handle_tool_response method
+        await session.handle_tool_response(response_id, result)
+
+        logger.debug(
+            f"Tool response handled: session_id={session_id}, response_id={response_id}"
+        )
+
+    async def execute_programmable_call(
+        self,
+        session_id: str,
+        call_id: str,
+        method: str,
+        instruction: Optional[str],
+        kwargs: Dict[str, Any],
+        return_schema: Optional[Dict[str, Any]],
+        command: 'ProgrammableCallCommand'
+    ):
+        """
+        Execute a programmable call in a Claude Code session.
+
+        This method enables SDK-style programmatic invocation of the agent,
+        allowing external systems to call the node with structured method calls
+        and receive structured responses.
+
+        Args:
+            session_id: Session identifier (must be ACTIVE)
+            call_id: Unique call identifier (UUID) for tracking this specific call
+            method: Semantic method identifier (e.g., "analyze_data", "extract_entities")
+            instruction: Optional detailed task description for complex multi-step tasks
+            kwargs: Keyword arguments for the call (must be JSON-serializable dict)
+            return_schema: Optional JSON Schema Draft 7 for return value validation
+            command: ProgrammableCallCommand instance (for MCP tool to set result)
+
+        Returns:
+            None: This method returns immediately. The MCP tool will set command.future result.
+
+        Raises:
+            SessionNotFoundError: If session not found in this node
+            RuntimeInternalError: If execution fails or validation errors occur
+        """
+        # Get the session from the session map
+        mosaic_session = self._sessions.get(session_id)
+        if not mosaic_session:
+            raise SessionNotFoundError(
+                f"Session {session_id} not found in node {self.node.node_id}"
+            )
+
+        # Delegate to the session's execute_programmable_call method
+        return await mosaic_session.execute_programmable_call(
+            call_id=call_id,
+            method=method,
+            instruction=instruction,
+            kwargs=kwargs,
+            return_schema=return_schema,
+            command=command
+        )
+
+    def get_default_session_config(self) -> Optional[Dict[str, Any]]:
+        return {
+            "mode": self.node.config.get("mode", SessionMode.BACKGROUND),
+            "model": self.node.config.get("model", LLMModel.SONNET),
+            "token_threshold_enabled": self.node.config.get("token_threshold_enabled", False),
+            "token_threshold": self.node.config.get("token_threshold", 30000),
+            "inherit_threshold": self.node.config.get("inherit_threshold", True),
+            "auto_generate_session_topic": self.node.config.get("auto_generate_session_topic", True),
+            "topic_generation_token_threshold": self.node.config.get("topic_generation_token_threshold", 1500)
+        }
 
 class ClaudeCodeSession(MosaicSession):
     """
@@ -338,6 +440,16 @@ class ClaudeCodeSession(MosaicSession):
         config = config or {}
         self.mode = config.get("mode", SessionMode.BACKGROUND)
         self.model = config.get("model", LLMModel.SONNET)
+
+        # Token threshold: force enable for LONG_RUNNING mode
+        if self.mode == SessionMode.LONG_RUNNING:
+            self.token_threshold_enabled = True
+        else:
+            self.token_threshold_enabled = config.get("token_threshold_enabled", False)
+        self.token_threshold = config.get("token_threshold", 30000)
+        self.inherit_threshold = config.get("inherit_threshold", True)
+        self.auto_generate_session_topic = config.get("auto_generate_session_topic", True)
+        self.topic_generation_token_threshold = config.get("topic_generation_token_threshold", 1500)
         self.mcp_servers = config.get("mcp_servers", {})  # Additional MCP servers
 
         # Claude SDK client (initialized in _on_initialize)
@@ -348,6 +460,10 @@ class ClaudeCodeSession(MosaicSession):
         self._total_input_tokens = 0
         self._total_output_tokens = 0
 
+        # Context window usage tracking
+        self._context_usage = 0  # Actual context usage (input + cache tokens)
+        self._context_percentage = 0.0  # Context usage percentage (0-100)
+
         # Session state (in-memory, synced to DB)
         self._message_count = 0
         self._last_activity_at: Optional[datetime] = None
@@ -357,6 +473,23 @@ class ClaudeCodeSession(MosaicSession):
 
         # Message sequence number (starts from 0, incremented for each message)
         self._message_sequence = 0
+
+        # Token threshold notification tracking
+        self._effective_threshold = self.token_threshold  # Dynamic threshold (updates after each notification)
+        self._token_threshold_notified = False  # Notification flag
+
+        # Tool response tracking (for async tool execution)
+        self._pending_responses: Dict[str, asyncio.Future] = {}  # response_id -> Future
+
+        # Programmable call tracking (for SDK programmable calls)
+        self._pending_programmable_calls: Dict[str, 'ProgrammableCallCommand'] = {}  # call_id -> Command
+
+        # Task lifecycle flags (LONG_RUNNING mode only)
+        self._task_started = False  # Whether task has been acknowledged as started
+        self._task_acknowledged = False  # Whether current task has been acknowledged as finished
+
+        # Background monitor task (LONG_RUNNING mode only)
+        self._monitor_task: Optional[asyncio.Task] = None
 
         logger.debug(
             f"Initialized ClaudeCodeSession: session_id={session_id}, "
@@ -411,6 +544,12 @@ class ClaudeCodeSession(MosaicSession):
                 "PreToolUse": [
                     HookMatcher(hooks=[self._pre_tool_use_hook])
                 ],
+                "PostToolUse": [
+                    HookMatcher(hooks=[self._post_tool_use_hook])
+                ],
+                "PreCompact": [
+                    HookMatcher(hooks=[self._pre_compact_hook])
+                ],
             },
             mcp_servers=mcp_servers,
             allowed_tools=["*"],
@@ -449,6 +588,25 @@ class ClaudeCodeSession(MosaicSession):
             }
         })
         logger.info(f"Pushed session_started notification to WebSocket: session_id={self.session_id}")
+
+        # 6. Start background task progress monitor (LONG_RUNNING mode only)
+        if self.mode == SessionMode.LONG_RUNNING:
+            self._monitor_task = asyncio.create_task(self._monitor_task_progress())
+            logger.info(
+                f"Started background task progress monitor: session_id={self.session_id}"
+            )
+
+        # 7. Send self-notification if session_start_notify is enabled (all modes except PROGRAM)
+        if self.mode != SessionMode.PROGRAM and self.node.node.config.get("session_start_notify", False):
+            self.enqueue_event({
+                "event_type": EventType.SYSTEM_MESSAGE,
+                "payload": {
+                    "message": "Session started"
+                }
+            })
+            logger.info(
+                f"Enqueued session_start self-notification: session_id={self.session_id}"
+            )
 
     async def _handle_event(self, event: dict) -> None:
         """
@@ -492,24 +650,63 @@ class ClaudeCodeSession(MosaicSession):
             # _should_close_after_event will handle the close decision
             return
 
-        # 1. Format event to message string
-        message = self._format_event_for_claude(event)
+        # Special handling for PROGRAMMABLE_CALL_EVENT (internal event)
+        if event_type == EventType.PROGRAMMABLE_CALL_EVENT:
+            logger.info(
+                f"Received programmable_call event: session_id={self.session_id}"
+            )
+            # Format the programmable call as a structured message to Claude
+            # This event will be processed like a normal event (sent to Claude)
+            # The agent will process it and call the programmable_return MCP tool
 
-        # 2. Determine message role and type based on event type
+        # LONG_RUNNING mode: Restart Claude client on self-referencing message
+        if self.mode == SessionMode.LONG_RUNNING:
+            source_node_id = event.get('source_node_id')
+            source_session_id = event.get('source_session_id')
+
+            if (source_node_id == self.node.node.node_id and
+                source_session_id == self.session_id):
+                logger.info(
+                    f"LONG_RUNNING session detected self-referencing message, "
+                    f"restarting Claude client to clear context: session_id={self.session_id}"
+                )
+
+                # Restart Claude client: disconnect old client and create new one
+                await self._restart_claude_client()
+
+                logger.info(
+                    f"Claude client restarted successfully: session_id={self.session_id}"
+                )
+
+        # 1. Determine message role and type based on event type
         if event_type == EventType.USER_MESSAGE_EVENT:
             # User message: role=user, type=user_message
             role = MessageRole.USER
             message_type = MessageType.USER_MESSAGE
+
+            # Extract original message and context from event payload
+            payload = event.get("payload", {})
+            original_message = payload.get("message", "")
+            context = payload.get("context")
+
+            # Build storage payload (keep structured format)
+            storage_payload = {"message": original_message}
+            if context:
+                storage_payload["context"] = context
         else:
             # Network events: role=system, type=system_message
             role = MessageRole.SYSTEM
             message_type = MessageType.SYSTEM_MESSAGE
 
-        # 3. Store to database and push to WebSocket
+            # For network events, format the entire event
+            formatted_message = self._format_event_for_claude(event)
+            storage_payload = {"message": formatted_message}
+
+        # 2. Store to database and push to WebSocket
         message_id, sequence, timestamp = await self._save_message_to_db(
             role=role,
             message_type=message_type,
-            payload={"message": message}
+            payload=storage_payload
         )
         self._push_to_websocket(
             role=role,
@@ -517,32 +714,132 @@ class ClaudeCodeSession(MosaicSession):
             message_id=message_id,
             sequence=sequence,
             timestamp=timestamp,
-            payload={"message": message}
+            payload=storage_payload
         )
 
-        # 4. Publish user_prompt_submit event (all modes except PROGRAM)
-        if self.mode != SessionMode.PROGRAM:
+        # 3. Publish user_prompt_submit event (only for user messages, all modes except PROGRAM)
+        if self.mode != SessionMode.PROGRAM and event_type == EventType.USER_MESSAGE_EVENT:
             await self.node.send_event(
                 source_session_id=self.session_id,
                 event_type=EventType.USER_PROMPT_SUBMIT,
-                payload={"prompt": message}
+                payload={"prompt": original_message}
             )
 
-        # 5. Send to Claude SDK
-        logger.debug(f"Sending query to Claude: session_id={self.session_id}")
-        await self._cc_client.query(message)
+        # 4. Update runtime status to BUSY before processing
+        await self._update_runtime_status_to_db(RuntimeStatus.BUSY)
 
-        # 6. Receive and forward Claude's response
+        # Send WebSocket notification for BUSY status
+        user_message_broker = UserMessageBroker.get_instance()
+        user_message_broker.push_from_worker(self.node.node.user_id, {
+            "role": MessageRole.NOTIFICATION,
+            "message_type": MessageType.RUNTIME_STATUS_CHANGED,
+            "session_id": self.session_id,
+            "payload": {
+                "session_id": self.session_id,
+                "runtime_status": RuntimeStatus.BUSY.value
+            }
+        })
+        logger.debug(
+            f"Pushed runtime_status_changed notification to WebSocket: "
+            f"session_id={self.session_id}, runtime_status=busy"
+        )
+
+        # 5. Format message for Claude
+        # For USER_MESSAGE_EVENT, format with context if present
+        # For other events, already formatted in step 1
+        if event_type == EventType.USER_MESSAGE_EVENT:
+            formatted_message_for_claude = self._format_event_for_claude(event)
+        else:
+            # Network events already formatted
+            formatted_message_for_claude = formatted_message
+
+        # 6. Send to Claude SDK
+        logger.debug(f"Sending query to Claude: session_id={self.session_id}")
+        await self._cc_client.query(formatted_message_for_claude)
+
+        # 7. Receive and forward Claude's response
         stats = await self._receive_assistant_response()
 
-        # 7. Update session statistics
+        # 8. Update runtime status back to IDLE after processing
+        await self._update_runtime_status_to_db(RuntimeStatus.IDLE)
+
+        # Send WebSocket notification for IDLE status
+        user_message_broker = UserMessageBroker.get_instance()
+        user_message_broker.push_from_worker(self.node.node.user_id, {
+            "role": MessageRole.NOTIFICATION,
+            "message_type": MessageType.RUNTIME_STATUS_CHANGED,
+            "session_id": self.session_id,
+            "payload": {
+                "session_id": self.session_id,
+                "runtime_status": RuntimeStatus.IDLE.value
+            }
+        })
+        logger.debug(
+            f"Pushed runtime_status_changed notification to WebSocket: "
+            f"session_id={self.session_id}, runtime_status=idle"
+        )
+
+        # 9. Update session statistics
         if stats:
             self._total_cost_usd += stats["cost_usd"]
             self._total_input_tokens += stats["input_tokens"]
             self._total_output_tokens += stats["output_tokens"]
+            self._context_usage = stats["context_usage"]
+            self._context_percentage = stats["context_percentage"]
 
             # Sync session state to database
             await self._update_session_to_db()
+
+        # Token threshold notification
+        if (self.mode != SessionMode.PROGRAM and
+            self.token_threshold_enabled and
+            self._total_output_tokens >= self._effective_threshold and
+            not self._token_threshold_notified):
+            logger.warning(
+                f"Token threshold reached: session_id={self.session_id}, "
+                f"total_output_tokens={self._total_output_tokens}, "
+                f"effective_threshold={self._effective_threshold}"
+            )
+            self.enqueue_event({
+                "event_type": EventType.SYSTEM_MESSAGE,
+                "payload": {
+                    "message": f"Token threshold reached: {self._effective_threshold}"
+                }
+            })
+
+            # Set flag to True - only reset on Claude client restart (LONG_RUNNING mode)
+            self._token_threshold_notified = True
+
+            logger.debug(
+                f"Token notification sent: session_id={self.session_id}, "
+                f"mode={self.mode.value}"
+            )
+
+        # Check if we should request session topic generation
+        if (self.mode != SessionMode.PROGRAM and
+            self.auto_generate_session_topic and
+            self._total_output_tokens > self.topic_generation_token_threshold):
+            # Check if topic has already been set
+            from ...model.session import Session
+            from sqlmodel import select
+
+            async with self.async_session_factory() as db_session:
+                stmt = select(Session).where(Session.session_id == self.session_id)
+                result = await db_session.execute(stmt)
+                db_session_obj = result.scalar_one_or_none()
+
+                if db_session_obj and not db_session_obj.topic:
+                    logger.info(
+                        f"Topic generation threshold reached: session_id={self.session_id}, "
+                        f"total_output_tokens={self._total_output_tokens}, "
+                        f"threshold={self.topic_generation_token_threshold}"
+                    )
+                    self.enqueue_event({
+                        "event_type": EventType.SYSTEM_MESSAGE,
+                        "payload": {
+                            "message": "Please provide a concise topic for this session using the set_session_topic tool (maximum 80 characters). IMPORTANT: Generate the topic in the same language as our current conversation."
+                        }
+                    })
 
         # Reset interrupt flag
         self._is_interrupted = False
@@ -653,6 +950,17 @@ class ClaudeCodeSession(MosaicSession):
         """
         logger.info(f"Cleaning up ClaudeCodeSession: session_id={self.session_id}")
 
+        # Cancel background monitor task if running (LONG_RUNNING mode)
+        if self._monitor_task and not self._monitor_task.done():
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+            logger.info(
+                f"Background monitor task cancelled: session_id={self.session_id}"
+            )
+
         # Sync final session state to database
         try:
             await self._update_session_to_db()
@@ -698,6 +1006,8 @@ class ClaudeCodeSession(MosaicSession):
         self._total_cost_usd = 0.0
         self._total_input_tokens = 0
         self._total_output_tokens = 0
+        self._context_usage = 0
+        self._context_percentage = 0.0
         self._message_count = 0
         self._last_activity_at = None
 
@@ -715,9 +1025,168 @@ class ClaudeCodeSession(MosaicSession):
 
     async def _on_initialize(self):
         pass
-    
+
     async def _on_close(self):
         pass
+
+    # ========== Task Progress Monitoring (LONG_RUNNING mode) ==========
+
+    async def _monitor_task_progress(self):
+        """
+        Background task that monitors progress for LONG_RUNNING sessions.
+
+        This task runs continuously and checks every 10 seconds:
+        - If runtime_status is IDLE
+        - If task has been started (acknowledge_task_started called)
+        - If task has NOT been acknowledged as finished
+
+        If all conditions are met, it sends a reminder to the agent to continue working.
+
+        This ensures the agent doesn't get stuck waiting and continues until
+        the task is explicitly marked as complete.
+        """
+        logger.info(
+            f"Task progress monitor started for LONG_RUNNING session: session_id={self.session_id}"
+        )
+
+        try:
+            while True:
+                # Wait 10 seconds before next check
+                await asyncio.sleep(10)
+
+                # Check if session should be monitored
+                from ...model.session import Session
+                from sqlmodel import select
+
+                async with self.async_session_factory() as db_session:
+                    stmt = select(Session).where(Session.session_id == self.session_id)
+                    result = await db_session.execute(stmt)
+                    db_session_obj = result.scalar_one_or_none()
+
+                    if not db_session_obj:
+                        logger.warning(
+                            f"Session not found in database, stopping monitor: session_id={self.session_id}"
+                        )
+                        break
+
+                    runtime_status = db_session_obj.runtime_status
+
+                # Check conditions: IDLE, task started, and task not finished
+                if (runtime_status == RuntimeStatus.IDLE and
+                    self._task_started and
+                    not self._task_acknowledged):
+                    logger.info(
+                        f"LONG_RUNNING session is IDLE and task not finished, sending reminder: "
+                        f"session_id={self.session_id}"
+                    )
+
+                    # Send reminder event to continue working
+                    self.enqueue_event({
+                        "event_type": EventType.SYSTEM_MESSAGE,
+                        "payload": {
+                            "message": (
+                                "Task progress check: You are currently idle. "
+                                "If you have completed all tasks, please call the acknowledge_task_finished tool. "
+                                "Otherwise, please continue working on the current task."
+                            )
+                        }
+                    })
+
+        except asyncio.CancelledError:
+            logger.info(
+                f"Task progress monitor cancelled: session_id={self.session_id}"
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"Error in task progress monitor: session_id={self.session_id}, error={e}",
+                exc_info=True
+            )
+
+    # ========== Claude Client Management ==========
+
+    async def _restart_claude_client(self) -> None:
+        """
+        Restart Claude SDK client to clear conversation context.
+
+        This is used when the session receives a self-referencing message,
+        allowing the session to continue with a fresh context while maintaining
+        the same session_id.
+
+        Steps:
+        1. Reset notification flags
+        2. Disconnect old client (send /exit, receive remaining messages, disconnect)
+        3. Create and connect new client with same configuration
+        """
+        # Step 1: Reset notification tracking
+        # After restart, reset flag and update effective threshold
+        self._token_threshold_notified = False
+        self._effective_threshold = self._total_output_tokens + self.token_threshold
+        logger.debug(
+            f"Reset notification tracking: session_id={self.session_id}, "
+            f"current_tokens={self._total_output_tokens}, "
+            f"effective_threshold={self._effective_threshold}, "
+            f"base_threshold={self.token_threshold}"
+        )
+
+        # Step 2: Disconnect old client
+        if self._cc_client:
+            try:
+                logger.debug(f"Disconnecting old Claude client: session_id={self.session_id}")
+                await self._cc_client.query("/exit")
+                async for _ in self._cc_client.receive_response():
+                    pass
+                await self._cc_client.disconnect()
+                logger.debug(f"Old Claude client disconnected: session_id={self.session_id}")
+            except Exception as e:
+                logger.error(
+                    f"Error disconnecting old Claude client: session_id={self.session_id}, error={e}",
+                    exc_info=True
+                )
+            self._cc_client = None
+
+        # Step 3: Create new client with same configuration
+        logger.debug(f"Creating new Claude client: session_id={self.session_id}")
+
+        # Get system prompt from node template
+        system_prompt = self.node._system_prompt_template.replace("###session_id###", self.session_id)
+
+        # Configure MCP servers
+        mcp_servers = self.mcp_servers.copy()
+        mcp_servers["mosaic-mcp-server"] = self._create_mosaic_mcp_server()
+
+        # Configure Claude SDK
+        cc_options = ClaudeAgentOptions(
+            model=self.model,
+            system_prompt={
+                "type": "preset",
+                "preset": "claude_code",
+                "append": system_prompt
+            },
+            cwd=str(self.node.node_path),
+            permission_mode="bypassPermissions",
+            hooks={
+                "PreToolUse": [
+                    HookMatcher(hooks=[self._pre_tool_use_hook])
+                ],
+                "PostToolUse": [
+                    HookMatcher(hooks=[self._post_tool_use_hook])
+                ],
+                "PreCompact": [
+                    HookMatcher(hooks=[self._pre_compact_hook])
+                ],
+            },
+            mcp_servers=mcp_servers,
+            allowed_tools=["*"],
+            setting_sources=["project"],
+            max_thinking_tokens=2000
+        )
+
+        # Create and connect new client
+        self._cc_client = ClaudeSDKClient(cc_options)
+        await self._cc_client.connect()
+
+        logger.debug(f"New Claude client connected: session_id={self.session_id}")
 
     # ========== User Message Handling ==========
 
@@ -736,9 +1205,120 @@ class ClaudeCodeSession(MosaicSession):
                 f"Cannot interrupt session {self.session_id}: Claude SDK not connected"
             )
 
+    async def handle_tool_response(self, response_id: str, result: Any) -> None:
+        """
+        Handle tool response from frontend.
+
+        This method is called when the frontend sends back a response to a tool execution.
+        It finds the pending Future for the given response_id and sets its result,
+        allowing the tool execution to complete.
+
+        Args:
+            response_id: Unique identifier matching the pending response
+            result: Response data from frontend
+
+        Note:
+            If no pending response is found for the response_id, a warning is logged
+            and the method returns without error (the tool may have timed out).
+        """
+        future = self._pending_responses.get(response_id)
+
+        if not future:
+            logger.warning(
+                f"No pending response found for response_id={response_id}, "
+                f"session_id={self.session_id}. Tool may have timed out."
+            )
+            return
+
+        if future.done():
+            logger.warning(
+                f"Future already completed for response_id={response_id}, "
+                f"session_id={self.session_id}"
+            )
+            return
+
+        # Set the result to complete the Future
+        future.set_result(result)
+
+        logger.info(
+            f"Tool response handled: session_id={self.session_id}, "
+            f"response_id={response_id}"
+        )
+
+    async def execute_programmable_call(
+        self,
+        call_id: str,
+        method: str,
+        instruction: Optional[str],
+        kwargs: Dict[str, Any],
+        return_schema: Optional[Dict[str, Any]],
+        command: 'ProgrammableCallCommand'
+    ) -> None:
+        """
+        Execute a programmable call in this Claude Code session.
+
+        This method enables SDK-style programmatic invocation of the agent,
+        allowing external systems to call the session with structured method calls
+        and receive structured responses.
+
+        Implementation Strategy:
+        1. Store the command reference in _pending_programmable_calls
+        2. Enqueue a programmable_call event to the session's event queue
+        3. Return immediately (don't wait for result)
+        4. The event loop will process the event and send it to the agent
+        5. The agent processes and calls programmable_return MCP tool
+        6. The MCP tool calls command.set_result() to resolve the future
+
+        Args:
+            call_id: Unique call identifier (UUID) for tracking this specific call
+            method: Semantic method identifier (e.g., "analyze_data", "extract_entities")
+            instruction: Optional detailed task description for complex multi-step tasks
+            kwargs: Keyword arguments for the call (must be JSON-serializable dict)
+            return_schema: Optional JSON Schema Draft 7 for return value validation
+            command: ProgrammableCallCommand instance (for MCP tool to set result)
+
+        Returns:
+            None: This method returns immediately. The MCP tool will set command.future result.
+
+        Raises:
+            RuntimeInternalError: If execution fails or validation errors occur
+
+        Note:
+            The command object is stored and will be retrieved by the programmable_return MCP tool
+            to set the result. Timeout is handled by RuntimeManager layer via asyncio.wait_for.
+        """
+        # 1. Store command reference
+        self._pending_programmable_calls[call_id] = command
+
+        logger.debug(
+            f"Stored programmable call command: session_id={self.session_id}, "
+            f"call_id={call_id}, method={method}"
+        )
+
+        # 2. Enqueue programmable_call event to session queue (non-blocking)
+        event = {
+            "event_type": EventType.PROGRAMMABLE_CALL_EVENT,
+            "payload": {
+                "call_id": call_id,
+                "method": method,
+                "instruction": instruction,
+                "kwargs": kwargs,
+                "return_schema": return_schema
+            }
+        }
+        self.enqueue_event(event)
+
+        logger.debug(
+            f"Enqueued programmable_call event: session_id={self.session_id}, "
+            f"call_id={call_id}"
+        )
+
+        # 3. Return immediately (don't wait)
+        return Nil.NIL
+
     # ========== Claude SDK Processing ==========
 
-    async def process_user_message(self, message: str):
+    async def process_user_message(self, message: str, context: Optional[Dict[str, Any]] = None):
         """
         Enqueue a user message for processing.
 
@@ -750,11 +1330,16 @@ class ClaudeCodeSession(MosaicSession):
 
         Args:
             message: User input text
+            context: Optional context data (e.g., GeoGebra states)
         """
         # Wrap message into internal event
+        payload = {"message": message}
+        if context:
+            payload["context"] = context
+
         event = {
             "event_type": EventType.USER_MESSAGE_EVENT,
-            "payload": {"message": message}
+            "payload": payload
         }
 
         # Enqueue for processing by worker loop
@@ -762,7 +1347,7 @@ class ClaudeCodeSession(MosaicSession):
 
         logger.debug(
             f"User message enqueued: session_id={self.session_id}, "
-            f"message_length={len(message)}"
+            f"message_length={len(message)}, context={'present' if context else 'absent'}"
         )
 
     async def _receive_assistant_response(self) -> Optional[Dict[str, Any]]:
@@ -811,33 +1396,20 @@ class ClaudeCodeSession(MosaicSession):
                             timestamp=timestamp,
                             payload={"message": block.thinking}
                         )
-
-                    elif isinstance(block, ToolUseBlock):
-                        message_id, sequence, timestamp = await self._save_message_to_db(
-                            role=MessageRole.ASSISTANT,
-                            message_type=MessageType.ASSISTANT_TOOL_USE,
-                            payload={
-                                "tool_name": block.name,
-                                "tool_input": block.input
-                            }
-                        )
-                        self._push_to_websocket(
-                            role=MessageRole.ASSISTANT,
-                            message_type=MessageType.ASSISTANT_TOOL_USE,
-                            message_id=message_id,
-                            sequence=sequence,
-                            timestamp=timestamp,
-                            payload={
-                                "tool_name": block.name,
-                                "tool_input": block.input
-                            }
-                        )
+            elif isinstance(message, SystemMessage):
+                logger.debug(f"System message received: {json.dumps(message.data, ensure_ascii=False)}")
 
             elif isinstance(message, ResultMessage):
                 # Collect statistics for return
                 cost_usd = message.total_cost_usd or 0.0
                 input_tokens = message.usage.get("input_tokens", 0)
                 output_tokens = message.usage.get("output_tokens", 0)
+
+                # Calculate context window usage
+                cache_creation_tokens = message.usage.get("cache_creation_input_tokens", 0)
+                cache_read_tokens = message.usage.get("cache_read_input_tokens", 0)
+                context_usage = input_tokens + cache_creation_tokens + cache_read_tokens
+                context_percentage = (context_usage / 200000) * 100  # 200k token window
 
                 # Save result message to database and push to WebSocket
                 message_id, sequence, timestamp = await self._save_message_to_db(
@@ -849,7 +1421,9 @@ class ClaudeCodeSession(MosaicSession):
                         "total_input_tokens": self._total_input_tokens + input_tokens,
                         "total_output_tokens": self._total_output_tokens + output_tokens,
                         "cost_usd": cost_usd,
-                        "usage": message.usage
+                        "usage": message.usage,
+                        "context_usage": context_usage,
+                        "context_percentage": context_percentage
                     }
                 )
                 self._push_to_websocket(
@@ -864,7 +1438,9 @@ class ClaudeCodeSession(MosaicSession):
                         "total_input_tokens": self._total_input_tokens + input_tokens,
                         "total_output_tokens": self._total_output_tokens + output_tokens,
                         "cost_usd": cost_usd,
-                        "usage": message.usage
+                        "usage": message.usage,
+                        "context_usage": context_usage,
+                        "context_percentage": context_percentage
                     }
                 )
 
@@ -880,7 +1456,9 @@ class ClaudeCodeSession(MosaicSession):
                 return {
                     "cost_usd": cost_usd,
                     "input_tokens": input_tokens,
-                    "output_tokens": output_tokens
+                    "output_tokens": output_tokens,
+                    "context_usage": context_usage,
+                    "context_percentage": context_percentage
                 }
 
         # Return None if no ResultMessage received
@@ -952,6 +1530,7 @@ class ClaudeCodeSession(MosaicSession):
         - message_count: Total number of messages
         - last_activity_at: Last activity timestamp
         - total_input_tokens, total_output_tokens, total_cost_usd: Token/cost statistics
+        - context_usage, context_percentage: Context window usage statistics
         - updated_at: Current timestamp
 
         This method should be called:
@@ -974,6 +1553,8 @@ class ClaudeCodeSession(MosaicSession):
                 db_session_obj.total_input_tokens = self._total_input_tokens
                 db_session_obj.total_output_tokens = self._total_output_tokens
                 db_session_obj.total_cost_usd = self._total_cost_usd
+                db_session_obj.context_usage = self._context_usage
+                db_session_obj.context_percentage = self._context_percentage
                 db_session_obj.updated_at = datetime.now()
 
                 await db_session.commit()
@@ -986,6 +1567,40 @@ class ClaudeCodeSession(MosaicSession):
             else:
                 logger.warning(
                     f"Session record not found for update: session_id={self.session_id}"
+                )
+
+    async def _update_runtime_status_to_db(self, runtime_status: RuntimeStatus):
+        """
+        Update runtime_status in database.
+
+        This method updates the runtime processing status of the session.
+
+        Args:
+            runtime_status: New runtime status (IDLE or BUSY)
+        """
+        from ...model.session import Session
+        from sqlmodel import select
+
+        async with self.async_session_factory() as db_session:
+            # Query session record
+            stmt = select(Session).where(Session.session_id == self.session_id)
+            result = await db_session.execute(stmt)
+            db_session_obj = result.scalar_one_or_none()
+
+            if db_session_obj:
+                # Update runtime status
+                db_session_obj.runtime_status = runtime_status
+                db_session_obj.updated_at = datetime.now()
+
+                await db_session.commit()
+
+                logger.debug(
+                    f"Runtime status updated in database: session_id={self.session_id}, "
+                    f"runtime_status={runtime_status.value}"
+                )
+            else:
+                logger.warning(
+                    f"Session record not found for runtime status update: session_id={self.session_id}"
                 )
 
     def _push_to_websocket(
@@ -1058,13 +1673,35 @@ class ClaudeCodeSession(MosaicSession):
         Returns:
             Hook response allowing tool use
         """
+        tool_name = hook_input.get("tool_name")
+        tool_input = hook_input.get("tool_input")
+
+        message_id, sequence, timestamp = await self._save_message_to_db(
+            role=MessageRole.ASSISTANT,
+            message_type=MessageType.ASSISTANT_TOOL_USE,
+            payload={
+                "tool_name": tool_name,
+                "tool_input": tool_input
+            }
+        )
+        self._push_to_websocket(
+            role=MessageRole.ASSISTANT,
+            message_type=MessageType.ASSISTANT_TOOL_USE,
+            message_id=message_id,
+            sequence=sequence,
+            timestamp=timestamp,
+            payload={
+                "tool_name": tool_name,
+                "tool_input": tool_input
+            }
+        )
         if self.mode != SessionMode.PROGRAM:
             await self.node.send_event(
                 source_session_id=self.session_id,
                 event_type=EventType.PRE_TOOL_USE,
                 payload={
-                    "tool_name": hook_input.get("tool_name"),
-                    "tool_input": hook_input.get("tool_input")
+                    "tool_name": tool_name,
+                    "tool_input": tool_input
                 }
             )
 
@@ -1076,6 +1713,70 @@ class ClaudeCodeSession(MosaicSession):
             }
         }
 
+    async def _post_tool_use_hook(
+        self,
+        hook_input: Dict[str, Any],
+        tool_use_id: Optional[str],
+        context: Any
+    ):
+        tool_name = hook_input.get("tool_name")
+        tool_output = hook_input.get("tool_response")
+        
+        message_id, sequence, timestamp = await self._save_message_to_db(
+            role=MessageRole.ASSISTANT,
+            message_type=MessageType.ASSISTANT_TOOL_OUTPUT,
+            payload={
+                "tool_name": tool_name,
+                "tool_output": tool_output
+            }
+        )
+        self._push_to_websocket(
+            role=MessageRole.ASSISTANT,
+            message_type=MessageType.ASSISTANT_TOOL_OUTPUT,
+            message_id=message_id,
+            sequence=sequence,
+            timestamp=timestamp,
+            payload={
+                "tool_name": tool_name,
+                "tool_output": tool_output
+            }
+        )
+        if self.mode != SessionMode.PROGRAM:
+            await self.node.send_event(
+                source_session_id=self.session_id,
+                event_type=EventType.POST_TOOL_USE,
+                payload={
+                    "tool_name": tool_name,
+                    "tool_output": tool_output
+                }
+            )
+        
+        return {}
+
+    async def _pre_compact_hook(
+        self,
+        hook_input: Dict[str, Any],
+        tool_use_id: Optional[str],
+        context: Any
+    ):
+        tool_name = hook_input.get("tool_name")
+        tool_output = hook_input.get("tool_response")
+        
+        message_id, sequence, timestamp = await self._save_message_to_db(
+            role=MessageRole.ASSISTANT,
+            message_type=MessageType.ASSISTANT_PRE_COMPACT,
+            payload={}
+        )
+        self._push_to_websocket(
+            role=MessageRole.ASSISTANT,
+            message_type=MessageType.ASSISTANT_PRE_COMPACT,
+            message_id=message_id,
+            sequence=sequence,
+            timestamp=timestamp,
+            payload={}
+        )
+        return {}
+
     def _create_mosaic_mcp_server(self):
         """
         Create Mosaic MCP server with tools for inter-node communication.
@@ -1083,7 +1784,19 @@ class ClaudeCodeSession(MosaicSession):
         Provides:
         - send_message: Send message to another node
         - send_email: Send email via email node
+        - set_session_topic: Set topic/title for current session
         - task_complete: Signal that the current task has been completed
+        - execute_geogebra_command: Execute GeoGebra commands in geometry canvas
+        - programmable_return: Return result of a programmable call request
+        - coze_search_skill: Search for skills on Coze platform
+        - coze_install_skill: Install a skill on Coze platform
+        - coze_invoke_skill: Invoke a skill with task prompt
+        - coze_get_result: Get task result from Coze platform
+        - coze_create_skill: Create a new skill with natural language description
+        - coze_send_message: Send a message to Coze skill creation agent
+        - coze_get_agent_response: Wait for and get the latest response from Coze skill creation agent
+        - coze_deploy_skill: Deploy a skill to Coze platform
+        - coze_list_user_skills: List user skills on Coze platform
         """
         @tool(
             "send_message",
@@ -1112,6 +1825,15 @@ class ClaudeCodeSession(MosaicSession):
                 target_node_id = args['target_node_id']
                 target_session_id = args.get('target_session_id', None)
                 message = args['message']
+
+                # Auto-fill target_session_id for LONG_RUNNING mode when sending to self
+                if (self.mode == SessionMode.LONG_RUNNING and
+                    target_node_id == self.node.node.node_id):
+                    target_session_id = self.session_id
+                    logger.debug(
+                        f"LONG_RUNNING mode: Auto-filled target_session_id for self-referencing message: "
+                        f"session_id={self.session_id}"
+                    )
 
                 await self.node.send_event(
                     source_session_id=self.session_id,
@@ -1188,6 +1910,259 @@ class ClaudeCodeSession(MosaicSession):
                             "text": f"Failed to send email: {str(e)}"
                         }
                     ]
+                }
+
+        @tool(
+            "set_session_topic",
+            "Set the topic/title for the current session",
+            {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "The topic/title that summarizes this session's content (maximum 80 characters). Use the same language as the current conversation."
+                    }
+                },
+                "required": ["topic"]
+            }
+        )
+        async def set_session_topic(args):
+            """
+            Set the topic/title for the current session.
+
+            This tool allows the agent to provide a descriptive topic for the session,
+            which will be stored in the database for easy reference and organization.
+            The topic should be in the same language as the conversation.
+            """
+            try:
+                topic = args.get('topic')
+
+                if not topic:
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Error: topic is required"
+                            }
+                        ]
+                    }
+
+                # Validate topic length (max 80 characters)
+                if len(topic) > 80:
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"Error: topic is too long ({len(topic)} characters). Maximum length is 80 characters."
+                            }
+                        ]
+                    }
+
+                # Update session topic in database
+                from ...model.session import Session
+                from sqlmodel import select
+
+                async with self.async_session_factory() as db_session:
+                    stmt = select(Session).where(Session.session_id == self.session_id)
+                    result = await db_session.execute(stmt)
+                    db_session_obj = result.scalar_one_or_none()
+
+                    if not db_session_obj:
+                        logger.error(
+                            f"Session not found when setting topic: session_id={self.session_id}"
+                        )
+                        return {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "Error: Session not found in database"
+                                }
+                            ]
+                        }
+
+                    # Update topic
+                    db_session_obj.topic = topic
+                    db_session_obj.updated_at = datetime.now()
+                    await db_session.commit()
+
+                    logger.info(
+                        f"Session topic updated: session_id={self.session_id}, topic='{topic}'"
+                    )
+
+                # Send WebSocket notification to frontend
+                from ...websocket import UserMessageBroker
+                user_message_broker = UserMessageBroker.get_instance()
+                user_message_broker.push_from_worker(self.node.node.user_id, {
+                    "role": MessageRole.NOTIFICATION,
+                    "message_type": MessageType.TOPIC_UPDATED,
+                    "session_id": self.session_id,
+                    "payload": {
+                        "session_id": self.session_id,
+                        "topic": topic
+                    }
+                })
+                logger.info(
+                    f"Pushed topic_updated notification to WebSocket: "
+                    f"session_id={self.session_id}, topic='{topic}'"
+                )
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Successfully set session topic to: {topic}"
+                        }
+                    ]
+                }
+            except Exception as e:
+                logger.error(
+                    f"Failed to set session topic: session_id={self.session_id}, error={e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Failed to set session topic: {str(e)}"
+                        }
+                    ]
+                }
+
+        @tool(
+            "execute_geogebra_command",
+            "Execute GeoGebra commands in the geometry canvas",
+            {
+                "type": "object",
+                "properties": {
+                    "instance_number": {
+                        "type": "integer",
+                        "description": "GeoGebra instance number (1, 2, 3, etc.)"
+                    },
+                    "commands": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of GeoGebra commands to execute"
+                    }
+                },
+                "required": ["instance_number", "commands"]
+            }
+        )
+        async def execute_geogebra_command(args):
+            """
+            Execute GeoGebra commands in a specific instance.
+
+            This tool allows the agent to manipulate GeoGebra instances by sending
+            commands that will be executed in the frontend geometry canvas.
+
+            Args:
+                instance_number: GeoGebra instance number (1, 2, 3, etc.)
+                commands: List of GeoGebra commands to execute
+
+            Returns:
+                Success or error message with execution result
+            """
+            try:
+                instance_number = args.get('instance_number')
+                commands = args.get('commands')
+
+                # Validate instance_number
+                if not isinstance(instance_number, int) or instance_number < 1:
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": f"Error: instance_number must be a positive integer, got: {instance_number}"
+                        }]
+                    }
+
+                # Validate commands
+                if not isinstance(commands, list) or len(commands) == 0:
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": "Error: commands must be a non-empty list of strings"
+                        }]
+                    }
+
+                # Validate all commands are strings
+                if not all(isinstance(cmd, str) for cmd in commands):
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": "Error: all commands must be strings"
+                        }]
+                    }
+
+                # Generate response_id
+                import uuid
+                response_id = str(uuid.uuid4())
+
+                # Create Future and store in pending responses
+                future = asyncio.Future()
+                self._pending_responses[response_id] = future
+
+                # Push WebSocket message to frontend with response_id
+                from ...websocket import UserMessageBroker
+                user_message_broker = UserMessageBroker.get_instance()
+                user_message_broker.push_from_worker(self.node.node.user_id, {
+                    "role": MessageRole.ASSISTANT,
+                    "message_type": MessageType.GEOGEBRA_COMMAND,
+                    "session_id": self.session_id,
+                    "payload": {
+                        "response_id": response_id,  # Add response_id for frontend to reply
+                        "instance_number": instance_number,
+                        "commands": commands
+                    }
+                })
+
+                logger.info(
+                    f"GeoGebra commands sent to instance #{instance_number}: "
+                    f"{len(commands)} command(s), session_id={self.session_id}, "
+                    f"response_id={response_id}, waiting for response..."
+                )
+
+                # Wait for frontend response (with 30 second timeout)
+                try:
+                    response_data = await asyncio.wait_for(future, timeout=30.0)
+
+                    logger.info(
+                        f"GeoGebra response received: session_id={self.session_id}, "
+                        f"response_id={response_id}"
+                    )
+
+                    # Return result with response data
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": f"Commands executed successfully. Response: {json.dumps(response_data, ensure_ascii=False)}"
+                        }]
+                    }
+
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"GeoGebra response timeout: session_id={self.session_id}, "
+                        f"response_id={response_id}"
+                    )
+                    return {
+                        "content": [{
+                            "type": "text",
+                            "text": f"Timeout waiting for GeoGebra response (30 seconds). Commands may not have been executed."
+                        }]
+                    }
+
+                finally:
+                    # Clean up pending response
+                    self._pending_responses.pop(response_id, None)
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to execute GeoGebra command: session_id={self.session_id}, error={e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": f"Failed to execute GeoGebra command: {str(e)}"
+                    }]
                 }
 
         @tool(
@@ -1357,9 +2332,1321 @@ class ClaudeCodeSession(MosaicSession):
                     ]
                 }
 
+        @tool(
+            "programmable_return",
+            "Return the result of a programmable call request.",
+            {
+                "type": "object",
+                "properties": {
+                    "call_id": {
+                        "type": "string",
+                        "description": "The call ID from the programmable call request"
+                    },
+                    "result": {
+                        "type": "string",
+                        "description": (
+                            "The result to return as a JSON string. "
+                            "IMPORTANT: Must be a valid, compact JSON string without formatting whitespace. "
+                            "All special characters in field values must be properly escaped: "
+                            "quotes as \\\", newlines as \\n, tabs as \\t, backslashes as \\\\, etc. "
+                            "Example: '{\"status\":\"success\",\"message\":\"Line 1\\nLine 2\"}'"
+                        )
+                    }
+                },
+                "required": ["call_id", "result"]
+            }
+        )
+        async def programmable_return(args):
+            """
+            Return the result of a programmable call.
+
+            This tool is used by the agent to return the result of a programmable call
+            request. The result will be validated against the return_schema if provided.
+
+            Args:
+                args: Dict containing:
+                    - call_id: The call ID from the programmable call request
+                    - result: The result to return (any JSON-serializable value)
+            """
+            try:
+                call_id = args.get('call_id')
+                result = args.get('result')
+
+                if not call_id:
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Error: call_id is required"
+                            }
+                        ]
+                    }
+
+                # Get the pending command
+                command = self._pending_programmable_calls.get(call_id)
+
+                if not command:
+                    logger.warning(
+                        f"No pending programmable call found for call_id={call_id}, "
+                        f"session_id={self.session_id}"
+                    )
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"Error: No pending programmable call found for call_id={call_id}"
+                            }
+                        ]
+                    }
+
+                # Step 1: Parse JSON string to object
+                try:
+                    result_obj = json.loads(result)
+                    logger.debug(
+                        f"JSON parsing successful: session_id={self.session_id}, "
+                        f"call_id={call_id}, "
+                        f"result_obj={result_obj}"
+                    )
+                except json.JSONDecodeError as e:
+                    # JSON parsing failed - return error to agent for retry
+                    error_details = [
+                        "JSON Parsing Error:",
+                        f"- Message: {str(e)}",
+                        f"- Position: line {e.lineno}, column {e.colno}",
+                        "",
+                        "Your result must be a valid JSON string.",
+                        "Common issues:",
+                        "- Use double quotes (\") for strings, not single quotes (')",
+                        "- Escape special characters: \\\" for quotes, \\n for newlines, \\t for tabs, \\\\ for backslashes",
+                        "- Use json.dumps() to automatically handle escaping",
+                        "- Ensure the JSON is properly formatted",
+                        "",
+                        f"Your input:",
+                        result[:500] + ("..." if len(result) > 500 else ""),
+                        "",
+                        f"Please fix the JSON and call programmable_return again with the same call_id={call_id}"
+                    ]
+
+                    full_error = "\n".join(error_details)
+
+                    logger.warning(
+                        f"JSON parsing failed: session_id={self.session_id}, "
+                        f"call_id={call_id}, error={str(e)}"
+                    )
+
+                    # Don't set result, don't clean up - agent can retry
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": full_error
+                            }
+                        ]
+                    }
+
+                # Step 2: Schema validation if return_schema is provided
+                if command.return_schema:
+                    try:
+                        jsonschema.validate(instance=result_obj, schema=command.return_schema)
+                        logger.debug(
+                            f"Schema validation passed: session_id={self.session_id}, "
+                            f"call_id={call_id}"
+                        )
+                    except JsonSchemaValidationError as e:
+                        # Validation failed - return error to agent for retry
+                        error_details = [
+                            "Schema Validation Error:",
+                            f"- Message: {e.message}",
+                        ]
+
+                        if e.path:
+                            path_str = ".".join(str(p) for p in e.path)
+                            error_details.append(f"- Path: {path_str}")
+
+                        if e.schema_path:
+                            schema_path_str = ".".join(str(p) for p in e.schema_path)
+                            error_details.append(f"- Schema Path: {schema_path_str}")
+
+                        error_details.append(f"\nExpected Schema:")
+                        error_details.append(json.dumps(command.return_schema, indent=2, ensure_ascii=False))
+
+                        error_details.append(f"\nYour Parsed Result:")
+                        error_details.append(json.dumps(result_obj, indent=2, ensure_ascii=False))
+
+                        error_details.append(f"\nPlease fix the result to match the schema and call programmable_return again with the same call_id={call_id}")
+
+                        full_error = "\n".join(error_details)
+
+                        logger.warning(
+                            f"Schema validation failed: session_id={self.session_id}, "
+                            f"call_id={call_id}, error={e.message}"
+                        )
+
+                        # Don't set result, don't clean up - agent can retry
+                        return {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": full_error
+                                }
+                            ]
+                        }
+                    except Exception as e:
+                        # Schema validation error (invalid schema itself)
+                        logger.error(
+                            f"Schema validation error: session_id={self.session_id}, "
+                            f"call_id={call_id}, error={e}",
+                            exc_info=True
+                        )
+                        return {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Schema validation error: {str(e)}"
+                                }
+                            ]
+                        }
+
+                # Validation passed (or no schema) - set the result
+                command.set_result(result_obj)
+
+                # Clean up
+                self._pending_programmable_calls.pop(call_id, None)
+
+                logger.info(
+                    f"Programmable call result set: session_id={self.session_id}, "
+                    f"call_id={call_id}"
+                )
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Successfully returned result for call_id={call_id}"
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to return programmable call result: "
+                    f"session_id={self.session_id}, error={e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Failed to return programmable call result: {str(e)}"
+                        }
+                    ]
+                }
+
+        # ========== Coze Platform Integration Tools ==========
+
+        @tool(
+            "coze_search_skill",
+            "Search for skills on Coze platform by keyword",
+            {
+                "type": "object",
+                "properties": {
+                    "keyword": {
+                        "type": "string",
+                        "description": "Search keyword (e.g., '数据分析', '写小说')"
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return (default: 10)",
+                        "default": 10
+                    }
+                },
+                "required": ["keyword"]
+            }
+        )
+        async def coze_search_skill(args):
+            """Search for skills on Coze platform by keyword."""
+            from ...integrations.coze.exceptions import (
+                CozeError,
+                CozeConnectionError,
+                CozeSkillNotFoundError
+            )
+
+            try:
+                keyword = args['keyword']
+                max_results = args.get('max_results', 10)
+
+                logger.info(
+                    f"coze_search_skill: keyword='{keyword}', max_results={max_results}, "
+                    f"session_id={self.session_id}"
+                )
+
+                # Search for skills using the shared CozeClient instance
+                skills = await self.node._coze_client.search_skill(keyword, max_results)
+
+                logger.info(
+                    f"coze_search_skill: Found {len(skills)} skills for keyword='{keyword}'"
+                )
+
+                # Format response
+                import json
+                skills_json = json.dumps(skills, ensure_ascii=False, indent=2)
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Found {len(skills)} skills matching '{keyword}':\n\n{skills_json}"
+                        }
+                    ]
+                }
+
+            except ValueError as e:
+                logger.error(f"coze_search_skill: Invalid parameter - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Invalid parameter - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeConnectionError as e:
+                logger.error(f"coze_search_skill: Connection failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to connect to Coze platform. Please ensure Chrome browser is running with CDP enabled on the configured port."
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"coze_search_skill: Unexpected error - {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Unexpected error occurred - {str(e)}"
+                        }
+                    ]
+                }
+
+        @tool(
+            "coze_install_skill",
+            "Add a skill to your Coze account to enable invocation (does not install locally)",
+            {
+                "type": "object",
+                "properties": {
+                    "skill_id": {
+                        "type": "string",
+                        "description": "Skill ID (19-digit identifier from search results)"
+                    },
+                    "skill_name": {
+                        "type": "string",
+                        "description": "Skill name (optional, for verification)"
+                    }
+                },
+                "required": ["skill_id"]
+            }
+        )
+        async def coze_install_skill(args):
+            """Add a skill to user's Coze platform account, making it available for invocation."""
+            from ...integrations.coze.exceptions import (
+                CozeError,
+                CozeConnectionError,
+                CozeInstallationError
+            )
+
+            try:
+                skill_id = args['skill_id']
+                skill_name = args.get('skill_name')
+
+                logger.info(
+                    f"coze_install_skill: skill_id='{skill_id}', skill_name='{skill_name}', "
+                    f"session_id={self.session_id}"
+                )
+
+                # Install skill using the shared CozeClient instance
+                result = await self.node._coze_client.install_skill(skill_id, skill_name)
+
+                logger.info(
+                    f"coze_install_skill: Success - skill_id='{skill_id}', "
+                    f"status='{result.get('status')}'"
+                )
+
+                # Format response
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Successfully added skill to Coze account: {result.get('skill_name', skill_id)}\n"
+                                    f"Status: {result.get('status')}\n"
+                                    f"Message: {result.get('message')}\n\n"
+                                    f"Note: Skill is now available for invocation on Coze platform."
+                        }
+                    ]
+                }
+
+            except ValueError as e:
+                logger.error(f"coze_install_skill: Invalid parameter - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Invalid parameter - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeInstallationError as e:
+                logger.error(f"coze_install_skill: Failed to add skill to account - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to add skill to account - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeConnectionError as e:
+                logger.error(f"coze_install_skill: Connection failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to connect to Coze platform. Please ensure Chrome browser is running with CDP enabled."
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"coze_install_skill: Unexpected error - {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Unexpected error occurred - {str(e)}"
+                        }
+                    ]
+                }
+
+        @tool(
+            "coze_invoke_skill",
+            "Invoke a skill on Coze platform with a task prompt",
+            {
+                "type": "object",
+                "properties": {
+                    "skill_id": {
+                        "type": "string",
+                        "description": "Skill ID (must be already installed)"
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": "Task prompt/instruction for the skill"
+                    }
+                },
+                "required": ["skill_id", "prompt"]
+            }
+        )
+        async def coze_invoke_skill(args):
+            """Invoke a skill with task prompt. Returns task_id for result retrieval."""
+            from ...integrations.coze.exceptions import (
+                CozeError,
+                CozeConnectionError,
+                CozeInvocationError
+            )
+
+            try:
+                skill_id = args['skill_id']
+                prompt = args['prompt']
+
+                logger.info(
+                    f"coze_invoke_skill: skill_id='{skill_id}', prompt='{prompt[:50]}...', "
+                    f"session_id={self.session_id}"
+                )
+
+                # Invoke skill using the shared CozeClient instance
+                task_info = await self.node._coze_client.invoke_skill(skill_id, prompt)
+
+                logger.info(
+                    f"coze_invoke_skill: Task created - task_id='{task_info.get('task_id')}', "
+                    f"task_url='{task_info.get('task_url')}'"
+                )
+
+                # Format response
+                import json
+                task_json = json.dumps(task_info, ensure_ascii=False, indent=2)
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Task created successfully!\n\n"
+                                    f"Task ID: {task_info.get('task_id')}\n"
+                                    f"Task URL: {task_info.get('task_url')}\n"
+                                    f"Status: {task_info.get('status')}\n\n"
+                                    f"Use coze_get_result with task_id '{task_info.get('task_id')}' to retrieve the result."
+                        }
+                    ]
+                }
+
+            except ValueError as e:
+                logger.error(f"coze_invoke_skill: Invalid parameter - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Invalid parameter - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeInvocationError as e:
+                logger.error(f"coze_invoke_skill: Invocation failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to invoke skill - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeConnectionError as e:
+                logger.error(f"coze_invoke_skill: Connection failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to connect to Coze platform. Please ensure Chrome browser is running with CDP enabled."
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"coze_invoke_skill: Unexpected error - {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Unexpected error occurred - {str(e)}"
+                        }
+                    ]
+                }
+
+        @tool(
+            "coze_get_result",
+            "Get result of a Coze task (waits for completion by default)",
+            {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "Task ID (19-digit identifier from invoke_skill result)"
+                    },
+                    "wait": {
+                        "type": "boolean",
+                        "description": "Whether to wait for task completion (default: true)",
+                        "default": True
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Maximum wait time in seconds (default: 120)",
+                        "default": 120
+                    },
+                    "poll_interval": {
+                        "type": "integer",
+                        "description": "Polling interval in seconds (default: 3)",
+                        "default": 3
+                    }
+                },
+                "required": ["task_id"]
+            }
+        )
+        async def coze_get_result(args):
+            """Get task result. Polls until completion if wait=True."""
+            from ...integrations.coze.exceptions import (
+                CozeError,
+                CozeConnectionError,
+                CozeTaskError
+            )
+
+            try:
+                task_id = args['task_id']
+                wait = args.get('wait', True)
+                timeout = args.get('timeout', 120)
+                poll_interval = args.get('poll_interval', 3)
+
+                logger.info(
+                    f"coze_get_result: task_id='{task_id}', wait={wait}, "
+                    f"timeout={timeout}s, poll_interval={poll_interval}s, "
+                    f"session_id={self.session_id}"
+                )
+
+                # Get task result using the shared CozeClient instance
+                result = await self.node._coze_client.get_result(
+                    task_id=task_id,
+                    wait=wait,
+                    timeout=timeout,
+                    poll_interval=poll_interval
+                )
+
+                status = result.get('status')
+                logger.info(
+                    f"coze_get_result: Task {status} - task_id='{task_id}', "
+                    f"reply_length={len(result.get('reply', ''))}, "
+                    f"files_count={len(result.get('files', []))}"
+                )
+
+                # Format response
+                import json
+                result_json = json.dumps(result, ensure_ascii=False, indent=2)
+
+                # Build human-readable summary
+                summary_lines = [
+                    f"Task Status: {status}",
+                    f"Task URL: {result.get('task_url')}",
+                    ""
+                ]
+
+                if result.get('reply'):
+                    summary_lines.append("AI Reply:")
+                    summary_lines.append(result['reply'])
+                    summary_lines.append("")
+
+                if result.get('files'):
+                    summary_lines.append(f"Files Generated: {len(result['files'])}")
+                    for file in result['files']:
+                        summary_lines.append(f"  - {file['name']}: {file['url']}")
+                    summary_lines.append("")
+
+                summary_text = "\n".join(summary_lines)
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": summary_text
+                        },
+                        {
+                            "type": "text",
+                            "text": f"Full result JSON:\n{result_json}"
+                        }
+                    ]
+                }
+
+            except ValueError as e:
+                logger.error(f"coze_get_result: Invalid parameter - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Invalid parameter - {str(e)}"
+                        }
+                    ]
+                }
+
+            except TimeoutError as e:
+                logger.error(f"coze_get_result: Timeout - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Task did not complete within {timeout} seconds. "
+                                    f"The task may still be running on Coze platform. "
+                                    f"You can try again with a longer timeout."
+                        }
+                    ]
+                }
+
+            except CozeTaskError as e:
+                logger.error(f"coze_get_result: Task failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Task execution failed - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeConnectionError as e:
+                logger.error(f"coze_get_result: Connection failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to connect to Coze platform. Please ensure Chrome browser is running with CDP enabled."
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"coze_get_result: Unexpected error - {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Unexpected error occurred - {str(e)}"
+                        }
+                    ]
+                }
+
+        # ========== Coze Skill Creation and Deployment Tools ==========
+
+        @tool(
+            "coze_create_skill",
+            "Create a new skill on Coze platform with natural language description",
+            {
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "Natural language description of the skill to create (e.g., '创建一个计算器技能')"
+                    },
+                    "space_id": {
+                        "type": "string",
+                        "description": "Workspace/space ID (optional, uses default if not provided)",
+                        "default": None
+                    }
+                },
+                "required": ["description"]
+            }
+        )
+        async def coze_create_skill(args):
+            """Submit skill creation request to Coze platform."""
+            from ...integrations.coze.exceptions import (
+                CozeError,
+                CozeConnectionError
+            )
+
+            try:
+                description = args['description']
+                space_id = args.get('space_id')
+
+                logger.info(
+                    f"coze_create_skill: description='{description}', space_id={space_id}, "
+                    f"session_id={self.session_id}"
+                )
+
+                # Create skill using the shared CozeClient instance
+                result = await self.node._coze_client.create_skill(
+                    description=description,
+                    space_id=space_id
+                )
+
+                project_id = result.get('project_id')
+                logger.info(
+                    f"coze_create_skill: Successfully submitted skill creation - project_id='{project_id}'"
+                )
+
+                # Format response
+                import json
+                result_json = json.dumps(result, ensure_ascii=False, indent=2)
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Skill creation submitted successfully!\n\n"
+                                    f"Project ID: {project_id}\n"
+                                    f"Project Type: {result.get('project_type')}\n\n"
+                                    f"Use coze_wait_skill_creation to wait for completion.\n\n"
+                                    f"Full result:\n{result_json}"
+                        }
+                    ]
+                }
+
+            except ValueError as e:
+                logger.error(f"coze_create_skill: Invalid parameter - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Invalid parameter - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeConnectionError as e:
+                logger.error(f"coze_create_skill: Connection failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to connect to Coze platform. Please ensure Chrome browser is running with CDP enabled."
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"coze_create_skill: Unexpected error - {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Unexpected error occurred - {str(e)}"
+                        }
+                    ]
+                }
+
+        @tool(
+            "coze_send_message",
+            "Send a message to Coze skill creation agent",
+            {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project ID (19-digit identifier from create_skill result)"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Message to send to the agent"
+                    }
+                },
+                "required": ["project_id", "message"]
+            }
+        )
+        async def coze_send_message(args):
+            """Send a message to Coze skill creation agent."""
+            from ...integrations.coze.exceptions import (
+                CozeError,
+                CozeConnectionError,
+                CozeTaskError
+            )
+
+            try:
+                project_id = args['project_id']
+                message = args['message']
+
+                logger.info(
+                    f"coze_send_message: project_id='{project_id}', "
+                    f"message='{message[:50]}...', session_id={self.session_id}"
+                )
+
+                # Send message using the shared CozeClient instance
+                result = await self.node._coze_client.send_message(
+                    project_id=project_id,
+                    message=message
+                )
+
+                logger.info(f"coze_send_message: Message sent successfully - project_id='{project_id}'")
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Message sent successfully to project {project_id}.\n\n"
+                                    f"Use coze_get_agent_response to wait for and get the agent's reply."
+                        }
+                    ]
+                }
+
+            except ValueError as e:
+                logger.error(f"coze_send_message: Invalid parameter - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Invalid parameter - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeConnectionError as e:
+                logger.error(f"coze_send_message: Connection failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to connect to Coze platform. Please ensure Chrome browser is running with CDP enabled."
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"coze_send_message: Unexpected error - {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Unexpected error occurred - {str(e)}"
+                        }
+                    ]
+                }
+
+        @tool(
+            "coze_get_agent_response",
+            "Wait for and get the latest response from Coze skill creation agent",
+            {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project ID (19-digit identifier from create_skill result)"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Maximum wait time in seconds (default: 300)",
+                        "default": 300
+                    },
+                    "poll_interval": {
+                        "type": "integer",
+                        "description": "Polling interval in seconds (default: 3)",
+                        "default": 3
+                    }
+                },
+                "required": ["project_id"]
+            }
+        )
+        async def coze_get_agent_response(args):
+            """Wait for and get the latest response from Coze agent."""
+            from ...integrations.coze.exceptions import (
+                CozeError,
+                CozeConnectionError,
+                CozeTaskError
+            )
+
+            try:
+                project_id = args['project_id']
+                timeout = args.get('timeout', 300)
+                poll_interval = args.get('poll_interval', 3)
+
+                logger.info(
+                    f"coze_get_agent_response: project_id='{project_id}', "
+                    f"timeout={timeout}s, poll_interval={poll_interval}s, "
+                    f"session_id={self.session_id}"
+                )
+
+                # Get agent response using the shared CozeClient instance
+                result = await self.node._coze_client.get_agent_response(
+                    project_id=project_id,
+                    timeout=timeout,
+                    poll_interval=poll_interval
+                )
+
+                agent_response = result.get('agent_response', '')
+
+                logger.info(
+                    f"coze_get_agent_response: Received response - "
+                    f"project_id='{project_id}', length={len(agent_response)}"
+                )
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Agent response received (length: {len(agent_response)} characters):\n\n"
+                                    f"{agent_response}"
+                        }
+                    ]
+                }
+
+            except ValueError as e:
+                logger.error(f"coze_get_agent_response: Invalid parameter - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Invalid parameter - {str(e)}"
+                        }
+                    ]
+                }
+
+            except TimeoutError as e:
+                logger.error(f"coze_get_agent_response: Timeout - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Agent did not complete response within {timeout} seconds. "
+                                    f"The agent may still be generating. "
+                                    f"You can try again with a longer timeout."
+                        }
+                    ]
+                }
+
+            except CozeTaskError as e:
+                logger.error(f"coze_get_agent_response: Failed to get response - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to get agent response - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeConnectionError as e:
+                logger.error(f"coze_get_agent_response: Connection failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to connect to Coze platform. Please ensure Chrome browser is running with CDP enabled."
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"coze_get_agent_response: Unexpected error - {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Unexpected error occurred - {str(e)}"
+                        }
+                    ]
+                }
+
+        @tool(
+            "coze_deploy_skill",
+            "Deploy a skill to Coze platform",
+            {
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "Project ID (19-digit identifier from skill creation)"
+                    },
+                    "deploy_name": {
+                        "type": "string",
+                        "description": "Deployment name (optional, uses project name if not provided)",
+                        "default": None
+                    }
+                },
+                "required": ["project_id"]
+            }
+        )
+        async def coze_deploy_skill(args):
+            """Submit skill deployment request to Coze platform."""
+            from ...integrations.coze.exceptions import (
+                CozeError,
+                CozeConnectionError
+            )
+
+            try:
+                project_id = args['project_id']
+                deploy_name = args.get('deploy_name')
+
+                logger.info(
+                    f"coze_deploy_skill: project_id='{project_id}', deploy_name='{deploy_name}', "
+                    f"session_id={self.session_id}"
+                )
+
+                # Deploy skill using the shared CozeClient instance
+                result = await self.node._coze_client.deploy_skill(
+                    project_id=project_id,
+                    deploy_name=deploy_name
+                )
+
+                deploy_id = result.get('deploy_id')
+                logger.info(
+                    f"coze_deploy_skill: Successfully submitted deployment - deploy_id='{deploy_id}'"
+                )
+
+                # Format response
+                import json
+                result_json = json.dumps(result, ensure_ascii=False, indent=2)
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Skill deployment submitted successfully!\n\n"
+                                    f"Deploy ID: {deploy_id}\n"
+                                    f"Project ID: {project_id}\n\n"
+                                    f"Use coze_wait_deployment to wait for completion.\n\n"
+                                    f"Full result:\n{result_json}"
+                        }
+                    ]
+                }
+
+            except ValueError as e:
+                logger.error(f"coze_deploy_skill: Invalid parameter - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Invalid parameter - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeConnectionError as e:
+                logger.error(f"coze_deploy_skill: Connection failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to connect to Coze platform. Please ensure Chrome browser is running with CDP enabled."
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"coze_deploy_skill: Unexpected error - {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Unexpected error occurred - {str(e)}"
+                        }
+                    ]
+                }
+
+        @tool(
+            "coze_list_user_skills",
+            "List user's skills on Coze platform (created or installed)",
+            {
+                "type": "object",
+                "properties": {
+                    "skill_type": {
+                        "type": "string",
+                        "description": "Type of skills to list: 'created' (skills created by user), 'installed' (skills installed by user), 'all' (all skills)",
+                        "enum": ["created", "installed", "all"],
+                        "default": "created"
+                    },
+                    "keyword": {
+                        "type": "string",
+                        "description": "Optional keyword to filter skills (default: empty = all skills)",
+                        "default": ""
+                    }
+                },
+                "required": []
+            }
+        )
+        async def coze_list_user_skills(args):
+            """List user's skills on Coze platform."""
+            from ...integrations.coze.exceptions import (
+                CozeError,
+                CozeConnectionError
+            )
+
+            try:
+                skill_type = args.get('skill_type', 'created')
+                keyword = args.get('keyword', '')
+
+                logger.info(
+                    f"coze_list_user_skills: skill_type='{skill_type}', keyword='{keyword}', "
+                    f"session_id={self.session_id}"
+                )
+
+                # List skills using the shared CozeClient instance
+                skills = await self.node._coze_client.list_user_skills(
+                    skill_type=skill_type,
+                    keyword=keyword
+                )
+
+                logger.info(
+                    f"coze_list_user_skills: Found {len(skills)} skills - skill_type='{skill_type}'"
+                )
+
+                # Format response
+                import json
+                skills_json = json.dumps(skills, ensure_ascii=False, indent=2)
+
+                # Build human-readable summary
+                skill_type_label = {
+                    "created": "创建的",
+                    "installed": "安装的",
+                    "all": "全部"
+                }.get(skill_type, skill_type)
+
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"找到 {len(skills)} 个{skill_type_label}技能:\n\n{skills_json}"
+                        }
+                    ]
+                }
+
+            except ValueError as e:
+                logger.error(f"coze_list_user_skills: Invalid parameter - {e}")
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Invalid parameter - {str(e)}"
+                        }
+                    ]
+                }
+
+            except CozeConnectionError as e:
+                logger.error(f"coze_list_user_skills: Connection failed - {e}", exc_info=True)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Failed to connect to Coze platform. Please ensure Chrome browser is running with CDP enabled."
+                        }
+                    ]
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"coze_list_user_skills: Unexpected error - {e}",
+                    exc_info=True
+                )
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: Unexpected error occurred - {str(e)}"
+                        }
+                    ]
+                }
+
+        # Build tools list based on session mode
+        tools = [
+            send_message,
+            send_email,
+            set_session_topic,
+            task_complete,
+            execute_geogebra_command,
+            programmable_return,
+            coze_search_skill,
+            coze_install_skill,
+            coze_invoke_skill,
+            coze_get_result,
+            coze_create_skill,
+            coze_send_message,
+            coze_get_agent_response,
+            coze_deploy_skill,
+            coze_list_user_skills,
+        ]
+
+        # Add LONG_RUNNING mode specific tools
+        if self.mode == SessionMode.LONG_RUNNING:
+            @tool(
+                "acknowledge_task_started",
+                "Acknowledge that you have understood the task and are ready to start working on it.",
+                {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            )
+            async def acknowledge_task_started(args):
+                """
+                Acknowledge task start for LONG_RUNNING sessions.
+
+                This tool allows the agent to signal that it has understood the task
+                and is ready to start working. After calling this tool, the monitoring
+                system will start checking progress and send reminders if the agent
+                becomes idle without finishing the task.
+                """
+                try:
+                    # Set task started flag
+                    self._task_started = True
+
+                    logger.info(
+                        f"Task acknowledged as started: session_id={self.session_id}"
+                    )
+
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Task acknowledged as started. Progress monitoring is now active."
+                            }
+                        ]
+                    }
+                except Exception as e:
+                    logger.error(
+                        f"Failed to acknowledge task start: session_id={self.session_id}, error={e}",
+                        exc_info=True
+                    )
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"Failed to acknowledge task start: {str(e)}"
+                            }
+                        ]
+                    }
+
+            @tool(
+                "acknowledge_task_finished",
+                "Acknowledge that the current task has been finished.",
+                {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            )
+            async def acknowledge_task_finished(args):
+                """
+                Acknowledge task completion for LONG_RUNNING sessions.
+
+                This tool allows the agent to signal that it has finished the current task
+                and is ready to accept new tasks. The session continues to run.
+                """
+                try:
+                    # Set task acknowledgment flag
+                    self._task_acknowledged = True
+
+                    logger.info(
+                        f"Task acknowledged as finished: session_id={self.session_id}"
+                    )
+
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Task acknowledged as finished. Ready for next task."
+                            }
+                        ]
+                    }
+                except Exception as e:
+                    logger.error(
+                        f"Failed to acknowledge task: session_id={self.session_id}, error={e}",
+                        exc_info=True
+                    )
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"Failed to acknowledge task: {str(e)}"
+                            }
+                        ]
+                    }
+
+            tools.append(acknowledge_task_started)
+            tools.append(acknowledge_task_finished)
+
         return create_sdk_mcp_server(
             name="mosaic-mcp-server",
-            tools=[send_message, send_email, task_complete]
+            tools=tools
         )
 
     # ========== Helper Methods ==========
@@ -1386,16 +3673,59 @@ class ClaudeCodeSession(MosaicSession):
         # Internal event: User message (direct input)
         if event_type == EventType.USER_MESSAGE_EVENT:
             payload = event.get("payload", {})
-            return payload.get("message", "")
+            message = payload.get("message", "")
+            context = payload.get("context")
 
-        # Network events: Format as structured event
-        formatted_event = {
-            "event_id": event.get("event_id", "unknown"),
-            "event_type": event.get("event_type", "unknown"),
-            "source_node_id": event.get("source_node_id", "unknown"),
-            "source_session_id": event.get("source_session_id", "unknown"),
-            "payload": event.get("payload", {})
-        }
+            # If context is present, append it as formatted JSON
+            if context:
+                context_json = json.dumps(context, indent=2, ensure_ascii=False)
+                return f"{message}\n\n[Context]\n{context_json}"
+
+            return message
+
+        # Internal event: Programmable call request
+        if event_type == EventType.PROGRAMMABLE_CALL_EVENT:
+            payload = event.get("payload", {})
+            call_id = payload.get("call_id", "")
+            method = payload.get("method", "")
+            instruction = payload.get("instruction")
+            kwargs = payload.get("kwargs", {})
+            return_schema = payload.get("return_schema")
+
+            # Build formatted message
+            parts = [f"[Programmable Call Request]"]
+            parts.append(f"Call ID: {call_id}")
+            parts.append(f"Method: {method}")
+
+            if instruction:
+                parts.append(f"\nInstruction:\n{instruction}")
+
+            if kwargs:
+                kwargs_json = json.dumps(kwargs, indent=2, ensure_ascii=False)
+                parts.append(f"\nArguments:\n{kwargs_json}")
+
+            if return_schema:
+                schema_json = json.dumps(return_schema, indent=2, ensure_ascii=False)
+                parts.append(f"\nExpected Return Schema:\n{schema_json}")
+
+            parts.append("\nPlease process this request and use the 'programmable_return' MCP tool to return the result.")
+
+            return "\n".join(parts)
+
+        if event_type == EventType.SYSTEM_MESSAGE:
+            formatted_event = {
+                "event_type": EventType.SYSTEM_MESSAGE,
+                "payload": event.get("payload", {})
+            }
+        else:
+            # Network events: Format as structured event
+            formatted_event = {
+                "event_id": event.get("event_id", "unknown"),
+                "event_type": event.get("event_type", "unknown"),
+                "source_node_id": event.get("source_node_id", "unknown"),
+                "source_session_id": event.get("source_session_id", "unknown"),
+                "payload": event.get("payload", {})
+            }
 
         # Convert to formatted JSON string
         message = f"{json.dumps(formatted_event, indent=2, ensure_ascii=False)}"

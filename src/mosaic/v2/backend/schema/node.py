@@ -141,3 +141,16 @@ class WorkspaceFileContentOut(BaseModel):
     truncated: bool = Field(..., description="Whether content was truncated due to size limit")
     mime_type: str | None = Field(None, description="MIME type")
     language: str | None = Field(None, description="Programming language (inferred from extension)")
+
+
+# ==================== Code Server Schemas ====================
+
+class CodeServerUrlOut(BaseModel):
+    """Code server URL for a node's workspace
+
+    Returns the URL to access code-server with the node's workspace already opened.
+    The URL includes the ?folder= parameter pointing to the node's workspace directory.
+    """
+
+    url: str = Field(..., description="Full URL to access code-server with workspace folder parameter")
+    workspace_path: str = Field(..., description="Absolute path to the workspace directory")

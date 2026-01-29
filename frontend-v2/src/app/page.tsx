@@ -199,18 +199,20 @@ function HomePage() {
     <TooltipProvider>
       <div className="min-h-screen bg-background">
         <Navbar />
-        <div className="container mx-auto px-4 py-8">
-          <div className="mb-8 flex items-center justify-between">
-            <div>
-              <h1 className="text-4xl font-bold">Mosaic 实例</h1>
-              <p className="mt-2 text-muted-foreground">
-                管理你的事件驱动多智能体系统实例
-              </p>
+        <div className="container mx-auto px-4 py-4 sm:py-6 md:py-8">
+          <div className="mb-6 md:mb-8">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h1 className="text-2xl font-bold md:text-4xl">Mosaic 实例</h1>
+                <p className="mt-1 text-sm text-muted-foreground md:mt-2 md:text-base">
+                  管理你的事件驱动多智能体系统实例
+                </p>
+              </div>
+              <Button onClick={() => setCreateDialogOpen(true)} className="w-full md:w-auto">
+                <Plus className="mr-2 h-4 w-4" />
+                新建 Mosaic
+              </Button>
             </div>
-            <Button onClick={() => setCreateDialogOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              新建 Mosaic
-            </Button>
           </div>
 
           {loading ? (
@@ -226,26 +228,24 @@ function HomePage() {
               </Button>
             </div>
           ) : (
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 md:gap-6">
               {mosaics.map((mosaic) => (
                 <Link key={mosaic.id} href={`/mosaic/${mosaic.id}/topology`}>
                   <Card className="h-full transition-all hover:shadow-lg hover:border-primary/50">
                     <CardHeader>
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <CardTitle className="text-xl">{mosaic.name}</CardTitle>
-                          <CardDescription className="mt-1.5 text-xs text-muted-foreground">
-                            ID: {mosaic.id}
-                          </CardDescription>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline">
-                            节点: {mosaic.node_count}
-                          </Badge>
+                      <div className="flex flex-col gap-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <CardTitle className="text-lg md:text-xl truncate">{mosaic.name}</CardTitle>
+                            <CardDescription className="mt-1 text-xs text-muted-foreground">
+                              ID: {mosaic.id}
+                            </CardDescription>
+                          </div>
                           <Badge
                             variant={
                               mosaic.status === "running" ? "default" : "secondary"
                             }
+                            className="shrink-0"
                           >
                             <Circle
                               className={cn(
@@ -253,17 +253,24 @@ function HomePage() {
                                 mosaic.status === "running" && "text-green-500"
                               )}
                             />
-                            {mosaic.status === "running" ? "运行中" : "已停止"}
+                            <span className="hidden sm:inline">{mosaic.status === "running" ? "运行中" : "已停止"}</span>
+                            <span className="sm:hidden">{mosaic.status === "running" ? "运行" : "停止"}</span>
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-xs">
+                            节点: {mosaic.node_count}
                           </Badge>
                         </div>
                       </div>
                     </CardHeader>
                     <CardContent>
-                      <p className="text-sm text-muted-foreground mb-4">
+                      <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
                         {mosaic.description || "暂无描述"}
                       </p>
-                      <div className="flex items-center justify-end text-xs text-muted-foreground mb-4">
-                        创建于 {new Date(mosaic.created_at).toLocaleString("zh-CN", {
+                      <div className="flex items-center justify-end text-xs text-muted-foreground mb-3">
+                        <span className="hidden sm:inline">创建于 </span>
+                        {new Date(mosaic.created_at).toLocaleString("zh-CN", {
                           year: "numeric",
                           month: "2-digit",
                           day: "2-digit",
@@ -273,15 +280,15 @@ function HomePage() {
                           hour12: false
                         })}
                       </div>
-                      <div className="flex gap-2" onClick={(e) => e.preventDefault()}>
+                      <div className="flex flex-col gap-2 sm:flex-row" onClick={(e) => e.preventDefault()}>
                         {mosaic.status === "running" ? (
                           <Button
                             size="sm"
                             variant="destructive"
-                            className="flex-1"
+                            className="w-full"
                             onClick={(e) => handleStopMosaic(mosaic.id, e)}
                           >
-                            <Square className="mr-1 h-3 w-3" />
+                            <Square className="mr-1.5 h-3.5 w-3.5" />
                             停止
                           </Button>
                         ) : (
@@ -289,46 +296,31 @@ function HomePage() {
                             <Button
                               size="sm"
                               variant="default"
-                              className="flex-1"
+                              className="w-full"
                               onClick={(e) => handleStartMosaic(mosaic.id, e)}
                             >
-                              <Play className="mr-1 h-3 w-3" />
+                              <Play className="mr-1.5 h-3.5 w-3.5" />
                               启动
                             </Button>
                             <Button
                               size="sm"
                               variant="outline"
+                              className="sm:w-auto w-full"
                               onClick={(e) => handleEditMosaic(mosaic, e)}
                             >
-                              <Edit className="h-3 w-3" />
+                              <Edit className="mr-1.5 h-3.5 w-3.5 sm:mr-0" />
+                              <span className="sm:hidden">编辑</span>
                             </Button>
-                            {mosaic.node_count > 0 ? (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="text-destructive hover:text-destructive"
-                                    disabled
-                                  >
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  <p>此 Mosaic 有 {mosaic.node_count} 个节点</p>
-                                  <p className="text-xs text-muted-foreground">需要先删除所有节点</p>
-                                </TooltipContent>
-                              </Tooltip>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-destructive hover:text-destructive"
-                                onClick={(e) => handleDeleteMosaic(mosaic.id, e)}
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-destructive hover:text-destructive sm:w-auto w-full"
+                              disabled={mosaic.node_count > 0}
+                              onClick={(e) => handleDeleteMosaic(mosaic.id, e)}
+                            >
+                              <Trash2 className="mr-1.5 h-3.5 w-3.5 sm:mr-0" />
+                              <span className="sm:hidden">删除</span>
+                            </Button>
                           </>
                         )}
                       </div>
@@ -342,16 +334,16 @@ function HomePage() {
 
         {/* Create Mosaic Dialog */}
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-          <DialogContent>
+          <DialogContent className="sm:max-w-[425px] max-w-[calc(100vw-2rem)]">
             <DialogHeader>
-              <DialogTitle>创建新的 Mosaic 实例</DialogTitle>
-              <DialogDescription>
+              <DialogTitle className="text-lg sm:text-xl">创建新的 Mosaic 实例</DialogTitle>
+              <DialogDescription className="text-sm">
                 创建一个新的事件驱动多智能体系统实例
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="name">名称 *</Label>
+                <Label htmlFor="name" className="text-sm">名称 *</Label>
                 <Input
                   id="name"
                   placeholder="例如:生产环境、开发测试"
@@ -360,10 +352,11 @@ function HomePage() {
                     setFormData({ ...formData, name: e.target.value })
                   }
                   maxLength={100}
+                  className="text-base"
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="description">描述(可选)</Label>
+                <Label htmlFor="description" className="text-sm">描述(可选)</Label>
                 <Textarea
                   id="description"
                   placeholder="描述这个 Mosaic 实例的用途..."
@@ -373,20 +366,23 @@ function HomePage() {
                   }
                   maxLength={500}
                   rows={3}
+                  className="text-base resize-none"
                 />
               </div>
             </div>
-            <DialogFooter>
+            <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
               <Button
                 variant="outline"
                 onClick={() => setCreateDialogOpen(false)}
                 disabled={creating}
+                className="w-full sm:w-auto"
               >
                 取消
               </Button>
               <Button
                 onClick={handleCreateMosaic}
                 disabled={creating || !formData.name.trim()}
+                className="w-full sm:w-auto"
               >
                 {creating ? (
                   <>
@@ -403,16 +399,16 @@ function HomePage() {
 
         {/* Edit Mosaic Dialog */}
         <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-          <DialogContent>
+          <DialogContent className="sm:max-w-[425px] max-w-[calc(100vw-2rem)]">
             <DialogHeader>
-              <DialogTitle>编辑 Mosaic 实例</DialogTitle>
-              <DialogDescription>
+              <DialogTitle className="text-lg sm:text-xl">编辑 Mosaic 实例</DialogTitle>
+              <DialogDescription className="text-sm">
                 修改 Mosaic 实例的名称和描述
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="edit-name">名称 *</Label>
+                <Label htmlFor="edit-name" className="text-sm">名称 *</Label>
                 <Input
                   id="edit-name"
                   placeholder="例如:生产环境、开发测试"
@@ -421,10 +417,11 @@ function HomePage() {
                     setFormData({ ...formData, name: e.target.value })
                   }
                   maxLength={100}
+                  className="text-base"
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="edit-description">描述(可选)</Label>
+                <Label htmlFor="edit-description" className="text-sm">描述(可选)</Label>
                 <Textarea
                   id="edit-description"
                   placeholder="描述这个 Mosaic 实例的用途..."
@@ -434,10 +431,11 @@ function HomePage() {
                   }
                   maxLength={500}
                   rows={3}
+                  className="text-base resize-none"
                 />
               </div>
             </div>
-            <DialogFooter>
+            <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
               <Button
                 variant="outline"
                 onClick={() => {
@@ -446,12 +444,14 @@ function HomePage() {
                   setFormData({ name: "", description: "" })
                 }}
                 disabled={updating}
+                className="w-full sm:w-auto"
               >
                 取消
               </Button>
               <Button
                 onClick={handleUpdateMosaic}
                 disabled={updating || !formData.name.trim()}
+                className="w-full sm:w-auto"
               >
                 {updating ? (
                   <>
@@ -468,10 +468,10 @@ function HomePage() {
 
         {/* Stop Mosaic Confirmation Dialog */}
         <Dialog open={stopConfirmOpen} onOpenChange={setStopConfirmOpen}>
-          <DialogContent>
+          <DialogContent className="sm:max-w-[425px] max-w-[calc(100vw-2rem)]">
             <DialogHeader>
-              <DialogTitle>确认停止 Mosaic 实例</DialogTitle>
-              <DialogDescription>
+              <DialogTitle className="text-lg sm:text-xl">确认停止 Mosaic 实例</DialogTitle>
+              <DialogDescription className="text-sm">
                 停止运行中的 Mosaic 实例将会终止所有正在运行的节点。此操作可以随时重新启动。
               </DialogDescription>
             </DialogHeader>
@@ -482,19 +482,21 @@ function HomePage() {
                 </span> 吗?
               </p>
             </div>
-            <DialogFooter>
+            <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
               <Button
                 variant="outline"
                 onClick={() => {
                   setStopConfirmOpen(false)
                   setMosaicToStop(null)
                 }}
+                className="w-full sm:w-auto"
               >
                 取消
               </Button>
               <Button
                 variant="destructive"
                 onClick={confirmStopMosaic}
+                className="w-full sm:w-auto"
               >
                 确认停止
               </Button>
@@ -504,7 +506,7 @@ function HomePage() {
 
         {/* Delete Mosaic Confirmation Dialog */}
         <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-          <DialogContent>
+          <DialogContent className="sm:max-w-[500px] max-w-[calc(100vw-2rem)]">
             {(() => {
               const targetMosaic = mosaics.find((m) => m.id === mosaicToDelete)
               const hasNodes = (targetMosaic?.node_count || 0) > 0
@@ -512,11 +514,11 @@ function HomePage() {
               return hasNodes ? (
                 <>
                   <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                      <AlertCircle className="h-5 w-5 text-destructive" />
-                      无法删除 Mosaic 实例
+                    <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
+                      <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
+                      <span>无法删除 Mosaic 实例</span>
                     </DialogTitle>
-                    <DialogDescription>
+                    <DialogDescription className="text-sm">
                       此 Mosaic 实例下仍有节点存在,必须先删除所有节点才能删除实例。
                     </DialogDescription>
                   </DialogHeader>
@@ -526,7 +528,7 @@ function HomePage() {
                         当前状态
                       </p>
                       <ul className="text-sm text-muted-foreground space-y-1">
-                        <li>Mosaic 名称: <span className="font-semibold text-foreground">{targetMosaic?.name}</span></li>
+                        <li className="break-words">Mosaic 名称: <span className="font-semibold text-foreground">{targetMosaic?.name}</span></li>
                         <li>节点数量: <span className="font-semibold text-foreground">{targetMosaic?.node_count}</span></li>
                       </ul>
                     </div>
@@ -534,13 +536,14 @@ function HomePage() {
                       请先前往节点管理页面删除所有节点,然后再尝试删除此 Mosaic 实例。
                     </p>
                   </div>
-                  <DialogFooter>
+                  <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
                     <Button
                       variant="outline"
                       onClick={() => {
                         setDeleteConfirmOpen(false)
                         setMosaicToDelete(null)
                       }}
+                      className="w-full sm:w-auto"
                     >
                       取消
                     </Button>
@@ -550,6 +553,7 @@ function HomePage() {
                         setMosaicToDelete(null)
                         router.push(`/mosaic/${mosaicToDelete}/nodes`)
                       }}
+                      className="w-full sm:w-auto"
                     >
                       前往节点管理
                     </Button>
@@ -558,13 +562,13 @@ function HomePage() {
               ) : (
                 <>
                   <DialogHeader>
-                    <DialogTitle>确认删除 Mosaic 实例</DialogTitle>
-                    <DialogDescription>
+                    <DialogTitle className="text-lg sm:text-xl">确认删除 Mosaic 实例</DialogTitle>
+                    <DialogDescription className="text-sm">
                       删除 Mosaic 实例是不可逆的操作,将永久删除该实例及其所有配置。
                     </DialogDescription>
                   </DialogHeader>
                   <div className="py-4 space-y-4">
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-muted-foreground break-words">
                       你确定要删除 <span className="font-semibold text-foreground">
                         {targetMosaic?.name}
                       </span> 吗?
@@ -576,7 +580,7 @@ function HomePage() {
                       </p>
                     </div>
                   </div>
-                  <DialogFooter>
+                  <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
                     <Button
                       variant="outline"
                       onClick={() => {
@@ -584,6 +588,7 @@ function HomePage() {
                         setMosaicToDelete(null)
                       }}
                       disabled={deleting}
+                      className="w-full sm:w-auto"
                     >
                       取消
                     </Button>
@@ -591,6 +596,7 @@ function HomePage() {
                       variant="destructive"
                       onClick={confirmDeleteMosaic}
                       disabled={deleting}
+                      className="w-full sm:w-auto"
                     >
                       {deleting ? (
                         <>

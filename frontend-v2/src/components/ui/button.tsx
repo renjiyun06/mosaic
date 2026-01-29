@@ -3,6 +3,7 @@ import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
+import { useTheme } from "@/contexts/theme-context"
 
 const buttonVariants = cva(
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
@@ -42,10 +43,42 @@ export interface ButtonProps
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
+    const { theme } = useTheme()
     const Comp = asChild ? Slot : "button"
+
+    // Get theme-specific classes
+    const getThemeClasses = () => {
+      switch (theme) {
+        case 'cyberpunk':
+          return variant === 'default'
+            ? 'neon-border hover:shadow-[0_0_20px_hsl(var(--primary)/0.5)]'
+            : variant === 'outline'
+            ? 'hover:neon-border'
+            : ''
+        case 'glassmorphism':
+          return variant === 'default' || variant === 'outline'
+            ? 'backdrop-blur-md bg-opacity-80'
+            : ''
+        case 'terminal':
+          return variant === 'default'
+            ? 'border-2 border-primary hover:shadow-[0_0_12px_hsl(var(--primary))] font-mono'
+            : variant === 'outline'
+            ? 'border-2 font-mono'
+            : 'font-mono'
+        case 'minimal':
+          return variant === 'default'
+            ? 'rounded-none border-2 border-foreground hover:bg-foreground hover:text-background'
+            : variant === 'outline'
+            ? 'rounded-none border-2'
+            : 'rounded-none'
+        default:
+          return ''
+      }
+    }
+
     return (
       <Comp
-        className={cn(buttonVariants({ variant, size, className }))}
+        className={cn(buttonVariants({ variant, size, className }), getThemeClasses())}
         ref={ref}
         {...props}
       />

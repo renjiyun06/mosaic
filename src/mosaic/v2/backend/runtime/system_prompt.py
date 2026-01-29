@@ -8,6 +8,7 @@ from sqlmodel import select
 from ..model.node import Node
 from ..model.connection import Connection
 from ..model.subscription import Subscription
+from ..model.mosaic import Mosaic
 from .event_definition import EVENT_DEFINITIONS
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,18 @@ async def generate_system_prompt_template(
     logger.info(f"Generating system prompt template for node {node.node_id}")
 
     async with async_session_factory() as db:
+        # 0. Get mosaic information
+        stmt = select(Mosaic).where(Mosaic.id == mosaic_id)
+        result = await db.execute(stmt)
+        mosaic = result.scalar_one_or_none()
+
+        if not mosaic:
+            logger.error(f"Mosaic with id {mosaic_id} not found")
+            raise ValueError(f"Mosaic with id {mosaic_id} not found")
+
+        mosaic_name = mosaic.name
+        logger.debug(f"Found mosaic: {mosaic_name}")
+
         # 1. Get all nodes in the mosaic
         stmt = select(Node).where(
             Node.mosaic_id == mosaic_id,
@@ -122,6 +135,7 @@ async def generate_system_prompt_template(
     # 9. Render template
     template = Template(SYSTEM_PROMPT_TEMPLATE)
     prompt = template.render(
+        mosaic_name=mosaic_name,
         node_id=node.node_id,
         session_id_placeholder="{session_id}",
         nodes=formatted_nodes,
@@ -141,9 +155,15 @@ async def generate_system_prompt_template(
 # ========== System Prompt Template ==========
 
 SYSTEM_PROMPT_TEMPLATE = """
+[Important: Image Handling]
+When you see image links in markdown format (e.g., ![filename](http://...)), do NOT use WebFetch tool directly. Instead:
+1. Use wget to download the image to /tmp directory first
+2. Then read the downloaded image file from /tmp
+
 You are now a node operating within the Mosaic Event Mesh system.
 
 [Identity]
+Mosaic Name: {{ mosaic_name }}
 Node ID: {{ node_id }}
 
 [Current Session]

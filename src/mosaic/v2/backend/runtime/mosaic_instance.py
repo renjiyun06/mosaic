@@ -4,7 +4,7 @@ import logging
 from typing import Dict, Optional, List, Any, TYPE_CHECKING, Type
 from pathlib import Path
 
-from ..enum import MosaicStatus, NodeStatus, NodeType
+from ..enum import MosaicStatus, NodeStatus, NodeType, Nil
 from ..exception import (
     MosaicAlreadyRunningError,
     MosaicNotRunningError,
@@ -21,6 +21,8 @@ from .command import (
     SendMessageCommand,
     InterruptSessionCommand,
     CloseSessionCommand,
+    ToolResponseCommand,
+    ProgrammableCallCommand,
 )
 
 if TYPE_CHECKING:
@@ -50,11 +52,13 @@ def _get_node_type_registry() -> Dict[NodeType, Type['MosaicNode']]:
     from .node.claude_code import ClaudeCodeNode
     from .node.scheduler import SchedulerNode
     from .node.email import EmailNode
+    from .node.aggregator import AggregatorNode
 
     return {
         NodeType.CLAUDE_CODE: ClaudeCodeNode,
         NodeType.SCHEDULER: SchedulerNode,
         NodeType.EMAIL: EmailNode,
+        NodeType.AGGREGATOR: AggregatorNode,
     }
 
 
@@ -263,7 +267,7 @@ class MosaicInstance:
                     result = await self._execute_command(command)
 
                     # Resolve future if present
-                    if command.future and not command.future.done():
+                    if result != Nil.NIL and command.future and not command.future.done():
                         command.set_result(result)
 
                 except Exception as e:
@@ -335,6 +339,10 @@ class MosaicInstance:
             return await self._handle_interrupt_session(command)
         elif isinstance(command, CloseSessionCommand):
             return await self._handle_close_session(command)
+        elif isinstance(command, ToolResponseCommand):
+            return await self._handle_tool_response(command)
+        elif isinstance(command, ProgrammableCallCommand):
+            return await self._handle_programmable_call(command)
         else:
             raise RuntimeInternalError(
                 f"Unknown command type: {command.__class__.__name__}"
@@ -474,7 +482,7 @@ class MosaicInstance:
 
         Steps:
         1. Get the MosaicNode instance via self._get_node(command.node)
-        2. Delegate to mosaic_node.send_message(command.session_id, command.message)
+        2. Delegate to mosaic_node.send_message(command.session_id, command.message, command.context)
         3. Return None
 
         Args:
@@ -487,7 +495,7 @@ class MosaicInstance:
             NodeNotFoundError: If node is not running
         """
         mosaic_node = self._get_node(command.node)
-        await mosaic_node.send_message(command.session.session_id, command.message)
+        await mosaic_node.send_message(command.session.session_id, command.message, command.context)
 
     async def _handle_interrupt_session(self, command: InterruptSessionCommand) -> None:
         """
@@ -530,6 +538,85 @@ class MosaicInstance:
         """
         mosaic_node = self._get_node(command.node)
         await mosaic_node.close_session(command.session_id)
+
+    async def _handle_tool_response(self, command: ToolResponseCommand) -> None:
+        """
+        Handle ToolResponseCommand.
+
+        Steps:
+        1. Get the MosaicNode instance via self._get_node(command.node)
+        2. Delegate to mosaic_node.handle_tool_response(session_id, response_id, result)
+        3. Return None
+
+        Args:
+            command: ToolResponseCommand instance
+
+        Returns:
+            None
+
+        Raises:
+            NodeNotFoundError: If node is not running
+        """
+        mosaic_node = self._get_node(command.node)
+        await mosaic_node.handle_tool_response(
+            command.session.session_id,
+            command.response_id,
+            command.result
+        )
+
+    async def _handle_programmable_call(self, command: ProgrammableCallCommand) -> None:
+        """
+        Handle ProgrammableCallCommand.
+
+        This handler routes programmable call requests to the target node for execution.
+
+        Flow:
+        1. Get the MosaicNode instance via self._get_node(command.node)
+        2. Delegate to mosaic_node.execute_programmable_call() with all parameters:
+           - session_id: command.session.session_id (extract session_id from Session object)
+           - call_id: command.call_id
+           - method: command.method
+           - instruction: command.instruction
+           - kwargs: command.kwargs
+           - return_schema: command.return_schema
+           - command: command reference (for MCP tool to set result)
+        3. Return immediately (don't wait for result)
+
+        Args:
+            command: ProgrammableCallCommand instance containing:
+                - node: Target node model object
+                - session: Session model object (must be ACTIVE)
+                - call_id: Unique call identifier (UUID)
+                - method: Semantic method identifier
+                - instruction: Optional task description
+                - kwargs: Call arguments (JSON-serializable dict)
+                - return_schema: Optional JSON Schema for return value
+
+        Returns:
+            None: This method returns immediately. The MCP tool will set command.future result.
+
+        Raises:
+            NodeNotFoundError: If the target node is not running
+            SessionNotFoundError: If the session doesn't exist in the node
+            RuntimeInternalError: If execution fails or validation errors occur
+
+        Note:
+            The command object is passed down to the session layer, where it's stored.
+            The MCP tool (programmable_return) will later call command.set_result() to resolve the future.
+        """
+        # Get the running node instance
+        mosaic_node = self._get_node(command.node)
+
+        # Delegate to node's execute_programmable_call method
+        return await mosaic_node.execute_programmable_call(
+            session_id=command.session.session_id,
+            call_id=command.call_id,
+            method=command.method,
+            instruction=command.instruction,
+            kwargs=command.kwargs,
+            return_schema=command.return_schema,
+            command=command
+        )
 
     # ========== Node Management (Internal) ==========
 

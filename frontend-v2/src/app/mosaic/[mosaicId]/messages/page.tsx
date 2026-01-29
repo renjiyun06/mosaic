@@ -20,6 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { apiClient } from "@/lib/api"
 import type { MessageOut } from "@/lib/types"
 import { MessageRole, MessageType } from "@/lib/types"
@@ -27,6 +28,9 @@ import { MessageRole, MessageType } from "@/lib/types"
 export default function MessagesPage() {
   const params = useParams()
   const mosaicId = parseInt(params.mosaicId as string)
+
+  // Mobile detection
+  const [isMobile, setIsMobile] = useState(false)
 
   // Filter state
   const [sessionIdFilter, setSessionIdFilter] = useState("")
@@ -44,6 +48,14 @@ export default function MessagesPage() {
   // Message detail dialog state
   const [selectedMessage, setSelectedMessage] = useState<MessageOut | null>(null)
   const [detailDialogOpen, setDetailDialogOpen] = useState(false)
+
+  // Mobile detection effect
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   // Fetch messages when sessionIdFilter or page changes
   useEffect(() => {
@@ -150,16 +162,16 @@ export default function MessagesPage() {
   }
 
   return (
-    <div className="flex flex-col h-full space-y-6 overflow-auto">
+    <div className="flex flex-col h-full space-y-3 sm:space-y-4 md:space-y-6 overflow-auto">
       {/* Header */}
       <div className="flex-shrink-0">
-        <h1 className="text-3xl font-bold">会话消息</h1>
-        <p className="text-muted-foreground mt-1">查看指定会话的所有消息记录，按序号升序排列</p>
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">会话消息</h1>
+        <p className="text-muted-foreground mt-1 text-sm md:text-base">查看指定会话的所有消息记录，按序号升序排列</p>
       </div>
 
       {/* Filter */}
       <div className="flex-shrink-0 flex justify-end">
-        <div className="relative w-1/2">
+        <div className="relative w-full sm:w-3/4 md:w-1/2">
           <Input
             placeholder="输入会话 ID..."
             value={sessionIdFilter}
@@ -167,7 +179,7 @@ export default function MessagesPage() {
               setSessionIdFilter(e.target.value)
               setCurrentPage(1)
             }}
-            className="pr-8 focus-visible:ring-0 focus-visible:ring-offset-0"
+            className="pr-8 text-base focus-visible:ring-0 focus-visible:ring-offset-0"
           />
           {sessionIdFilter && (
             <button
@@ -185,26 +197,63 @@ export default function MessagesPage() {
 
       {/* Message list */}
       {loading ? (
-        <div className="flex items-center justify-center min-h-[400px]">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="flex items-center justify-center min-h-[300px] sm:min-h-[400px]">
+          <Loader2 className="h-6 w-6 sm:h-8 sm:w-8 animate-spin text-muted-foreground" />
         </div>
       ) : !sessionIdFilter.trim() ? (
-        <div className="flex-1 flex flex-col items-center pt-16 border rounded-lg">
-          <Mail className="h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-xl font-semibold mb-2">输入会话 ID 开始查询</h2>
-          <p className="text-muted-foreground text-center mb-6 max-w-lg">
+        <div className="flex-1 flex flex-col items-center pt-8 sm:pt-16 border rounded-lg px-4">
+          <Mail className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground mb-3 sm:mb-4" />
+          <h2 className="text-lg sm:text-xl font-semibold mb-2 text-center">输入会话 ID 开始查询</h2>
+          <p className="text-sm sm:text-base text-muted-foreground text-center mb-4 sm:mb-6 max-w-lg">
             输入会话 ID 后，系统将自动加载该会话的所有消息记录。
           </p>
         </div>
       ) : messages.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center pt-16 border rounded-lg">
-          <Mail className="h-12 w-12 text-muted-foreground mb-4" />
-          <h2 className="text-xl font-semibold mb-2">没有找到消息</h2>
-          <p className="text-muted-foreground text-center mb-6 max-w-lg">
+        <div className="flex-1 flex flex-col items-center pt-8 sm:pt-16 border rounded-lg px-4">
+          <Mail className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground mb-3 sm:mb-4" />
+          <h2 className="text-lg sm:text-xl font-semibold mb-2 text-center">没有找到消息</h2>
+          <p className="text-sm sm:text-base text-muted-foreground text-center mb-4 sm:mb-6 max-w-lg">
             该会话还没有任何消息记录，或会话 ID 不存在。
           </p>
         </div>
+      ) : isMobile ? (
+        // Mobile card view
+        <div className="flex-1 overflow-auto space-y-3">
+          {messages.map((message) => (
+            <Card key={message.id} className="cursor-pointer hover:border-primary/50" onClick={() => handleViewDetail(message)}>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Badge variant="outline" className="text-xs">#{message.sequence}</Badge>
+                  <Badge variant={getRoleBadgeVariant(message.role)} className="text-xs">
+                    {getRoleLabel(message.role)}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div>
+                  <span className="text-xs text-muted-foreground">类型：</span>
+                  <Badge variant="outline" className="text-xs ml-1">{getMessageTypeLabel(message.message_type)}</Badge>
+                </div>
+                <div className="text-sm text-muted-foreground line-clamp-2">
+                  {formatPayload(message.payload)}
+                </div>
+                <div className="text-xs text-muted-foreground pt-2 border-t">
+                  {new Date(message.created_at).toLocaleString("zh-CN", {
+                    year: "numeric",
+                    month: "2-digit",
+                    day: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                    hour12: false,
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       ) : (
+        // Desktop table view
         <>
           <div className="flex-1 flex flex-col min-h-0 border rounded-lg">
             <div className="flex-1 overflow-auto">
@@ -256,63 +305,66 @@ export default function MessagesPage() {
             </div>
           </div>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex-shrink-0 flex items-center justify-between">
-              <div className="text-sm text-muted-foreground">
-                共 {total} 条记录，第 {currentPage} / {totalPages} 页
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handlePreviousPage}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4 mr-1" />
-                  上一页
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleNextPage}
-                  disabled={currentPage === totalPages}
-                >
-                  下一页
-                  <ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
-              </div>
-            </div>
-          )}
         </>
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && messages.length > 0 && (
+        <div className="flex-shrink-0 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
+          <div className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">
+            共 {total} 条记录，第 {currentPage} / {totalPages} 页
+          </div>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePreviousPage}
+              disabled={currentPage === 1}
+              className="flex-1 sm:flex-initial"
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" />
+              上一页
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleNextPage}
+              disabled={currentPage === totalPages}
+              className="flex-1 sm:flex-initial"
+            >
+              下一页
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        </div>
       )}
 
       {/* Message Detail Dialog */}
       <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-scroll" onOpenAutoFocus={(e) => e.preventDefault()}>
+        <DialogContent className="sm:max-w-3xl max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto" onOpenAutoFocus={(e) => e.preventDefault()}>
           <DialogHeader>
-            <DialogTitle>消息详情</DialogTitle>
+            <DialogTitle className="text-lg sm:text-xl">消息详情</DialogTitle>
           </DialogHeader>
           {selectedMessage && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <div className="text-sm font-medium text-muted-foreground mb-1">序号</div>
-                  <Badge variant="outline">{selectedMessage.sequence}</Badge>
+                  <div className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">序号</div>
+                  <Badge variant="outline" className="text-xs sm:text-sm">{selectedMessage.sequence}</Badge>
                 </div>
                 <div>
-                  <div className="text-sm font-medium text-muted-foreground mb-1">角色</div>
-                  <Badge variant={getRoleBadgeVariant(selectedMessage.role)}>
+                  <div className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">角色</div>
+                  <Badge variant={getRoleBadgeVariant(selectedMessage.role)} className="text-xs sm:text-sm">
                     {getRoleLabel(selectedMessage.role)}
                   </Badge>
                 </div>
                 <div>
-                  <div className="text-sm font-medium text-muted-foreground mb-1">消息类型</div>
-                  <Badge variant="outline">{getMessageTypeLabel(selectedMessage.message_type)}</Badge>
+                  <div className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">消息类型</div>
+                  <Badge variant="outline" className="text-xs sm:text-sm">{getMessageTypeLabel(selectedMessage.message_type)}</Badge>
                 </div>
                 <div>
-                  <div className="text-sm font-medium text-muted-foreground mb-1">创建时间</div>
-                  <div className="text-sm">
+                  <div className="text-xs sm:text-sm font-medium text-muted-foreground mb-1">创建时间</div>
+                  <div className="text-xs sm:text-sm">
                     {new Date(selectedMessage.created_at).toLocaleString("zh-CN", {
                       year: "numeric",
                       month: "2-digit",
@@ -326,8 +378,8 @@ export default function MessagesPage() {
                 </div>
               </div>
               <div>
-                <div className="text-sm font-medium text-muted-foreground mb-2">消息内容</div>
-                <pre className="p-4 bg-muted rounded-lg text-sm overflow-x-auto whitespace-pre-wrap break-words">
+                <div className="text-xs sm:text-sm font-medium text-muted-foreground mb-2">消息内容</div>
+                <pre className="p-3 sm:p-4 bg-muted rounded-lg text-xs sm:text-sm overflow-x-auto whitespace-pre-wrap break-words">
                   {typeof selectedMessage.payload === "string"
                     ? JSON.stringify(JSON.parse(selectedMessage.payload), null, 2)
                     : JSON.stringify(selectedMessage.payload, null, 2)}

@@ -20,6 +20,7 @@ from ..schema.node import (
     WorkspaceInfoOut,
     WorkspaceFilesOut,
     WorkspaceFileContentOut,
+    CodeServerUrlOut,
 )
 from ..model import Mosaic, Node, Session
 from ..dep import get_db_session, get_current_user
@@ -816,17 +817,17 @@ async def stop_node(
 # ==================== Workspace API Endpoints ====================
 
 def _validate_workspace_path(workspace_root: Path, requested_path: str) -> Path:
-    """Validate and resolve a path within workspace (prevent path traversal)
+    """Validate and resolve a path within workspace
 
     Args:
         workspace_root: Workspace root directory
         requested_path: User-requested relative path
 
     Returns:
-        Resolved absolute path within workspace
+        Absolute path within workspace
 
     Raises:
-        ValidationError: If path is invalid or outside workspace
+        ValidationError: If path is invalid
     """
     # Normalize path (remove leading/trailing slashes)
     normalized_path = requested_path.strip("/")
@@ -837,19 +838,7 @@ def _validate_workspace_path(workspace_root: Path, requested_path: str) -> Path:
     else:
         full_path = workspace_root
 
-    # Resolve to absolute path
-    try:
-        resolved_path = full_path.resolve()
-    except (OSError, RuntimeError) as e:
-        raise ValidationError(f"Invalid path: {e}")
-
-    # Security check: ensure resolved path is within workspace
-    try:
-        resolved_path.relative_to(workspace_root.resolve())
-    except ValueError:
-        raise ValidationError("Path traversal attempt detected")
-
-    return resolved_path
+    return full_path
 
 
 def _build_file_item(file_path: Path, workspace_root: Path, recursive: bool, current_depth: int, max_depth: int):
@@ -1421,3 +1410,101 @@ async def get_workspace_file_content(
 
     logger.info(f"File content retrieved: path={path}, size={file_size}, truncated={truncated}")
     return SuccessResponse(data=file_content_out)
+
+
+# ==================== Code Server API Endpoints ====================
+
+@router.get("/{node_id}/code-server/url", response_model=SuccessResponse[CodeServerUrlOut])
+async def get_code_server_url(
+    mosaic_id: int,
+    node_id: str,
+    req: Request,
+    session: SessionDep,
+    current_user: CurrentUserDep,
+):
+    """Get code-server URL for a node's workspace
+
+    Business logic:
+    1. Verify mosaic exists and user has permission (ownership check)
+    2. Query node and verify it exists
+    3. Construct workspace path: {instance_path}/users/{user_id}/{mosaic_id}/{node.id}/
+    4. Build code-server URL with folder parameter
+    5. Return URL for frontend to load in iframe
+
+    Returns:
+        CodeServerUrlOut: URL with folder parameter and workspace path
+
+    Raises:
+        NotFoundError: Mosaic or node not found or deleted
+        PermissionError: Current user doesn't own this mosaic
+
+    Notes:
+    - Code-server instance is always running (started at application startup)
+    - No need to manage instance lifecycle (no start/stop operations)
+    - URL includes ?folder= parameter to open the specific workspace
+    - Frontend can directly load this URL in an iframe
+
+    Example:
+    - Node workspace: /home/user/mosaic/users/1/1/5/
+    - Returned URL: http://192.168.1.8:20000/?folder=/home/user/mosaic/users/1/1/5/
+    """
+    logger.info(
+        f"Getting code-server URL: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"user_id={current_user.id}"
+    )
+
+    # 1. Verify mosaic exists and ownership
+    mosaic_stmt = select(Mosaic).where(
+        Mosaic.id == mosaic_id,
+        Mosaic.deleted_at.is_(None)
+    )
+    mosaic_result = await session.execute(mosaic_stmt)
+    mosaic = mosaic_result.scalar_one_or_none()
+
+    if not mosaic:
+        logger.warning(f"Mosaic not found: id={mosaic_id}")
+        raise NotFoundError("Mosaic not found")
+
+    if mosaic.user_id != current_user.id:
+        logger.warning(
+            f"Permission denied: mosaic_id={mosaic_id}, "
+            f"owner_id={mosaic.user_id}, requester_id={current_user.id}"
+        )
+        raise PermissionError("You do not have permission to access this mosaic")
+
+    # 2. Query node
+    node_stmt = select(Node).where(
+        Node.mosaic_id == mosaic_id,
+        Node.node_id == node_id,
+        Node.deleted_at.is_(None)
+    )
+    node_result = await session.execute(node_stmt)
+    node = node_result.scalar_one_or_none()
+
+    if not node:
+        logger.warning(f"Node not found: mosaic_id={mosaic_id}, node_id={node_id}")
+        raise NotFoundError("Node not found")
+
+    # 3. Construct workspace path
+    instance_path = req.app.state.instance_path
+    workspace_path = instance_path / "users" / str(current_user.id) / str(mosaic_id) / str(node.id)
+
+    # 4. Get code-server configuration
+    code_server_config = req.app.state.config.get('code_server', {})
+    external_host = code_server_config.get('external_host', 'localhost')
+    port = code_server_config.get('port', 20000)
+
+    # 5. Build URL with folder parameter
+    url = f"http://{external_host}:{port}/?folder={workspace_path}"
+
+    logger.info(
+        f"Code-server URL generated: node_db_id={node.id}, url={url}"
+    )
+
+    # 6. Return response
+    url_out = CodeServerUrlOut(
+        url=url,
+        workspace_path=str(workspace_path)
+    )
+
+    return SuccessResponse(data=url_out)

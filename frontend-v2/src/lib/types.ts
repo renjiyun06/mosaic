@@ -43,7 +43,8 @@ export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.2
 export enum NodeType {
   CLAUDE_CODE = 'claude_code',
   SCHEDULER = 'scheduler',
-  EMAIL = 'email'
+  EMAIL = 'email',
+  AGGREGATOR = 'aggregator'
 }
 
 export enum MosaicStatus {
@@ -85,10 +86,16 @@ export enum SessionStatus {
   ARCHIVED = 'archived'
 }
 
+export enum RuntimeStatus {
+  IDLE = 'idle',
+  BUSY = 'busy'
+}
+
 export enum SessionMode {
   BACKGROUND = 'background',
   PROGRAM = 'program',
-  CHAT = 'chat'
+  CHAT = 'chat',
+  LONG_RUNNING = 'long_running'
 }
 
 export enum LLMModel {
@@ -100,7 +107,8 @@ export enum LLMModel {
 export enum MessageRole {
   SYSTEM = 'system',
   ASSISTANT = 'assistant',
-  USER = 'user'
+  USER = 'user',
+  NOTIFICATION = 'notification'
 }
 
 export enum MessageType {
@@ -108,8 +116,15 @@ export enum MessageType {
   ASSISTANT_TEXT = 'assistant_text',
   ASSISTANT_THINKING = 'assistant_thinking',
   ASSISTANT_TOOL_USE = 'assistant_tool_use',
+  ASSISTANT_TOOL_OUTPUT = 'assistant_tool_output',
+  ASSISTANT_PRE_COMPACT = 'assistant_pre_compact',
   ASSISTANT_RESULT = 'assistant_result',
-  SYSTEM_MESSAGE = 'system_message'
+  SYSTEM_MESSAGE = 'system_message',
+  SESSION_STARTED = 'session_started',
+  SESSION_ENDED = 'session_ended',
+  TOPIC_UPDATED = 'topic_updated',
+  RUNTIME_STATUS_CHANGED = 'runtime_status_changed',
+  GEOGEBRA_COMMAND = 'geogebra_command'
 }
 
 // ==================== Auth Types ====================
@@ -345,6 +360,8 @@ export interface SessionOut {
   mode: SessionMode
   model: LLMModel | null
   status: SessionStatus
+  runtime_status: RuntimeStatus
+  topic: string | null
   message_count: number
   total_input_tokens: number
   total_output_tokens: number
@@ -353,6 +370,8 @@ export interface SessionOut {
   updated_at: string
   last_activity_at: string
   closed_at: string | null
+  parent_session_id: string | null
+  child_count: number
 }
 
 export interface SessionTopologyNode {
@@ -420,4 +439,34 @@ export interface SessionRoutingOut {
   remote_node_id: string
   remote_session_id: string
   created_at: string
+}
+
+// ==================== Image Types ====================
+
+export interface UploadImageResponse {
+  image_id: string
+  url: string
+  thumbnail_url: string | null
+  filename: string
+  mime_type: string
+  file_size: number
+  width: number | null
+  height: number | null
+}
+
+// ==================== CodeServer Types ====================
+
+export type CodeServerStatus = 'starting' | 'running' | 'stopping' | 'stopped'
+
+export interface CodeServerStatusOut {
+  status: CodeServerStatus
+  port: number | null
+  url: string | null
+  started_at: string | null
+  ref_count: number | null
+}
+
+export interface CodeServerUrlOut {
+  url: string
+  workspace_path: string
 }

@@ -10,8 +10,8 @@ from sqlalchemy import select, func, text
 from typing import Annotated, Optional
 
 from ..schema.response import SuccessResponse, PaginatedData
-from ..schema.session import CreateSessionRequest, SessionOut, SessionTopologyNode, SessionTopologyResponse
-from ..model import Session, Node, Mosaic
+from ..schema.session import CreateSessionRequest, SessionOut, SessionTopologyNode, SessionTopologyResponse, BatchArchiveResponse
+from ..model import Session, Node, Mosaic, SessionRouting
 from ..dep import get_db_session, get_current_user
 from ..model.user import User
 from ..exception import NotFoundError, PermissionError, ValidationError
@@ -108,6 +108,9 @@ async def create_session(
         node=node,
         mode=request.mode,
         model=request.model,
+        token_threshold_enabled=node.config.get("token_threshold_enabled", False),
+        token_threshold=node.config.get("token_threshold", 60000),
+        inherit_threshold=node.config.get("inherit_threshold", True),
         timeout=10.0
     )
 
@@ -133,10 +136,14 @@ async def create_session(
         mode=db_session.mode,
         model=db_session.model,
         status=db_session.status,
+        runtime_status=db_session.runtime_status,
+        topic=db_session.topic,
         message_count=db_session.message_count,
         total_input_tokens=db_session.total_input_tokens,
         total_output_tokens=db_session.total_output_tokens,
         total_cost_usd=db_session.total_cost_usd,
+        context_usage=db_session.context_usage,
+        context_percentage=db_session.context_percentage,
         created_at=db_session.created_at,
         updated_at=db_session.updated_at,
         last_activity_at=db_session.last_activity_at,
@@ -250,10 +257,14 @@ async def close_session(
         mode=db_session.mode,
         model=db_session.model,
         status=db_session.status,
+        runtime_status=db_session.runtime_status,
+        topic=db_session.topic,
         message_count=db_session.message_count,
         total_input_tokens=db_session.total_input_tokens,
         total_output_tokens=db_session.total_output_tokens,
         total_cost_usd=db_session.total_cost_usd,
+        context_usage=db_session.context_usage,
+        context_percentage=db_session.context_percentage,
         created_at=db_session.created_at,
         updated_at=db_session.updated_at,
         last_activity_at=db_session.last_activity_at,
@@ -337,10 +348,14 @@ async def archive_session(
         mode=db_session.mode,
         model=db_session.model,
         status=db_session.status,
+        runtime_status=db_session.runtime_status,
+        topic=db_session.topic,
         message_count=db_session.message_count,
         total_input_tokens=db_session.total_input_tokens,
         total_output_tokens=db_session.total_output_tokens,
         total_cost_usd=db_session.total_cost_usd,
+        context_usage=db_session.context_usage,
+        context_percentage=db_session.context_percentage,
         created_at=db_session.created_at,
         updated_at=db_session.updated_at,
         last_activity_at=db_session.last_activity_at,
@@ -348,6 +363,90 @@ async def archive_session(
     )
 
     return SuccessResponse(data=session_out)
+
+
+@router.post("/batch-archive", response_model=SuccessResponse[BatchArchiveResponse])
+async def batch_archive_sessions(
+    mosaic_id: int,
+    session: SessionDep,
+    current_user: CurrentUserDep,
+    node_id: Optional[str] = Query(None, description="Filter by node ID to archive only closed sessions of this node"),
+):
+    """Batch archive all closed sessions
+
+    Business logic:
+    1. Query all closed sessions for current user in mosaic
+    2. Optionally filter by node_id if provided
+    3. Update all sessions to ARCHIVED status
+    4. Return count of archived sessions
+
+    Query Parameters:
+    - node_id: Optional node ID to only archive sessions from specific node
+
+    Validation Rules:
+    - Only CLOSED sessions will be archived (ACTIVE and ARCHIVED sessions are skipped)
+    - User must own the mosaic
+
+    Returns:
+        BatchArchiveResponse with archived_count and failed_sessions list
+    """
+    logger.info(
+        f"Batch archiving sessions: mosaic_id={mosaic_id}, node_id={node_id}, "
+        f"user_id={current_user.id}"
+    )
+
+    # 1. Query all closed sessions
+    stmt = select(Session).where(
+        Session.mosaic_id == mosaic_id,
+        Session.user_id == current_user.id,
+        Session.status == SessionStatus.CLOSED,
+        Session.deleted_at.is_(None)
+    )
+
+    # Apply node_id filter if provided
+    if node_id:
+        stmt = stmt.where(Session.node_id == node_id)
+
+    result = await session.execute(stmt)
+    closed_sessions = result.scalars().all()
+
+    if not closed_sessions:
+        logger.info(f"No closed sessions to archive: mosaic_id={mosaic_id}, node_id={node_id}")
+        return SuccessResponse(data=BatchArchiveResponse(
+            archived_count=0,
+            failed_sessions=[]
+        ))
+
+    # 2. Update all sessions to ARCHIVED
+    archived_count = 0
+    failed_sessions = []
+    now = datetime.now()
+
+    for db_session in closed_sessions:
+        try:
+            db_session.status = SessionStatus.ARCHIVED
+            db_session.updated_at = now
+            archived_count += 1
+        except Exception as e:
+            logger.error(f"Failed to archive session {db_session.session_id}: {e}")
+            failed_sessions.append(db_session.session_id)
+
+    # 3. Commit changes
+    try:
+        await session.flush()
+        logger.info(
+            f"Batch archived {archived_count} sessions: mosaic_id={mosaic_id}, "
+            f"node_id={node_id}, failed={len(failed_sessions)}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to commit batch archive: {e}")
+        raise
+
+    # 4. Construct response
+    return SuccessResponse(data=BatchArchiveResponse(
+        archived_count=archived_count,
+        failed_sessions=failed_sessions
+    ))
 
 
 @router.get("", response_model=SuccessResponse[PaginatedData[SessionOut]])
@@ -428,7 +527,38 @@ async def list_sessions(
         f"Found {len(sessions)} sessions (total={total}, page={page}/{total_pages})"
     )
 
-    # 6. Build response list
+    # 6. Build response list with parent-child relationship info
+    session_ids = [s.session_id for s in sessions]
+
+    # 6.1 Batch query parent session mapping (remote -> local)
+    parent_map = {}
+    if session_ids:
+        parent_map_stmt = select(
+            SessionRouting.remote_session_id,
+            SessionRouting.local_session_id
+        ).where(
+            SessionRouting.remote_session_id.in_(session_ids),
+            SessionRouting.mosaic_id == mosaic_id,
+            SessionRouting.deleted_at.is_(None)
+        )
+        parent_result = await session.execute(parent_map_stmt)
+        parent_map = {row[0]: row[1] for row in parent_result.all()}
+
+    # 6.2 Batch query child session count (local -> count(remote))
+    child_count_map = {}
+    if session_ids:
+        child_count_stmt = select(
+            SessionRouting.local_session_id,
+            func.count(SessionRouting.remote_session_id)
+        ).where(
+            SessionRouting.local_session_id.in_(session_ids),
+            SessionRouting.mosaic_id == mosaic_id,
+            SessionRouting.deleted_at.is_(None)
+        ).group_by(SessionRouting.local_session_id)
+        child_result = await session.execute(child_count_stmt)
+        child_count_map = {row[0]: row[1] for row in child_result.all()}
+
+    # 6.3 Build response list with parent-child info
     session_list = [
         SessionOut(
             id=s.id,
@@ -439,14 +569,20 @@ async def list_sessions(
             mode=s.mode,
             model=s.model,
             status=s.status,
+            runtime_status=s.runtime_status,
+            topic=s.topic,
             message_count=s.message_count,
             total_input_tokens=s.total_input_tokens,
             total_output_tokens=s.total_output_tokens,
             total_cost_usd=s.total_cost_usd,
+            context_usage=s.context_usage,
+            context_percentage=s.context_percentage,
             created_at=s.created_at,
             updated_at=s.updated_at,
             last_activity_at=s.last_activity_at,
-            closed_at=s.closed_at
+            closed_at=s.closed_at,
+            parent_session_id=parent_map.get(s.session_id),
+            child_count=child_count_map.get(s.session_id, 0)
         )
         for s in sessions
     ]

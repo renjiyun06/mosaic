@@ -3,6 +3,7 @@ import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu"
 import { Check, ChevronRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { useTheme } from "@/contexts/theme-context"
 
 const DropdownMenu = DropdownMenuPrimitive.Root
 
@@ -57,19 +58,37 @@ DropdownMenuSubContent.displayName =
 const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
->(({ className, sideOffset = 4, ...props }, ref) => (
-  <DropdownMenuPrimitive.Portal>
-    <DropdownMenuPrimitive.Content
-      ref={ref}
-      sideOffset={sideOffset}
-      className={cn(
-        "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-background p-1 text-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
-        className
-      )}
-      {...props}
-    />
-  </DropdownMenuPrimitive.Portal>
-))
+>(({ className, sideOffset = 4, ...props }, ref) => {
+  const { theme } = useTheme()
+
+  const getThemeClasses = () => {
+    const baseClasses = "z-50 min-w-[8rem] overflow-hidden p-1 text-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"
+
+    switch (theme) {
+      case 'cyberpunk':
+        return `${baseClasses} glass-card border border-primary/30 shadow-[0_0_12px_hsl(var(--primary)/0.3)] rounded-md`
+      case 'glassmorphism':
+        return `${baseClasses} glass-card border border-border/50 shadow-md rounded-md`
+      case 'terminal':
+        return `${baseClasses} bg-black/95 border-2 border-primary shadow-[0_0_8px_hsl(var(--primary)/0.3)] rounded-none`
+      case 'minimal':
+        return `${baseClasses} border-2 border-foreground bg-background shadow-none rounded-none`
+      default:
+        return `${baseClasses} rounded-md border bg-background shadow-md`
+    }
+  }
+
+  return (
+    <DropdownMenuPrimitive.Portal>
+      <DropdownMenuPrimitive.Content
+        ref={ref}
+        sideOffset={sideOffset}
+        className={cn(getThemeClasses(), className)}
+        {...props}
+      />
+    </DropdownMenuPrimitive.Portal>
+  )
+})
 DropdownMenuContent.displayName = DropdownMenuPrimitive.Content.displayName
 
 const DropdownMenuItem = React.forwardRef<
